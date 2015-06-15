@@ -17,7 +17,7 @@ public Plugin:myinfo =
 
 public OnPluginStart()
 {
-	RegAdminCmd("generate_password", GeneratePassword, ADMFLAG_BAN, "Randomly generates a password for the server");
+	RegAdminCmd("sm_newpassword", GeneratePassword, ADMFLAG_BAN, "Randomly generates a password for the server");
 	sv_password = FindConVar("sv_password");
 }
 
@@ -52,12 +52,19 @@ public Action:GeneratePassword(client, args)
     
 	SetConVarString(sv_password, password);
     
-	PrintToChatAll("Server password changed to: %s", password);
-	PrintToServer("Server password changed to: %s", password);
+	new String:name[64];
+	GetClientName(client, name, sizeof(name));
+	
+	PrintToChatAll("---------------------------------------------------------------------");
+	PrintToChatAll("%s changed the server password to: %s", name, password);
+	PrintToChatAll("---------------------------------------------------------------------");
+	PrintToServer("%s changed the server password to: %s", name, password);
 //	PrintToConsole(client, "password1 changed to: %s", password1);
 //	PrintToConsole(client, "password2 changed to: %s", password2);
 //	PrintToConsole(client, "password3 changed to: %s", password3);
 //	PrintToConsole(client, "password4 changed to: %s", password4);
+	PrintToConsole(client, "==================================");
 	PrintToConsole(client, "Server password changed to: %s", password);
-	LogMessage("Server password changed to: %s", password);
+	PrintToConsole(client, "==================================");
+	LogMessage("%s changed the server password to: %s", name, password);
 }
