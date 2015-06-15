@@ -9,7 +9,7 @@ new String:listOfChar[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 public Plugin:myinfo = 
 {
 	name = "Random Server Password",
-	author = "Xsinthis`",
+	author = "glub, with snippets by Xsinthis`",
 	description = "Randomly generates a server password",
 	version = "1.1nt",
 	url = ""
