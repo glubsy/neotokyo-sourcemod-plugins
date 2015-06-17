@@ -1,4 +1,4 @@
-# neotokyo-votes
-sourcemod funvote plugin with specific neotokyo implementations
+# neotokyo custom votes
+Funvotes-NT: Modified Sourcemod default "funvote" plugin with a specific neotokyo public vote to restart the game.
 
-adding custom needed public vote commands for servers, and PUG server in particular.
+RandomServerPassword-nt: sets a random password on request (public command) and resets to the default password after the last player quits the game.
