@@ -21,6 +21,7 @@ public Plugin:myinfo =
 public OnPluginStart()
 {
 	RegAdminCmd("sm_newpassword", GeneratePassword, ADMFLAG_BAN, "Randomly generates a password for the server");
+	RegAdminCmd("sm_password", DisplayPassword, ADMFLAG_BAN, "Displays the current server password in chat");
 	sv_password = FindConVar("sv_password");
 //	CreateTimer(5.0, CheckEmpty, 0, TIMER_REPEAT );
 }
@@ -43,8 +44,10 @@ public OnClientDisconnect(client)
 	if(IsServerEmpty){
 	passwordChangeTimer = CreateTimer(TIMER_INTERVAL, CheckEmpty);
 	}
+	else {
+	return;
+	}
 }
-
 
 public IsServerEmpty()
 {
@@ -63,7 +66,7 @@ public Action:CheckEmpty( Handle:timer, any:ignore ) {
 			return;
 		}
 	}
-	new String:defaultpassword[] = "";
+	new String:defaultpassword[] = "ANPA";
 	SetConVarString(sv_password, defaultpassword);
 	LogMessage( "Server is empty, resetting default password" );
 	PrintToServer("Changed the server password to default");
@@ -116,4 +119,16 @@ public Action:GeneratePassword(client, args)
 	PrintToConsole(client, "Server password changed to: %s", password);
 	PrintToConsole(client, "==================================");
 	LogMessage("%s changed the server password to: %s", name, password);
+}
+
+public Action:DisplayPassword(client, args)
+{
+	new String:password[64];
+	GetConVarString(sv_password, password, 64);
+	PrintToChatAll("---------------------------------------------------------------------");
+	PrintToChatAll("Current server password is: %s", password);
+	PrintToChatAll("---------------------------------------------------------------------");
+	PrintToConsole(client, "==========================================");
+	PrintToConsole(client, "Current server password is: %s", password);
+	PrintToConsole(client, "==========================================");
 }
