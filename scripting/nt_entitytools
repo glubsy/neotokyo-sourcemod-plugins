@@ -1,5 +1,6 @@
 #include <sourcemod>
 #include <sdktools>
+#include <sdkhooks>
 //#include <smlib>
 
 //new Float:goDist[MAXPLAYERS+1];
@@ -11,6 +12,7 @@ new String:setmodelnameh[130] = "models/d/d_h02.mdl";
 new String:setmodelnameg[130] = "models/d/d_g02.mdl";
 new String:setmodelnamemh[130] = "models/d/d_mh02.mdl";
 new gRemaining[MAXPLAYERS+1];
+new g_propindex_d[MAXPLAYERS+1];
 new Handle:cvNumProps = INVALID_HANDLE;
 
 
@@ -18,11 +20,11 @@ new Handle:cvNumProps = INVALID_HANDLE;
 
 public Plugin:myinfo = 
 {
-	name = "NoPropCollision",
+	name = "nt_entitytools",
 	author = "glub",
-	description = "Changes prop collisions",
-	version = "0.1",
-	url = ""
+	description = "Various prop manipulation tools",
+	version = "0.3",
+	url = "https://github.com/glubsy"
 };
 
 public OnPluginStart()
@@ -34,15 +36,18 @@ public OnPluginStart()
 	RegAdminCmd("getinfo", GetPropInfo, ADMFLAG_SLAY)
 	RegAdminCmd("dontcollide", CommandPropNoCollide, ADMFLAG_SLAY, "test")
 	RegAdminCmd("collide", CommandPropCollide, ADMFLAG_SLAY)
+	RegAdminCmd("makeladder", CommandMakeLadder, ADMFLAG_SLAY)
+	RegAdminCmd("movetype", ChangeEntityMoveType, ADMFLAG_SLAY)
 	RegConsoleCmd("strapon", CommandStrapon, "strapon self/all/target to stick a dick on people")
 	//RegAdminCmd("strapon", CommandStrapon, ADMFLAG_SLAY,  "strapon self/all/target to stick a dick on people")
 	RegAdminCmd("entity_remove", RemoveEntity, ADMFLAG_SLAY, "test");
 	RegAdminCmd("setpropinfo", SetPropInfo, ADMFLAG_SLAY, "sets prop property")
+	RegAdminCmd("TestSpawnFlags", TestSpawnFlags, ADMFLAG_SLAY, "sets prop property to all by name")
 	RegAdminCmd("entity_rotate", Rotate_Entity, ADMFLAG_SLAY, "rotates an entity");
 	RegAdminCmd("entity_rotateroll", Rotate_EntityRoll, ADMFLAG_SLAY, "rotates an entity (roll)");
 	RegAdminCmd("entity_rotatepitch", Rotate_EntityPitch, ADMFLAG_SLAY, "rotates an entity (pitch)");
 	RegConsoleCmd("sm_dick", CommandDickSpawn, "spawns a dick");
-	cvNumProps = CreateConVar("sm_props_allowed", "10");
+	cvNumProps = CreateConVar("sm_props_allowed", "3");
 	g_cvar_enabled   = CreateConVar( "entitycreate_enabled", "1", "0: disable prop creation, 1: enable prop creation", FCVAR_PLUGIN | FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO ); //from LeftFortDead plugin
 	g_cvar_adminonly = CreateConVar( "entitycreate_adminonly", "1", "0: every client can build, 1: only admin can build", FCVAR_PLUGIN | FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO );
 
@@ -77,6 +82,82 @@ public Action:event_RoundStart(Handle:event, const String:name[], bool:dontBroad
 
 
 
+public Action:CommandMakeLadder(client, args)
+{
+	new String:arg1[130];
+	GetCmdArg(1, arg1, sizeof(arg1));
+	
+	new EntIndex = CreateEntityByName("prop_dynamic");
+	
+	if(!IsModelPrecached(arg1))
+	{
+		PrecacheModel(arg1);
+	}
+
+	new String:name[130];
+	new Float:VecOrigin[3];
+	new Float:VecAngles[3];
+	new Float:normal[3];
+	
+	DispatchKeyValue(EntIndex, "model", "models/nt/props_construction/ladder2.mdl");
+	DispatchKeyValue(EntIndex, "Solid", "7");
+	//SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);
+	//SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 5);
+	//SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);
+	//SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  
+	
+	
+	GetClientEyePosition(client, VecOrigin);
+	GetClientEyeAngles(client, VecAngles);
+	TR_TraceRayFilter(VecOrigin, VecAngles, MASK_SOLID, RayType_Infinite, TraceEntityFilterPlayer, client);
+	TR_GetEndPosition(VecOrigin);
+	TR_GetPlaneNormal(INVALID_HANDLE, normal);
+	GetVectorAngles(normal, normal);
+	normal[0] += 90.0;
+	DispatchKeyValueVector(EntIndex, "Origin", VecOrigin); // works!
+	DispatchKeyValueVector(EntIndex, "Angles", normal); // works!
+	
+	//SetEntityMoveType(EntIndex, MOVETYPE_LADDER);
+	TeleportEntity(EntIndex, VecOrigin, normal, NULL_VECTOR);
+	DispatchSpawn(EntIndex);
+	
+	new Float:degree = 180.0;  //rotating properly -glub
+	decl Float:angles[3];
+	GetEntPropVector(EntIndex, Prop_Data, "m_angRotation", angles);
+	RotateYaw(angles, degree);
+	
+	DispatchKeyValueVector(EntIndex, "Angles", angles ); 
+	GetClientName(client, name, sizeof(name));
+	PrintToChatAll("%s spawned something", name);
+	return Plugin_Handled;
+}
+
+
+
+public Action:ChangeEntityMoveType(client, args)   // doesn't seem to do shit
+{
+	new String:arg1[130];
+	GetCmdArg(1, arg1, sizeof(arg1));
+	
+	new EntIndex = GetClientAimTarget(client, false);
+	if (EntIndex != -1 && IsValidEntity(EntIndex))
+	{
+		new String:classname[32];
+		GetEdictClassname(EntIndex, classname, 32);
+		
+		SetEntityMoveType(EntIndex, MOVETYPE_LADDER);
+		//DispatchSpawn(EntIndex);  // <- do not use again! it works now.
+
+		ChangeEdictState(EntIndex, 0);
+		PrintToChatAll("movetype changed?, %d", GetEntityMoveType(EntIndex));
+
+	}
+	return Plugin_Handled;
+}
+
+
+
+
 
 public Action:CommandDickSpawn(client, args) 
 {
@@ -97,33 +178,42 @@ public Action:CommandDickSpawn(client, args)
 
 	//PrintToConsole(client, "modelnum %s modelprop %d num %d", modelnum, modelpropnum, num);
 
+	
 	if (gRemaining[client]>0)
 		{
 			if(GetCmdArgs() == 1)
 			{
 				if(num == 1){
-					CreatePropPhysicsOverride(client, setmodelnames, 50);  //defaults to 50 health points
+					g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnames, 50);  //defaults to 50 health points
 					gRemaining[client]-=1;
+					SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
 					return Plugin_Handled;
 				} 
 				if(num == 2){   //if(StrEqual(modelnum, casenumber[1])){    //checks if the first argument is 1 to 5
-					CreatePropPhysicsOverride(client, setmodelnameb, 100); 
+					g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnameb, 120); 
 					gRemaining[client]-=1;
+					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
 					return Plugin_Handled;
 				}
 				if(num == 3){
-					CreatePropPhysicsOverride(client, setmodelnameh, 160); 
+					g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnameh, 180); 
 					gRemaining[client]-=1;
+					SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
+					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
 					return Plugin_Handled;
 				}
 				if(num == 4){
-					CreatePropPhysicsOverride(client, setmodelnameg, 220); 
+					g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnameg, 200); 
 					gRemaining[client]-=1;
+					SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
+					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
 					return Plugin_Handled;
 				}
 				if(num == 5){
-					CreatePropPhysicsOverride(client, setmodelnamemh, 300); 
-					gRemaining[client]-=1;					
+					g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnamemh, 250); 
+					gRemaining[client]-=1;
+					SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
+					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
 					return Plugin_Handled;
 				}
 				else{
@@ -132,28 +222,35 @@ public Action:CommandDickSpawn(client, args)
 			}
 			if(GetCmdArgs() >= 2){
 				if(num == 1){
-					CreatePropDynamicOverride(client, setmodelnames, 50); 
+					g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnames, 50); 
 					gRemaining[client]-=1;
 					return Plugin_Handled;
 				}
 				if(num == 2){
-					CreatePropDynamicOverride(client, setmodelnameb, 100); 
+					g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnameb, 120); 
 					gRemaining[client]-=1;
+					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
 					return Plugin_Handled;
 				}
 				if(num == 3){
-					CreatePropDynamicOverride(client, setmodelnameh, 160); 
+					g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnameh, 180); 
 					gRemaining[client]-=1;
+					SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
+					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
 					return Plugin_Handled;
 				}
 				if(num == 4){
-					CreatePropDynamicOverride(client, setmodelnameg, 220); 
+					g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnameg, 200); 
 					gRemaining[client]-=1;
+					SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
+					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
 					return Plugin_Handled;
 				}
 				if(num == 5){
-					CreatePropDynamicOverride(client, setmodelnamemh, 300); 
+					g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnamemh, 250); 
 					gRemaining[client]-=1;
+					SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
+					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
 					return Plugin_Handled;
 				}
 				else{
@@ -164,6 +261,32 @@ public Action:CommandDickSpawn(client, args)
 	else{ PrintToChat(client, "You don't have any remaining spawn this round");}
 	return Plugin_Handled;
 }
+
+public Action:TimerKillEntity(Handle:timer, any:prop)
+{
+	KillEntity(prop);
+	return Plugin_Handled;
+}
+
+public Action:KillEntity(prop)
+{
+	if(IsValidEdict(prop))
+	{
+		AcceptEntityInput(prop, "kill");
+	}
+	return Plugin_Handled;
+}
+
+public Action:OnTouchEntityRemove(propindex, client)
+{
+	if(client > 0 && client <= GetMaxClients() && propindex > 0 && !IsFakeClient(client) && IsValidEntity(client) && IsClientInGame(client) && IsPlayerAlive(client) && IsValidEdict(propindex))
+	{
+		AcceptEntityInput(propindex, "kill");
+	}
+	PrintToServer("bypassed function ontouch");
+	return Plugin_Handled;
+}
+
 
 /*
 public trim_quotes(String:text[])
@@ -237,8 +360,8 @@ stock CreatePropPhysicsOverride(client, const String:modelname[], int health)
 		}
 		
 //		SetEntityModel(EntIndex, arg1);   <-- this doesn't work, it spawns at 0 0 0 no matter what! 
-		SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);   // 4 should be OK, but it's set to 0 instead? <-- 1073741824 now don't collide with players!
-		SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 11);   //2, changed to 11 so that they collide bewteen each other!!
+		//SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);   // 4 should be OK, but it's set to 0 instead? <-- 1073741824 now don't collide with players, but ignore collisions altogether
+		SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 11);   //2, changed to 11 so that they collide bewteen each other! 11 = weapon!
 		SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);   // Do I need to change this to 9218?????  <- doesn't work, we need to try with prop_multiplayer
 		SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  //16 is suggested, ghost is 136!??     <- doesn't work, we need to try with prop_multiplayer
 		
@@ -246,7 +369,11 @@ stock CreatePropPhysicsOverride(client, const String:modelname[], int health)
 		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1)  // Prop_Send didn't work but this works!
 		SetEntProp(EntIndex, Prop_Data, "m_iMaxHealth", health, 1)
 		
-		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 0.9)  // doesn't seem to do anything?
+		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 1.0)  // doesn't seem to do anything?
+		SetEntityGravity(EntIndex, 0.5) 						// (default = 1.0, half = 0.5, double = 2.0)
+		
+		SetEntPropFloat(EntIndex, Prop_Data, "m_massScale", 1.0)
+		DispatchKeyValue(EntIndex, "massScale", "1.0");
 		
 //		DispatchKeyValue(EntIndex, "health", "100");    //not working
 //		DispatchKeyValue(EntIndex, "rendercolor", "20,50,80,255");  //not working
@@ -261,9 +388,9 @@ stock CreatePropPhysicsOverride(client, const String:modelname[], int health)
 
 		DispatchKeyValue(EntIndex, "targetname", "test");
 		DispatchKeyValue(EntIndex, "model", modelname);     //does the same as SetEntityModel but works better! can teleport!?
-		DispatchKeyValue(EntIndex, "CCollisionProperty", "2");
-//		DispatchKeyValueFloat(EntIndex, "solid", 2.0);  //remettre 2.0 ! 
-		DispatchKeyValue(EntIndex, "Solid", "6");    // might need to disable this one (unnecessary?)
+		//DispatchKeyValue(EntIndex, "CCollisionProperty", "2");
+		//DispatchKeyValueFloat(EntIndex, "solid", 2.0);  //remettre 2.0 ! 
+		//DispatchKeyValue(EntIndex, "Solid", "6");    // might need to disable this one (unnecessary?)
 		DispatchKeyValue(EntIndex, "inertiaScale", "1.0");
 
 		
@@ -376,7 +503,7 @@ public Action:CommandPropCreatePhysicsOverrideVector(client, args)
 	{	
 
 //		SetEntityModel(EntIndex, arg1);   <-- this doesn't work, it spawns at 0 0 0 no matter what! 
-		SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);   // 4 should be OK, but it's set to 0 instead? <-- 1073741824 now don't collide with players!
+		//SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);   // 4 should be OK, but it's set to 0 instead? <-- 1073741824 now don't collide with players but ignore collisions altogether
 		SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 11);   //2, changed to 11 so that they collide bewteen each other!!
 		SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);   // Do I need to change this to 9218?????  <- doesn't work, we need to try with prop_multiplayer
 		SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  //16 is suggested, ghost is 136!??     <- doesn't work, we need to try with prop_multiplayer
@@ -539,8 +666,8 @@ stock CreatePropDynamicOverride(client, const String:modelname[], int health)
 	
 	DispatchKeyValue(EntIndex, "model", modelname);
 	DispatchKeyValue(EntIndex, "Solid", "6");
-	SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);
-	SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 11);
+	//SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);
+	SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 11); 
 	SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);
 	SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  
 
@@ -558,6 +685,7 @@ stock CreatePropDynamicOverride(client, const String:modelname[], int health)
 	DispatchKeyValueVector(EntIndex, "Origin", VecOrigin); // works!
 	DispatchKeyValueVector(EntIndex, "Angles", normal); // works!
 	
+	
 	TeleportEntity(EntIndex, VecOrigin, normal, NULL_VECTOR);
 	DispatchSpawn(EntIndex);
 	
@@ -570,7 +698,7 @@ stock CreatePropDynamicOverride(client, const String:modelname[], int health)
 	GetClientName(client, name, sizeof(name));
 	//PrintToChatAll("%s spawned something", name);
 	return EntIndex;
-}  
+}
 
 
 
@@ -708,7 +836,7 @@ public Action:CommandPropCreateDynamicOverride(client, args)  // not used right 
 	{	
 
 //		SetEntityModel(EntIndex, arg1);   <-- this doesn't work, it spawns at 0 0 0 no matter what! 
-		SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);   // 4 should be OK, but it's set to 0 instead? <-- 1073741824 now don't collide with players!
+		//SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);   // 4 should be OK, but it's set to 0 instead? <-- 1073741824 now don't collide with players but ignore collisions altogether
 		SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 11);   //2, changed to 11 so that they collide bewteen each other!!
 		SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);   // Do I need to change this to 9218?????  <- doesn't work, we need to try with prop_multiplayer
 		SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  //16 is suggested, ghost is 136!??     <- doesn't work, we need to try with prop_multiplayer
@@ -861,9 +989,93 @@ public Action:GetPropInfo(client, args)
 //		m_massScale = GetEntPropFloat(aimed, Prop_Data, "m_massScale");
 		m_usSolidFlags = GetEntProp(aimed, Prop_Data, "m_usSolidFlags"); 
 
-		ReplyToCommand(client, "Entity: %d, classname: %s, m_ModelName: %s", aimed, classname, m_ModelName);
 		PrintToConsole(client, "Entity: %d, classname: %s, m_ModelName: %s, m_usSolidFlags: %d, movetype: %d", aimed, classname, m_ModelName, m_usSolidFlags, GetEntityMoveType(aimed));
-		PrintToConsole(client, "Entity: %d, m_CollisionGroup: %d, m_spawnflags: %d, m_nSolidType: %d, m_iMaxHealth: %d, m_flGravity: %f", aimed, m_CollisionGroup, m_spawnflags, m_nSolidType, m_iMaxHealth, m_flGravity);
+		PrintToConsole(client, "m_CollisionGroup: %d, m_spawnflags: %d, m_nSolidType: %d, m_iMaxHealth: %d, m_flGravity: %f", m_CollisionGroup, m_spawnflags, m_nSolidType, m_iMaxHealth, m_flGravity);
+		
+/*		
+		
+		m_iszBasePropData
+		m_iInteractions
+		m_bIsWalkableSetByPropData
+		m_flGroundSpeed
+		m_flLastEventCheck
+		m_nHitboxSet
+		m_flModelWidthScale
+		m_iClassname
+		m_iGlobalname
+		m_iParent
+		m_nRenderFX  renderfx
+		m_nRenderMode   rendermode
+		m_fEffects   effects
+		m_clrRender   rendercolor
+		m_nModelIndex   modelindex	
+		touchStamp
+		m_aThinkFunctions
+		m_ResponseContexts
+		m_iszResponseContext  ResponseContext
+		m_iEFlags 
+		m_iName
+		Sub-Class Table (1 Deep): m_Collision - CCollisionProperty
+		- m_vecMins 
+		- m_vecMaxs 
+		- m_nSolidType solid
+		- m_usSolidFlags 
+		- m_nSurroundType 
+		- m_triggerBloat
+		m_MoveType
+		m_MoveCollide <-
+		m_pPhysicsObject
+		m_hGroundEntity
+		m_ModelName  model
+		m_vecBaseVelocity  basevelocity
+		m_vecAbsVelocity  
+		m_vecAngVelocity   avelocity
+		m_pBlocker
+		m_flLocalTime
+		m_vecAbsOrigin 
+		m_vecVelocity  - velocity
+		m_spawnflags    spawnflags
+		m_angAbsRotation (Save)(12 Bytes)
+		m_vecOrigin (Save)(12 Bytes)
+		m_angRotation
+		m_vecViewOffset - view_ofs
+		m_fFlags
+		InputUse
+		CBaseEntitySUB_Remove
+		CBaseEntitySUB_Remove (FunctionTable)
+		CBaseEntitySUB_DoNothing (FunctionTable)
+		CBaseEntitySUB_StartFadeOut (FunctionTable)
+		CBaseEntitySUB_StartFadeOutInstant (FunctionTable)
+		CBaseEntitySUB_FadeOut (FunctionTable)
+		CBaseEntitySUB_Vanish (FunctionTable)
+		CBaseEntitySUB_CallUseToggle (FunctionTable)
+		CBaseEntityShadowCastDistThink (FunctionTable)
+		m_hEffectEntity <-
+		
+		MOVETYPE_LADDER (x) that's for player when on a ladder
+		!HasSpawnFlags(SF_TRIG_PUSH_AFFECT_PLAYER_ON_LADDER) 
+		
+		netprops:
+		CBaseEntity
+		movetype (offset 222) (type integer)
+		movecollide (offset 223) (type integer) (bits 3) (Unsigned)
+		
+		CFuncLadder
+		m_bFakeLadder
+		
+		
+		MIGHT BE THIS?!
+		SetEntityMoveType(Entindex,MOVETYPE_LADDER);		
+*/ 
+		new Float:coords[3]; 
+		GetEntPropVector(aimed, Prop_Send, "m_vecOrigin", coords);
+		new Float:angles[3];
+		GetEntPropVector(aimed, Prop_Data, "m_angRotation", angles);
+		
+		PrintToConsole(client, "m_CollisionGroup: %d, m_spawnflags: %d, m_nSolidType: %d, m_iMaxHealth: %d, m_flGravity: %f", m_CollisionGroup, m_spawnflags, m_nSolidType, m_iMaxHealth, m_flGravity);
+		PrintToConsole(client, "m_CollisionGroup: %d, m_spawnflags: %d, m_nSolidType: %d, m_iMaxHealth: %d, m_flGravity: %f", m_CollisionGroup, m_spawnflags, m_nSolidType, m_iMaxHealth, m_flGravity);
+		PrintToConsole(client, "m_CollisionGroup: %d, m_spawnflags: %d, m_nSolidType: %d, m_iMaxHealth: %d, m_flGravity: %f", m_CollisionGroup, m_spawnflags, m_nSolidType, m_iMaxHealth, m_flGravity);
+		PrintToConsole(client, "index %d, coord[0]: %f, coord[1]: %f, coord[2]: %f, angle[0]: %f, angle[1]: %f,angle[2]: %f", aimed, coords[0], coords[1], coords[2], angles[0], angles[1], angles[2]);
 	}
 	return Plugin_Handled;
 }
@@ -872,6 +1084,23 @@ public Action:GetPropInfo(client, args)
 
 
 
+public Action:TestSpawnFlags(client, args)
+{
+	new aimed = CreateEntityByName("weapon_mx");
+	new Float:vpos[3];
+	GetClientEyePosition(client,vpos);
+	vpos[0] += 50.0;
+	
+	if (IsValidEntity(aimed))
+	{
+		DispatchKeyValue(aimed, "spawnflags", "1073741824"); //1073741824
+		SetEntProp(aimed, Prop_Data, "m_spawnflags", 1073741824);
+		DispatchKeyValueVector(aimed, "Origin", vpos);
+		DispatchSpawn(aimed);
+		PrintToConsole(client, "Spawned  mx: spawnflags: %d", GetEntProp(aimed, Prop_Data, "m_spawnflags"));
+	}
+	return Plugin_Handled;
+}
 
 
 public Action:SetPropInfo(client, args)
@@ -911,7 +1140,6 @@ public Action:SetPropInfo(client, args)
 
 
 
-
 public Action:CommandStrapon(client, args)
 {
 	if (args < 1)  
@@ -941,7 +1169,14 @@ public Action:CommandStrapon(client, args)
 		
 		SetVariantString("grenade2");
 		AcceptEntityInput(aimed, "SetParentAttachment");  
-		AcceptEntityInput(aimed, "SetParentAttachmentMaintainOffset");		
+		SetVariantString("grenade2");
+		AcceptEntityInput(aimed, "SetParentAttachmentMaintainOffset");
+		/*new Float:coords[3];
+		coords[0] -= 60.0;
+		coords[1] -= 60.0;
+		coords[2] += 100.0;
+		DispatchKeyValueVector(aimed, "Origin", coords);*/    // Testing offsetting stuffs
+		
 		return Plugin_Handled;
 		}
 	}
@@ -960,7 +1195,14 @@ public Action:CommandStrapon(client, args)
 		
 		SetVariantString("grenade2");
 		AcceptEntityInput(created, "SetParentAttachment");  
+		new Float:coords[3];
+		coords[0] += 60.0;
+		coords[1] += 60.0;
+		coords[2] += 10.0;
+		DispatchKeyValueVector(created, "Origin", coords);    //FIX testing offset coordinates, remove! -glub
+		SetVariantString("grenade2");
 		AcceptEntityInput(created, "SetParentAttachmentMaintainOffset");
+
 		return Plugin_Handled;
 	}
 	return Plugin_Handled;
@@ -1012,7 +1254,7 @@ public Action:CommandPropCreateMultiplayer(client, args)
 	{	
 
 //		SetEntityModel(EntIndex, arg1);  // <-- this doesn't work, it spawns at 0 0 0 no matter what?
-		SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);   // 4 should be OK, but it's set to 0 instead? <-- now don't collide with players!
+		SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);   // 4 should be OK, but it's set to 0 instead? <-- now don't collide with players but ignores collisions altogether?
 		SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 11);   //2, changed to 11 so that they collide bewteen each other!!
 		SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);   // Do I need to change this to 9218?????  <- doesn't work, we need to try with prop_multiplayer
 		SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  //16 is suggested, ghost is 136!??     <- doesn't work, we need to try with prop_multiplayer
