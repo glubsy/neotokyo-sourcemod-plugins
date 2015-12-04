@@ -108,7 +108,7 @@ public Action:GeneratePassword(client, args)
 	GetClientName(client, name, sizeof(name));
 	
 	PrintToChatAll("---------------------------------------------------------------------");
-	PrintToChatAll("%s changed the server password to: %s", name, password);
+	PrintToChatAll("%s changed the server password", name, password);
 	PrintToChatAll("---------------------------------------------------------------------");
 	PrintToServer("%s changed the server password to: %s", name, password);
 //	PrintToConsole(client, "password1 changed to: %s", password1);  just debugging silly code here
@@ -125,9 +125,6 @@ public Action:DisplayPassword(client, args)
 {
 	new String:password[64];
 	GetConVarString(sv_password, password, 64);
-	PrintToChatAll("---------------------------------------------------------------------");
-	PrintToChatAll("Current server password is: %s", password);
-	PrintToChatAll("---------------------------------------------------------------------");
 	PrintToConsole(client, "==========================================");
 	PrintToConsole(client, "Current server password is: %s", password);
 	PrintToConsole(client, "==========================================");
