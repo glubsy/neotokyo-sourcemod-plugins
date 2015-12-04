@@ -47,7 +47,7 @@ public OnPluginStart()
 	RegAdminCmd("entity_rotateroll", Rotate_EntityRoll, ADMFLAG_SLAY, "rotates an entity (roll)");
 	RegAdminCmd("entity_rotatepitch", Rotate_EntityPitch, ADMFLAG_SLAY, "rotates an entity (pitch)");
 	RegConsoleCmd("sm_dick", CommandDickSpawn, "spawns a dick");
-	cvNumProps = CreateConVar("sm_props_allowed", "3");
+	cvNumProps = CreateConVar("sm_props_allowed", "3", "number of props allowed per round/life -default is 3-");
 	g_cvar_enabled   = CreateConVar( "entitycreate_enabled", "1", "0: disable prop creation, 1: enable prop creation", FCVAR_PLUGIN | FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO ); //from LeftFortDead plugin
 	g_cvar_adminonly = CreateConVar( "entitycreate_adminonly", "1", "0: every client can build, 1: only admin can build", FCVAR_PLUGIN | FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO );
 
@@ -372,8 +372,10 @@ stock CreatePropPhysicsOverride(client, const String:modelname[], int health)
 		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 1.0)  // doesn't seem to do anything?
 		SetEntityGravity(EntIndex, 0.5) 						// (default = 1.0, half = 0.5, double = 2.0)
 		
-		SetEntPropFloat(EntIndex, Prop_Data, "m_massScale", 1.0)
+		SetEntPropFloat(EntIndex, Prop_Data, "m_massScale", 1.0)  //FIXME! 
 		DispatchKeyValue(EntIndex, "massScale", "1.0");
+		DispatchKeyValue(EntIndex, "physdamagescale", "1.0");  // FIXME! not sure if it works
+		
 		
 //		DispatchKeyValue(EntIndex, "health", "100");    //not working
 //		DispatchKeyValue(EntIndex, "rendercolor", "20,50,80,255");  //not working
