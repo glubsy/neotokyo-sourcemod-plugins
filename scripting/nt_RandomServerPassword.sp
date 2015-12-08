@@ -70,7 +70,7 @@ public Action:CheckEmpty( Handle:timer, any:ignore ) {
 	SetConVarString(sv_password, defaultpassword);
 	LogMessage( "Server is empty, resetting default password" );
 	PrintToServer("Changed the server password to default");
-	KillTimer(passwordChangeTimer);
+	passwordChangeTimer = INVALID_HANDLE;
 }
 
 public Action:GeneratePassword(client, args)
