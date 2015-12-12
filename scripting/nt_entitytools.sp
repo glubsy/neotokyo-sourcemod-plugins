@@ -55,10 +55,11 @@ public OnPluginStart()
 	HookEvent("game_round_start", event_RoundStart);
 }
 
-public OnEventShutdown(){
+/*
+public OnEventShutdown(){ 
 	UnhookEvent("player_spawn",PlayerSpawn);
 	UnhookEvent("game_round_start",event_RoundStart);
-}
+}*/ //might be responsible for weapon disappearing, don't even remember why I used this in the first place
 
 public OnClientPutInServer(client){
   if(client && !IsFakeClient(client)) gRemaining[client] = 0;
@@ -77,7 +78,7 @@ public Action:event_RoundStart(Handle:event, const String:name[], bool:dontBroad
 	new client;
 	client = GetClientOfUserId(GetEventInt(event, "userid"));
 	gRemaining[client] = GetConVarInt(cvNumProps);
-	//return Plugin_Continue;  //??? change if needed
+	return Plugin_Continue;  //??? change if needed
 }
 
 
@@ -715,6 +716,7 @@ stock CreatePropDynamicOverride(client, const String:modelname[], int health)
 //---------------------------------------------------------
 // spawn a given entity type and assign it a model
 //---------------------------------------------------------
+/*
 CreateEntity( client, const String:entity_name[], const String:item_name[], const String:model[] = "" )
 {
     new player = GetPlayerIndex( client );
@@ -745,7 +747,7 @@ CreateEntity( client, const String:entity_name[], const String:item_name[], cons
 
     return index;
 }
-
+*/
 
 
 
