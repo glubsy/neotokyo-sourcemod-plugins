@@ -47,7 +47,7 @@ public OnPluginStart()
 	RegAdminCmd("entity_rotateroll", Rotate_EntityRoll, ADMFLAG_SLAY, "rotates an entity (roll)");
 	RegAdminCmd("entity_rotatepitch", Rotate_EntityPitch, ADMFLAG_SLAY, "rotates an entity (pitch)");
 	RegConsoleCmd("sm_dick", CommandDickSpawn, "spawns a dick");
-	cvNumProps = CreateConVar("sm_props_allowed", "3", "number of props allowed per round/life -default is 3-");
+	cvNumProps = CreateConVar("sm_props_allowed", "20", "number of credits for props allowed per round/life");
 	g_cvar_enabled   = CreateConVar( "entitycreate_enabled", "1", "0: disable prop creation, 1: enable prop creation", FCVAR_PLUGIN | FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO ); //from LeftFortDead plugin
 	g_cvar_adminonly = CreateConVar( "entitycreate_adminonly", "1", "0: every client can build, 1: only admin can build", FCVAR_PLUGIN | FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO );
 
@@ -184,82 +184,174 @@ public Action:CommandDickSpawn(client, args)
 		{
 			if(GetCmdArgs() == 1)
 			{
-				if(num == 1){
-					g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnames, 50);  //defaults to 50 health points
-					gRemaining[client]-=1;
-					SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
-					return Plugin_Handled;
-				} 
-				if(num == 2){   //if(StrEqual(modelnum, casenumber[1])){    //checks if the first argument is 1 to 5
-					g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnameb, 120); 
-					gRemaining[client]-=1;
-					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
-					return Plugin_Handled;
+				if(num == 1)
+				{
+					if(gRemaining[client] >= 1)
+					{
+						g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnames, 50);  //defaults to 50 health points
+						gRemaining[client]-=1;
+						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
+						return Plugin_Handled;
+					}
 				}
-				if(num == 3){
-					g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnameh, 180); 
-					gRemaining[client]-=1;
-					SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
-					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
-					return Plugin_Handled;
+				if(num == 2)
+				{   //if(StrEqual(modelnum, casenumber[1])){    //checks if the first argument is 1 to 5
+					if(gRemaining[client] >= 5)
+					{
+						g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnameb, 120); 
+						gRemaining[client]-=5;
+						CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
+						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
+						return Plugin_Handled;
+					}
+					if(gRemaining[client] < 5)
+					{
+						PrintToChat(client, "[] You don't have enough credits. Credits remaining: %d", gRemaining[client]);
+						return Plugin_Handled;
+					}
 				}
-				if(num == 4){
-					g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnameg, 200); 
-					gRemaining[client]-=1;
-					SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
-					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
-					return Plugin_Handled;
+				if(num == 3)
+				{
+					if(gRemaining[client] >= 13)
+					{
+						g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnameh, 180); 
+						gRemaining[client]-=13;
+						SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
+						CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
+						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
+						return Plugin_Handled;
+					}
+					if(gRemaining[client] < 13)
+					{
+						PrintToChat(client, "[] You don't have enough credits. Credits remaining: %d", gRemaining[client]);
+						return Plugin_Handled;
+					}
 				}
-				if(num == 5){
-					g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnamemh, 250); 
-					gRemaining[client]-=1;
-					SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
-					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
-					return Plugin_Handled;
+				if(num == 4)
+				{
+					if(gRemaining[client] >= 15)
+					{
+						g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnameg, 200); 
+						gRemaining[client]-=15;
+						SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
+						CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
+						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
+						return Plugin_Handled;
+					}
+					if(gRemaining[client] < 10)
+					{
+						PrintToChat(client, "[] You don't have enough credits. Credits remaining: %d", gRemaining[client]);
+						return Plugin_Handled;
+					}
 				}
-				else{
-				PrintToConsole(client, "usage: sm_dick [scale 1-5] [1 for static]");
+				if(num == 5)
+				{
+					if(gRemaining[client] >= 20)
+					{
+						g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnamemh, 250); 
+						gRemaining[client]-=20;
+						SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
+						CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
+						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
+						return Plugin_Handled;
+					}
+					if(gRemaining[client] < 20)
+					{
+						PrintToChat(client, "[] You don't have enough credits. Credits remaining: %d", gRemaining[client]);
+						return Plugin_Handled;
+					}
+				}
+				else
+				{
+					PrintToConsole(client, "\nUsage: sm_dick [scale 1-5] [1 for static]\n");
 				}
 			}
-			if(GetCmdArgs() >= 2){
-				if(num == 1){
-					g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnames, 50); 
-					gRemaining[client]-=1;
-					return Plugin_Handled;
+			if(GetCmdArgs() >= 2)
+			{
+				if(num == 1)
+				{
+					if(gRemaining[client] >= 1)
+					{
+						g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnames, 50); 
+						gRemaining[client]-=1;
+						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
+						return Plugin_Handled;
+					}
 				}
-				if(num == 2){
-					g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnameb, 120); 
-					gRemaining[client]-=1;
-					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
-					return Plugin_Handled;
+				if(num == 2)
+				{
+					if(gRemaining[client] >= 5)
+					{
+						g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnameb, 120); 
+						gRemaining[client]-=5;
+						CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
+						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
+						return Plugin_Handled;
+					}
+					if(gRemaining[client] < 5)
+					{
+						PrintToChat(client, "[] You don't have enough credits. Credits remaining: %d", gRemaining[client]);
+						return Plugin_Handled;
+					}
 				}
-				if(num == 3){
-					g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnameh, 180); 
-					gRemaining[client]-=1;
-					SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
-					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
-					return Plugin_Handled;
+				if(num == 3)
+				{
+					if(gRemaining[client] >= 13)
+					{
+						g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnameh, 180); 
+						gRemaining[client]-=13;
+						SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
+						CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
+						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
+						return Plugin_Handled;
+					}
+					if(gRemaining[client] < 13)
+					{
+						PrintToChat(client, "[] You don't have enough credits. Credits remaining: %d", gRemaining[client]);
+						return Plugin_Handled;
+					}
 				}
-				if(num == 4){
-					g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnameg, 200); 
-					gRemaining[client]-=1;
-					SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
-					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
-					return Plugin_Handled;
+				if(num == 4)
+				{
+					if(gRemaining[client] >= 15)
+					{
+						g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnameg, 200); 
+						gRemaining[client]-=15;
+						SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
+						CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
+						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
+						return Plugin_Handled;
+					}
+					if(gRemaining[client] < 15)
+					{
+						PrintToChat(client, "[] You don't have enough credits. Credits remaining: %d", gRemaining[client]);
+						return Plugin_Handled;
+					}
 				}
-				if(num == 5){
-					g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnamemh, 250); 
-					gRemaining[client]-=1;
-					SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
-					CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
-					return Plugin_Handled;
+				if(num == 5)
+				{
+					if(gRemaining[client] >= 20)
+					{
+						g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnamemh, 250); 
+						gRemaining[client]-=20;
+						SDKHook(g_propindex_d[client], SDKHook_StartTouch, OnTouchEntityRemove);
+						CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
+						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
+						return Plugin_Handled;
+					}
+					if(gRemaining[client] < 20)
+					{
+						PrintToChat(client, "[] You don't have enough credits. Credits remaining: %d", gRemaining[client]);
+						return Plugin_Handled;
+					}
 				}
-				else{
-				PrintToConsole(client, "usage: sm_dick [scale 1-5] [1 for static]");
+				else
+				{
+					PrintToConsole(client, "\nUsage: sm_dick [scale 1-5] [1 for static]\n");
 				}
 			}
 		}
-	else{ PrintToChat(client, "You don't have any remaining spawn this round");}
+	else{ PrintToChat(client, "[] You don't have any remaining credit this round."); }
 	return Plugin_Handled;
 }
 
@@ -280,12 +372,11 @@ public Action:KillEntity(prop)
 
 public Action:OnTouchEntityRemove(propindex, client)
 {
-	if(client > 0 && client <= GetMaxClients() && propindex > 0 && !IsFakeClient(client) && IsValidEntity(client) && IsClientInGame(client) && IsPlayerAlive(client) && IsValidEdict(propindex))
+	if(client <= GetMaxClients() && propindex > 0 && !IsFakeClient(client) && IsValidEntity(client) && IsClientInGame(client) && IsPlayerAlive(client) && IsValidEdict(propindex))
 	{
 		AcceptEntityInput(propindex, "kill");
 	}
-	PrintToServer("bypassed function ontouch");
-	return Plugin_Handled;
+	//return Plugin_Handled;
 }
 
 
