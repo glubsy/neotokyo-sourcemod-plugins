@@ -73,12 +73,12 @@ public Action:DisplayNotification(Handle:timer, client)
 		if(g_OverlayDisabled[client] == false)
 		{
 			PrintToChat(client, "[SM] You can disable Cyborg vision by typing !vision");
-			PrintToConsole(client, "[SM] You can disable Cyborg vision by typing sm_vision");
+			PrintToConsole(client, "\n[SM] You can disable Cyborg vision by typing sm_vision\n");
 		}
 		if(g_OverlayDisabled[client] == true)
 		{
 			PrintToChat(client, "[SM] You can re-enable Cyborg vision by typing !vision");
-			PrintToConsole(client, "[SM] You can re-enable Cyborg vision by typing sm_vision");
+			PrintToConsole(client, "\n[SM] You can re-enable Cyborg vision by typing sm_vision\n");
 		}
 	}
 }
@@ -102,7 +102,7 @@ public Action:EnableVision(client)
 		ClientCommand(client, "r_screenoverlay effects/combine_binocoverlay.vmt");
 		g_OverlayActive[client] = true;
 	} 
-	PrintToChat(client, "Cyborg vision re-enabled.");
+	PrintToChat(client, "[SM] Cyborg vision re-enabled.");
 	SetClientCookie(client, g_cookies[0], "enabled");
 }
 public Action:DisableVision(client)
@@ -110,7 +110,7 @@ public Action:DisableVision(client)
 	ClientCommand(client, "r_screenoverlay off");
 	g_OverlayActive[client] = false;
 	g_OverlayDisabled[client] = true;
-	PrintToChat(client, "Cyborg vision now disabled.");
+	PrintToChat(client, "[SM] Cyborg vision now disabled.");
 	SetClientCookie(client, g_cookies[0], "disabled");
 }
 
@@ -133,7 +133,9 @@ public OnPlayerSpawn(Handle:event,const String:name[],bool:dontBroadcast)
 	
 	if(g_OverlayDisabled[client] == true && IsPlayerAlive(client) && !IsFakeClient(client))
 	{
-		PrintToServer("overlay is disabled: %d, client: %d", g_OverlayDisabled[client], client); //do nothing
+		//PrintToServer("overlay is disabled: %d, client: %d", g_OverlayDisabled[client], client); 
+		//do nothing
+		return;
 	}
 	if (g_OverlayDisabled[client] == false && clientTeam >= 2 && IsPlayerAlive(client) && g_OverlayActive[client] == false && !IsClientObserver(client) && !IsFakeClient(client) && IsClientInGame(client))
 	{
@@ -155,13 +157,13 @@ public OnPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 
 public Action:Command_JoinTeam(client, const String:command[], argc) 
 {
-	new clientTeam = GetClientTeam(client);
+	//new clientTeam = GetClientTeam(client);
 	if(!IsPlayerAlive(client))
 	{
 		CreateTimer(0.0, ClearOverlay, client);
 		//ClientCommand(client, "r_screenoverlay off");  //doesn't fire for some reason, need a timer of 0.0
 		//g_OverlayActive[client] = false;
-		PrintToServer("Hook: Changed team to %d", clientTeam); 
+		//PrintToServer("Hook: Changed team to %d", clientTeam); 
 	}	
 	return Plugin_Continue;
 }
