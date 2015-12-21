@@ -53,3 +53,12 @@ public event_PlayerSpawn(Handle:event, const String:name[], bool:dontBroadcast)
 		ClientCommand(client, "slot1");
 	}
 }
+
+public OnEntityCreated(entity, const String:classname[])
+{
+	if(StrEqual(classname, "smokegrenade_projectile"))
+	{
+		new client = GetEntPropEnt(entity, Prop_Send, "m_hOwnerEntity");
+		ClientCommand(client, "slot1");		
+	}
+}
