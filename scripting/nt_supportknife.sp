@@ -1,6 +1,5 @@
 #include <sourcemod>
 #include <sdktools>
-#include <neotokyo>
 
 new bool:IsClientSupport[MAXPLAYERS+1]
 
