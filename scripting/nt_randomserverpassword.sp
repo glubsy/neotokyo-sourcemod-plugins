@@ -20,8 +20,8 @@ public Plugin:myinfo =
 
 public OnPluginStart()
 {
-	RegAdminCmd("sm_newpassword", GeneratePassword, ADMFLAG_BAN, "Randomly generates a password for the server");
-	RegAdminCmd("sm_password", DisplayPassword, ADMFLAG_BAN, "Displays the current server password in chat");
+	RegConsoleCmd("sm_newpassword", GeneratePassword, "Randomly generates a password for the server");
+	RegConsoleCmd("sm_password", DisplayPassword, "Displays the current server password in chat");
 	sv_password = FindConVar("sv_password");
 //	CreateTimer(5.0, CheckEmpty, 0, TIMER_REPEAT );
 }
