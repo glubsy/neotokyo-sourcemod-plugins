@@ -132,10 +132,15 @@ public Action SwapToWeaponSlot(int client, int slot)
 
 public OnEntityCreated(entity, const String:classname[])
 {
-	if(StrEqual(classname, "smokegrenade_projectile"))
+	if(StrEqual(classname, "smokegrenade_projectile")) // when client throws a smoke grenade
 	{
 		new client = GetEntPropEnt(entity, Prop_Send, "m_hOwnerEntity");
 		if(client > 0 && IsValidEntity(client) && IsPlayerAlive(client))
-			ClientCommand(client, "slot1");		
+		{
+			//ClientCommand(client, "slot1");	//not a recommnended method
+			SwapToWeaponSlot(client, 2);
+			SwapToWeaponSlot(client, 1);
+			SwapToWeaponSlot(client, 0);	//switching progressively to primary slot
+		}
 	}
 }
