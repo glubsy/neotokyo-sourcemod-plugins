@@ -107,7 +107,7 @@ public Action timer_SwapToWeaponSlot(Handle timer, client)
 
 public Action SwapToWeaponSlot(int client, int slot)
 {
-	int currentweapon = GetWeaponFromSlot(client, slot);
+	int currentweapon = GetPlayerWeaponSlot(client, slot);
 	
 	if((currentweapon != -1) && IsValidEdict(currentweapon) && IsValidEntity(currentweapon))
 	{
