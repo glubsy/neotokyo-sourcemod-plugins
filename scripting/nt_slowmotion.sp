@@ -33,6 +33,7 @@ public OnPluginStart()
 	convar_slowmotion_enabled = CreateConVar("sm_slowmotion_enabled", "1", "Enable Slow-Motion on last man standing death", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
 	HookEvent("game_round_start", Event_RoundStart, EventHookMode_Post);
 	HookEvent("player_death", Event_PlayerDeath, EventHookMode_Post);
+	HookEvent("player_disconnect", Event_PlayerDisconnect, EventHookMode_Post);
 }
 
 public OnConfigsExecuted()
@@ -183,7 +184,6 @@ public Action CountPlayers(Handle timer)
 		if(countNsf == 1)
 		{
 			CreateTimer(3.0, LastManStanding, lastNsf);
-			PrintToChatAll("NSF has lastman!");
 			if(GetConVarBool(convar_slowmotion_enabled))
 				g_bLastManStanding[lastNsf] = true;
 		}
@@ -193,7 +193,6 @@ public Action CountPlayers(Handle timer)
 		if(countJin == 1)
 		{
 			CreateTimer(3.0, LastManStanding, lastJin);
-			PrintToChatAll("Jinrai has lastman!");
 			if(GetConVarBool(convar_slowmotion_enabled))
 				g_bLastManStanding[lastJin] = true;
 		}
@@ -213,6 +212,15 @@ public Action LastManStanding(Handle timer, int client)
 stock Duel(client)
 {
 	PrintToChat(client, MESSAGE_DUEL);
+}
+
+public Action Event_PlayerDisconnect(Handle event, const char[] name, bool dontBroadcast)
+{
+	if(hPlayerCounter == INVALID_HANDLE)
+		hPlayerCounter = CreateTimer(0.1, CountPlayers);
+	
+	int client = GetClientOfUserId(GetEventInt(event, "userid"));
+	g_MessageShownLast[client] = false;
 }
 
 public OnMapEnd()
