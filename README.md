@@ -1,5 +1,7 @@
 #Neotokyo server-side Sourcemod plugins
 
+**nt_slowmotion**: simulates slow motion effect once last man standing dies.
+
 **nt_supportknife**: gives a knife to support classes on player spawn, and switches back to first weapon slot.
 
 **nt_cyborgvision**: !vision to disable cyborg vision (which is enabled by default)
