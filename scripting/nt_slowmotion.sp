@@ -68,6 +68,9 @@ public Action:Event_RoundStart(Handle:event, const String:name[], bool:dontBroad
 	
 	if(GetConVarBool(convar_slowmotion_enabled))
 	{
+		//just in case something went wrong
+		ServerCommand("host_timescale 1.0");
+		
 		for (int i; i <= MaxClients; i++)
 		{
 			g_bLastManStanding[i] = false;
@@ -86,6 +89,10 @@ public Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 		
 		if(client == lastJin && g_bLastManStanding[client] || client == lastNsf && g_bLastManStanding[client])
 		{
+			
+			StopSoundPerm("gameplay/nsf.mp3");
+			StopSoundPerm("gameplay/jinrai.mp3");
+			
 			ServerCommand("host_timescale 0.6");
 			if(g_bSoundFilesExist[0])
 			{
@@ -99,6 +106,8 @@ public Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 public Action timer_SlowMoScalePost(Handle timer)
 {
 	ServerCommand("host_timescale 0.2");
+	StopSoundPerm("gameplay/nsf.mp3");
+	StopSoundPerm("gameplay/jinrai.mp3");
 	g_TimerSlowMotion = CreateTimer(0.7, timer_StopSlowMo, _, TIMER_FLAG_NO_MAPCHANGE);
 }
 
@@ -106,6 +115,8 @@ public Action timer_StopSlowMo(Handle timer)
 {
 	//progressively scaling back up
 	ServerCommand("host_timescale 0.6");
+	StopSoundPerm("gameplay/nsf.mp3");
+	StopSoundPerm("gameplay/jinrai.mp3");
 	g_TimerSlowMotion = CreateTimer(0.3, timer_DefaultTimeScale, _, TIMER_FLAG_NO_MAPCHANGE);
 }
 
@@ -114,6 +125,8 @@ public Action timer_DefaultTimeScale(Handle timer)
 	if(g_bSoundFilesExist[1])
 	{
 		EmitSoundToAll(g_SloMoSound[1], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 160, SND_NOFLAGS, 0.6);
+		StopSoundPerm("gameplay/nsf.mp3");
+		StopSoundPerm("gameplay/jinrai.mp3");
 	}
 	ServerCommand("host_timescale 1.0");
 }
@@ -228,4 +241,23 @@ public OnMapEnd()
 	//clearing handles for timers with flag TIMER_FLAG_NO_MAPCHANGE
 	if(g_TimerSlowMotion != INVALID_HANDLE)
 		g_TimerSlowMotion = INVALID_HANDLE;	
+}
+
+
+stock StopSoundPerm(char[] sound)
+{
+	for(int client = 1; client < MaxClients; client++)
+	{
+		if(IsClientConnected(client) && IsClientInGame(client))
+		{			
+			StopSound(client, SNDCHAN_AUTO, sound);
+			StopSound(client, SNDCHAN_WEAPON, sound);
+			StopSound(client, SNDCHAN_VOICE, sound);
+			StopSound(client, SNDCHAN_ITEM, sound);
+			StopSound(client, SNDCHAN_BODY, sound);
+			StopSound(client, SNDCHAN_STREAM, sound);
+			StopSound(client, SNDCHAN_VOICE_BASE, sound);
+			StopSound(client, SNDCHAN_USER_BASE, sound);
+		}
+	}
 }

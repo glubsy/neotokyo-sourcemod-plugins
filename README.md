@@ -1,5 +1,7 @@
 #Neotokyo server-side Sourcemod plugins
 
+**nt_restartfix**: Agiel's plugin, rewritten to handle neo_restart_this 2 which resets only current round, reverting player scores as well.
+
 **nt_slowmotion**: simulates slow motion effect once last man standing dies.
 
 **nt_supportknife**: gives a knife to support classes on player spawn, and switches back to first weapon slot.
