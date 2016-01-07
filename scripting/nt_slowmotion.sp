@@ -12,6 +12,7 @@ int lastJin, lastNsf;
 bool g_bSoundFilesExist[2], g_bLastManStanding[MAXPLAYERS+1];
 Handle convar_slowmotion_enabled = INVALID_HANDLE;
 Handle g_TimerSlowMotion = INVALID_HANDLE;
+Handle hGravity, hPhysTimeScale;
 
 new const String:g_SloMoSound[][] = { 
 	"custom/slowmoin.mp3",
@@ -32,8 +33,11 @@ public OnPluginStart()
 {
 	convar_slowmotion_enabled = CreateConVar("sm_slowmotion_enabled", "1", "Enable Slow-Motion on last man standing death", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
 	HookEvent("game_round_start", Event_RoundStart, EventHookMode_Post);
-	HookEvent("player_death", Event_PlayerDeath, EventHookMode_Post);
+	HookEvent("player_death", Event_PlayerDeath, EventHookMode_Pre);
 	HookEvent("player_disconnect", Event_PlayerDisconnect, EventHookMode_Post);
+	
+	hGravity = FindConVar("sv_gravity");
+	hPhysTimeScale = FindConVar("phys_timescale");
 }
 
 public OnConfigsExecuted()
@@ -69,7 +73,10 @@ public Action:Event_RoundStart(Handle:event, const String:name[], bool:dontBroad
 	if(GetConVarBool(convar_slowmotion_enabled))
 	{
 		//just in case something went wrong
-		ServerCommand("host_timescale 1.0");
+		//ServerCommand("host_timescale 1.0");
+		SetConVarFloat(hPhysTimeScale, 1.0);
+		ServerCommand("sm_exec @all cl_phys_timescale 1.0");
+		SetConVarInt(hGravity, 800);	
 		
 		for (int i; i <= MaxClients; i++)
 		{
@@ -89,34 +96,34 @@ public Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 		
 		if(client == lastJin && g_bLastManStanding[client] || client == lastNsf && g_bLastManStanding[client])
 		{
+			//ServerCommand("host_timescale 0.6");
+			SetConVarFloat(hPhysTimeScale, 0.2);
+			ServerCommand("sm_exec @all cl_phys_timescale 0.2");
+			SetConVarInt(hGravity, 220);
 			
-			StopSoundPerm("gameplay/nsf.mp3");
-			StopSoundPerm("gameplay/jinrai.mp3");
-			
-			ServerCommand("host_timescale 0.6");
 			if(g_bSoundFilesExist[0])
 			{
 				EmitSoundToAll(g_SloMoSound[0], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 160, SND_NOFLAGS, 0.6);
 			}
-			g_TimerSlowMotion = CreateTimer(0.6, timer_SlowMoScalePost, _, TIMER_FLAG_NO_MAPCHANGE);
+			g_TimerSlowMotion = CreateTimer(4.0, timer_DefaultTimeScale, _, TIMER_FLAG_NO_MAPCHANGE);
 		}
 	}
 }
 
 public Action timer_SlowMoScalePost(Handle timer)
 {
-	ServerCommand("host_timescale 0.2");
-	StopSoundPerm("gameplay/nsf.mp3");
-	StopSoundPerm("gameplay/jinrai.mp3");
-	g_TimerSlowMotion = CreateTimer(0.7, timer_StopSlowMo, _, TIMER_FLAG_NO_MAPCHANGE);
+	//ServerCommand("host_timescale 0.2");
+	ServerCommand("phys_timescale 0.2");
+	ServerCommand("sm_exec @all cl_phys_timescale 0.2");
+	g_TimerSlowMotion = CreateTimer(0.6, timer_StopSlowMo, _, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action timer_StopSlowMo(Handle timer)
 {
 	//progressively scaling back up
-	ServerCommand("host_timescale 0.6");
-	StopSoundPerm("gameplay/nsf.mp3");
-	StopSoundPerm("gameplay/jinrai.mp3");
+	//ServerCommand("host_timescale 0.6");
+	ServerCommand("phys_timescale 0.2");
+	ServerCommand("sm_exec @all cl_phys_timescale 0.2");
 	g_TimerSlowMotion = CreateTimer(0.3, timer_DefaultTimeScale, _, TIMER_FLAG_NO_MAPCHANGE);
 }
 
@@ -125,10 +132,12 @@ public Action timer_DefaultTimeScale(Handle timer)
 	if(g_bSoundFilesExist[1])
 	{
 		EmitSoundToAll(g_SloMoSound[1], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 160, SND_NOFLAGS, 0.6);
-		StopSoundPerm("gameplay/nsf.mp3");
-		StopSoundPerm("gameplay/jinrai.mp3");
 	}
-	ServerCommand("host_timescale 1.0");
+	//ServerCommand("host_timescale 1.0");
+	SetConVarFloat(hPhysTimeScale, 1.0);
+	ServerCommand("sm_exec @all cl_phys_timescale 1.0");
+	SetConVarInt(hGravity, 800);
+	
 }
 
 
@@ -243,8 +252,8 @@ public OnMapEnd()
 		g_TimerSlowMotion = INVALID_HANDLE;	
 }
 
-
-stock StopSoundPerm(char[] sound)
+/*
+stock void StopSoundPerm(char[] sound)
 {
 	for(int client = 1; client < MaxClients; client++)
 	{
@@ -261,3 +270,4 @@ stock StopSoundPerm(char[] sound)
 		}
 	}
 }
+*/
