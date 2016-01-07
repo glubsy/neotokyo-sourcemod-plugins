@@ -221,7 +221,7 @@ public int SwitchToWeaponSlot(int client, int slot)
 			return currentweapon;
 		}
 		#if DEBUG > 0
-		PrintToServer("couldn't find weapon_ in string: %s", classname);
+		PrintToServer("[SUPPORTKNIFE]  couldn't find weapon_ in string: %s", classname);
 		#endif
 		return 0;
 	}
