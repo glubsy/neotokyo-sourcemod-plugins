@@ -8,10 +8,8 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define DEBUG 2
+#define DEBUG 1
 #define PLUGIN_VERSION "0.4"
-
-bool g_bHasPlayerSurvivedLastRound[MAXPLAYERS+1];
 
 char
 	g_iPlayersHeldPrimaryWeapon[MAXPLAYERS+1][32],
@@ -22,7 +20,8 @@ int
 	g_iPlayersHeldPrimaryWeaponAmmo[MAXPLAYERS+1],
 	g_iPlayersHeldSecondaryWeaponAmmo[MAXPLAYERS+1],
 	g_iPlayersHeldGrenadesAmmo[MAXPLAYERS+1],
-	g_iPlayerSelectedClass[MAXPLAYERS+1];
+	g_iPlayerSelectedClass[MAXPLAYERS+1],
+	g_bPlayerSurvivedLastRound[MAXPLAYERS+1];
 
 bool
 	g_F3Bound[MAXPLAYERS+1],
@@ -30,7 +29,7 @@ bool
 	g_bClassSelected[MAXPLAYERS+1],
 	g_bVariantSelected[MAXPLAYERS+1],
 	g_bBlockWeapons[MAXPLAYERS+1],
-	Buytime;
+	g_bBuytime;
 
 Handle
 	convar_weaponeconomy_enabled = INVALID_HANDLE,
@@ -65,7 +64,7 @@ public void OnPluginStart()
 	AddCommandListener(OnCommand, "setvariant");
 	AddCommandListener(OnCommand, "playerready");
 
-	Buytime = false;
+	g_bBuytime = false;
 
 	// Hook again if plugin is restarted
 	for(int client = 1; client <= MaxClients; client++)
@@ -106,7 +105,7 @@ public void OnPlayerDisconnected(Handle event, const char[] name, bool dontBroad
 	g_bClassSelected[client] = false;
 	g_bVariantSelected[client] = false;
 	g_bBlockWeapons[client] = false;
-	g_bHasPlayerSurvivedLastRound[client] = false;
+	g_bPlayerSurvivedLastRound[client] = false;
 
 	g_iPlayersHeldPrimaryWeapon[client] = "";
 	g_iPlayersHeldSecondaryWeapon[client] = "";
@@ -126,7 +125,7 @@ public void OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)  
 
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
 
-	CreateTimer(0.5, OnPlayerSpawn_Post, client);
+	CreateTimer(1.0, OnPlayerSpawn_Post, client);
 }
 
 public Action OnPlayerSpawn_Post(Handle timer, int client)
@@ -136,9 +135,11 @@ public Action OnPlayerSpawn_Post(Handle timer, int client)
 
 	g_bBlockWeapons[client] = false;
 
-	// TODO: Check if we have weapon in slot for some reason before blindly giving weapon
-	GivePlayerLastPrimaryWeapon(client);
-	GivePlayerLastSecondaryWeapon(client);
+	if(g_bPlayerSurvivedLastRound[client])
+	{
+		GivePlayerLastPrimaryWeapon(client);
+		GivePlayerLastSecondaryWeapon(client);
+	}
 }
 
 public void OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
@@ -148,7 +149,11 @@ public void OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 
 	int victim = GetClientOfUserId(GetEventInt(event, "userid"));
 
-	g_bHasPlayerSurvivedLastRound[victim] = false;
+	#if DEBUG > 0
+	PrintToServer("[OnPlayerDeath] %N (%d) didn't survive this round!", victim, victim);
+	#endif
+
+	g_bPlayerSurvivedLastRound[victim] = false;
 	g_bVariantSelected[victim] = false;
 }
 
@@ -157,7 +162,8 @@ public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 	if(!GetConVarBool(convar_weaponeconomy_enabled))
 		return;
 
-	Buytime = true;
+	g_bBuytime = true;
+
 	PrintToChatAll("[WE] Buytime active!");
 	CreateTimer(30.0, timer_ClearBuyTime); //FIXME: 30 seconds is a lot of time, round can end before bytime is over
 
@@ -191,6 +197,7 @@ public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 	for(int client = 1; client <= MaxClients; client++)
 	{
 		g_bVariantSelected[client] = false;
+		g_bBlockWeapons[client] = true;
 
 		if(!IsClientInGame(client) || !IsClientConnected(client) || IsFakeClient(client))
 			continue;
@@ -198,8 +205,11 @@ public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 		if(!IsPlayerAlive(client))
 			continue;
 
-		g_bHasPlayerSurvivedLastRound[client] = true;
-		g_bBlockWeapons[client] = true;
+		#if DEBUG > 0
+		PrintToServer("[OnRoundEnd] %N (%d) survived this round!", client, client);
+		#endif
+
+		g_bPlayerSurvivedLastRound[client] = true;
 
 		int primaryweapon = GetPlayerWeaponSlot(client, SLOT_PRIMARY);
 		int secondaryweapon = GetPlayerWeaponSlot(client, SLOT_SECONDARY);
@@ -341,7 +351,7 @@ public Action OnVGUIMenu(UserMsg msg_id, BfRead bf, const int[] players, int pla
 
 public Action OnPlayerRunCmd(int client, int &buttons)
 {
-	if(Buytime && GetConVarBool(convar_weaponeconomy_enabled))
+	if(g_bBuytime && GetConVarBool(convar_weaponeconomy_enabled))
 	{
 		if(buttons & IN_JUMP)
 		{
@@ -373,27 +383,33 @@ public Action OnWeaponEquip(int client, int weapon)
 	if(!g_bBlockWeapons[client])
 		return Plugin_Continue;
 
-	char classname[15];
-	GetEdictClassname(weapon, classname, sizeof(classname));
+	int slot = GetWeaponSlot(weapon);
 
-	// TODO: Remove weapon because it stays on ground if we don't use it
-
-	if(StrEqual(classname, "weapon_mpn"))
+	if(g_bPlayerSurvivedLastRound[client]) // Survived the round
 	{
-		#if DEBUG > 1
-		PrintToServer("[WE] Blocking equiping %s for %N [%i]", classname, client, client);
-		#endif
-
-		return Plugin_Handled;
-	}
-
-	if(g_bHasPlayerSurvivedLastRound[client])
-	{
-		// Survived last round, don't keep anything
-		if(StrEqual(classname, "weapon_milso") || StrEqual(classname, "weapon_tachi") || StrEqual(classname, "weapon_kyla"))
+		// Block primary and secondary weapons
+		if(slot == SLOT_PRIMARY || slot == SLOT_SECONDARY)
 		{
 			#if DEBUG > 1
-			PrintToServer("[WE] Blocking equiping %s for %N %i", classname, client, client);
+			char classname[15];
+			GetEdictClassname(weapon, classname, sizeof(classname));
+
+			PrintToServer("[WE] Blocking equiping %s for %N (%i)", classname, client, client);
+			#endif
+
+			return Plugin_Handled;
+		}
+	}
+	else // Died
+	{
+		// Only block primary weapon
+		if(slot == SLOT_PRIMARY)
+		{
+			#if DEBUG > 1
+			char classname[15];
+			GetEdictClassname(weapon, classname, sizeof(classname));
+
+			PrintToServer("[WE] Blocking equiping %s for %N (%i)", classname, client, client);
 			#endif
 
 			return Plugin_Handled;
@@ -408,26 +424,38 @@ public Action OnWeaponCanSwitchTo(int client, int weapon)
 	if(!g_bBlockWeapons[client])
 		return Plugin_Continue;
 
-	char classname[15];
-	GetEdictClassname(weapon, classname, sizeof(classname));
+	int slot = GetWeaponSlot(weapon);
 
-	if(g_bHasPlayerSurvivedLastRound[client] && GetPlayerClass(client) != CLASS_SUPPORT)
+	if(g_bPlayerSurvivedLastRound[client]) // Survived last round
 	{
-		if(!StrEqual(classname, "weapon_knife"))
+		if(slot != SLOT_MELEE)
 		{
 			#if DEBUG > 1
+			char classname[15];
+			GetEdictClassname(weapon, classname, sizeof(classname));
+
 			PrintToServer("[WE] WeaponCanSwitch %N blocking switching to weapon %s (%i)", client, classname, weapon);
 			#endif
+
+			// Block everything but knife
 			return Plugin_Stop;
 		}
-	}
-	else if(!StrEqual(classname, "weapon_milso") || !StrEqual(classname, "weapon_tachi") || !StrEqual(classname, "weapon_kyla"))
-	{
-		#if DEBUG > 1
-		PrintToServer("[WE] WeaponCanSwitch %N blocking switching to weapon %s (%i)", client, classname, weapon);
-		#endif
 
-		return Plugin_Stop;
+	}
+	else // Died last round
+	{
+		if(slot != SLOT_SECONDARY)
+		{
+			#if DEBUG > 1
+			char classname[15];
+			GetEdictClassname(weapon, classname, sizeof(classname));
+
+			PrintToServer("[WE] WeaponCanSwitch %N blocking switching to weapon %s (%i)", client, classname, weapon);
+			#endif
+
+			// Block everything but pistols
+			return Plugin_Stop;
+		}
 	}
 
 	return Plugin_Continue;
@@ -438,7 +466,7 @@ public Action timer_ClearBuyTime(Handle timer)
 	if(!GetConVarBool(convar_weaponeconomy_enabled))
 		return;
 
-	Buytime = false;
+	g_bBuytime = false;
 
 	PrintToChatAll("Buytime ended!");
 }
