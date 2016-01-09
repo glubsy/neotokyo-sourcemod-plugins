@@ -125,13 +125,19 @@ public void OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)  
 
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
 
-	CreateTimer(1.0, OnPlayerSpawn_Post, client);
+	CreateTimer(0.5, OnPlayerSpawn_Post, client);
 }
 
 public Action OnPlayerSpawn_Post(Handle timer, int client)
 {
 	if(!IsValidClient(client) && !IsPlayerAlive(client))
 		return;
+
+	if(GetPlayerClass(client) == CLASS_SUPPORT && !IsValidEdict(GetPlayerWeaponSlot(client, SLOT_MELEE)))
+	{
+		// Give knife to supports if they don't have one already
+		GiveWeaponToPlayer(client, "weapon_knife");
+	}
 
 	g_bBlockWeapons[client] = false;
 
