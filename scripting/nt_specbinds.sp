@@ -4,8 +4,8 @@
 #include <smlib>
 #include <neotokyo>
 #include <clientprefs>
-#define DEBUG 1
-#define PLUGIN_VERSION "0.3"
+#define DEBUG 0
+#define PLUGIN_VERSION "0.4"
 
 //Players
 int g_iNSFPlayer[5];
@@ -20,7 +20,7 @@ int Observers[MAXPLAYERS+1];
 int ObservedPlayer[MAXPLAYERS+1];
 int argtest;
 Handle g_cookies[1];
-
+bool g_bEnteredFPPOV[MAXPLAYERS+1][10];
 
 public Plugin:myinfo = 
 {
@@ -34,7 +34,8 @@ public Plugin:myinfo =
 
 public void OnPluginStart()
 {
-	RegConsoleCmd("sm_specbinds", CastBindCallback, "Binds key nums to spectator modes");
+	RegConsoleCmd("sm_specbinds", SpecBindsCommand, "Binds key nums to spectator modes");
+	RegConsoleCmd("sm_specunbind", SpecUnbindCommand, "Restores config_backup.cfg for the client");
 	
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("game_round_start", OnRoundStart);
@@ -46,6 +47,13 @@ public void OnPluginStart()
 	g_cookies[0] = RegClientCookie("config-backed-up","backed-up default client config file", CookieAccess_Public);
 	
 	RegConsoleCmd("testobs", Test, "test");
+	
+	for(int client = 1; client < MaxClients; client++)
+	{
+		if(!IsValidEntity(client) || !IsClientConnected(client) || !IsClientInGame(client))
+			continue;	
+		ProcessCookies(client);
+	}
 }
 
 public Action Test(client, args)
@@ -57,12 +65,14 @@ public Action Test(client, args)
 	//ObservedPlayer = GetEntProp(client, Prop_Send, "m_hObserverTarget");
 	ObservedPlayer[0] = argtest;
 	Observers[0] = client;
+	
+	#if DEBUG >0
 	PrintToChatAll("Observed: %N %i", ObservedPlayer[0], ObservedPlayer[0]);
-
+	#endif
 	
 	//CreateTimer(5.0, timer_setobs, client);
 	SetEntProp(client, Prop_Send, "m_hObserverTarget", ObservedPlayer[0]);
-	Client_SetObserverMode(client, 6, false);
+	Client_SetObserverMode(client, 6, false); 
 
 
 	Client_SetThirdPersonMode(client, false); 
@@ -108,137 +118,69 @@ public Action SpecClientCommand(int client, int args)
 	{
 		case 1:
 		{
-			if(g_iNSFPlayer[0] < 1)
-				return Plugin_Handled;
-			
-			if(g_bIsDead[g_iNSFPlayer[0]])
-			{
-				PrintCenterText(client, "%N is dead.", g_iNSFPlayer[0]);
-				
-				SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
-				TeleportEntity(client, g_fDeathOrigin[g_iNSFPlayer[0]], NULL_VECTOR, NULL_VECTOR);
-				return Plugin_Handled;
-			}
-			
-			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
-			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iNSFPlayer[0]);
-			#if DEBUG >0
-			PrintToChatAll("%N is observing %i %N", client, g_iNSFPlayer[0], g_iNSFPlayer[0]);
-			#endif
-		}
-		case 2:
-		{
-			if(g_iNSFPlayer[1] < 1)
-				return Plugin_Handled;
-			
-			if(g_bIsDead[g_iNSFPlayer[1]])
-			{
-				PrintCenterText(client, "%N is dead.", g_iNSFPlayer[1]);
-				
-				SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
-				TeleportEntity(client, g_fDeathOrigin[g_iNSFPlayer[1]], NULL_VECTOR, NULL_VECTOR);
-				return Plugin_Handled;
-			}
-			
-			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
-			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iNSFPlayer[1]);
-			#if DEBUG >0
-			PrintToChatAll("%N is observing %i %N", client, g_iNSFPlayer[1], g_iNSFPlayer[1]);
-			#endif
-		}
-		case 3:
-		{
-			if(g_iNSFPlayer[2] < 1)
-				return Plugin_Handled;
-			
-			if(g_bIsDead[g_iNSFPlayer[2]])
-			{
-				PrintCenterText(client, "%N is dead.", g_iNSFPlayer[2]);
-				
-				SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
-				TeleportEntity(client, g_fDeathOrigin[g_iNSFPlayer[2]], NULL_VECTOR, NULL_VECTOR);
-				return Plugin_Handled;
-			}
-			
-			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
-			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iNSFPlayer[2]);
-			#if DEBUG >0
-			PrintToChatAll("%N is observing %i %N", client, g_iNSFPlayer[2], g_iNSFPlayer[2]);
-			#endif
-		}
-		case 4:
-		{
-			if(g_iNSFPlayer[3] < 1)
-				return Plugin_Handled;
-			
-			if(g_bIsDead[g_iNSFPlayer[3]])
-			{
-				PrintCenterText(client, "%N is dead.", g_iNSFPlayer[3]);
-				
-				SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
-				TeleportEntity(client, g_fDeathOrigin[g_iNSFPlayer[3]], NULL_VECTOR, NULL_VECTOR);
-				return Plugin_Handled;
-			}
-			
-			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
-			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iNSFPlayer[3]);
-			#if DEBUG >0
-			PrintToChatAll("%N is observing %i %N", client, g_iNSFPlayer[3], g_iNSFPlayer[3]);
-			#endif
-		}
-		case 5:
-		{
-			if(g_iNSFPlayer[4] < 1)
-				return Plugin_Handled;
-			
-			if(g_bIsDead[g_iNSFPlayer[4]])
-			{
-				PrintCenterText(client, "%N is dead.", g_iNSFPlayer[4]);
-				
-				SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
-				TeleportEntity(client, g_fDeathOrigin[g_iNSFPlayer[4]], NULL_VECTOR, NULL_VECTOR);
-				return Plugin_Handled;
-			}
-			
-			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
-			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iNSFPlayer[4]);
-			#if DEBUG >0
-			PrintToChatAll("%N is observing %i %N", client, g_iNSFPlayer[4], g_iNSFPlayer[4]);
-			#endif
-		}
-		case 6:
-		{
 			if(g_iJINRAIPlayer[0] < 1)
 				return Plugin_Handled;
 			
 			if(g_bIsDead[g_iJINRAIPlayer[0]])
 			{
-				PrintCenterText(client, "%N is dead.", g_iJINRAIPlayer[0]);
+				//PrintCenterText(client, "%N is dead.", g_iNSFPlayer[0]);
 				
-				SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
-				TeleportEntity(client, g_fDeathOrigin[g_iJINRAIPlayer[0]], NULL_VECTOR, NULL_VECTOR);
+				//SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
+				//TeleportEntity(client, g_fDeathOrigin[g_iJINRAIPlayer[0]], NULL_VECTOR, NULL_VECTOR);
 				return Plugin_Handled;
 			}
+
+			/*
+			if(g_bEnteredFPPOV[client][0])
+			{
+				EnterFPPOV(client, false);
+				g_bEnteredFPPOV[client][0] = false;
+			}		
+			else if(!g_bEnteredFPPOV[client][0])
+			{
+				EnterFPPOV(client, true);
+				g_bEnteredFPPOV[client][0] = true;
+			}*/
+
+			if(!IsValidEntity(client))
+				return Plugin_Handled;
 			
 			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
 			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iJINRAIPlayer[0]);
+			
 			#if DEBUG >0
 			PrintToChatAll("%N is observing %i %N", client, g_iJINRAIPlayer[0], g_iJINRAIPlayer[0]);
 			#endif
+			
 		}
-		case 7:
+		case 2:
 		{
 			if(g_iJINRAIPlayer[1] < 1)
 				return Plugin_Handled;
 			
 			if(g_bIsDead[g_iJINRAIPlayer[1]])
 			{
-				PrintCenterText(client, "%N is dead.", g_iJINRAIPlayer[1]);
+				//PrintCenterText(client, "%N is dead.", g_iJINRAIPlayer[1]);
 				
-				SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
-				TeleportEntity(client, g_fDeathOrigin[g_iJINRAIPlayer[1]], NULL_VECTOR, NULL_VECTOR);
+				//SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
+				//TeleportEntity(client, g_fDeathOrigin[g_iJINRAIPlayer[1]], NULL_VECTOR, NULL_VECTOR);
 				return Plugin_Handled;
 			}
+			
+			/*
+			if(g_bEnteredFPPOV[client][1])
+			{
+				EnterFPPOV(client, false);
+				g_bEnteredFPPOV[client][1] = false;
+			}		
+			else if(!g_bEnteredFPPOV[client][1])
+			{
+				EnterFPPOV(client, true);
+				g_bEnteredFPPOV[client][1] = true;
+			}*/
+			
+			if(!IsValidEntity(client))
+				return Plugin_Handled; 
 			
 			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
 			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iJINRAIPlayer[1]);
@@ -246,19 +188,35 @@ public Action SpecClientCommand(int client, int args)
 			PrintToChatAll("%N is observing %i %N", client, g_iJINRAIPlayer[1], g_iJINRAIPlayer[1]);
 			#endif
 		}
-		case 8:
+		case 3:
 		{
 			if(g_iJINRAIPlayer[2] < 1)
 				return Plugin_Handled;
 			
 			if(g_bIsDead[g_iJINRAIPlayer[2]])
 			{
-				PrintCenterText(client, "%N is dead.", g_iJINRAIPlayer[2]);
+				//PrintCenterText(client, "%N is dead.", g_iJINRAIPlayer[2]);
 				
-				SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
-				TeleportEntity(client, g_fDeathOrigin[g_iJINRAIPlayer[2]], NULL_VECTOR, NULL_VECTOR);
+				//SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
+				//TeleportEntity(client, g_fDeathOrigin[g_iJINRAIPlayer[2]], NULL_VECTOR, NULL_VECTOR);
 				return Plugin_Handled;
 			}
+			
+			/*
+			if(g_bEnteredFPPOV[client][2])
+			{
+				EnterFPPOV(client, false);
+				g_bEnteredFPPOV[client][2] = false;
+			}		
+			else if(!g_bEnteredFPPOV[client][2])
+			{
+				EnterFPPOV(client, true);
+				g_bEnteredFPPOV[client][2] = true;
+			}
+			*/
+			
+			if(!IsValidEntity(client))
+				return Plugin_Handled;
 			
 			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
 			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iJINRAIPlayer[2]);
@@ -266,19 +224,34 @@ public Action SpecClientCommand(int client, int args)
 			PrintToChatAll("%N is observing %i %N", client, g_iJINRAIPlayer[2], g_iJINRAIPlayer[2]);
 			#endif
 		}
-		case 9:
+		case 4:
 		{
 			if(g_iJINRAIPlayer[3] < 1)
 				return Plugin_Handled;
 			
 			if(g_bIsDead[g_iJINRAIPlayer[3]])
 			{
-				PrintCenterText(client, "%N is dead.", g_iJINRAIPlayer[3]);
+				//PrintCenterText(client, "%N is dead.", g_iJINRAIPlayer[3]);
 				
-				SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
-				TeleportEntity(client, g_fDeathOrigin[g_iJINRAIPlayer[3]], NULL_VECTOR, NULL_VECTOR);
+				//SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
+				//TeleportEntity(client, g_fDeathOrigin[g_iJINRAIPlayer[3]], NULL_VECTOR, NULL_VECTOR);
 				return Plugin_Handled;
 			}
+			
+			/*
+			if(g_bEnteredFPPOV[client][3])
+			{
+				EnterFPPOV(client, false);
+				g_bEnteredFPPOV[client][3] = false;
+			}		
+			else if(!g_bEnteredFPPOV[client][3])
+			{
+				EnterFPPOV(client, true);
+				g_bEnteredFPPOV[client][3] = true;
+			}*/
+			
+			if(!IsValidEntity(client))
+				return Plugin_Handled; 
 			
 			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
 			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iJINRAIPlayer[3]);
@@ -286,19 +259,34 @@ public Action SpecClientCommand(int client, int args)
 			PrintToChatAll("%N is observing %i %N", client, g_iJINRAIPlayer[3], g_iJINRAIPlayer[3]);
 			#endif
 		}
-		case 10:
+		case 5:
 		{
 			if(g_iJINRAIPlayer[4] < 1)
 				return Plugin_Handled;
 			
 			if(g_bIsDead[g_iJINRAIPlayer[4]])
 			{
-				PrintCenterText(client, "%N is dead.", g_iJINRAIPlayer[4]);
+				//PrintCenterText(client, "%N is dead.", g_iJINRAIPlayer[4]);
 				
-				SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
-				TeleportEntity(client, g_fDeathOrigin[g_iJINRAIPlayer[4]], NULL_VECTOR, NULL_VECTOR);
+				//SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
+				//TeleportEntity(client, g_fDeathOrigin[g_iJINRAIPlayer[4]], NULL_VECTOR, NULL_VECTOR);
 				return Plugin_Handled;
 			}
+			
+			/*
+			if(g_bEnteredFPPOV[client][4])
+			{
+				EnterFPPOV(client, false);
+				g_bEnteredFPPOV[client][4] = false;
+			}		
+			else if(!g_bEnteredFPPOV[client][4])
+			{
+				EnterFPPOV(client, true);
+				g_bEnteredFPPOV[client][4] = true;
+			}*/
+			
+			if(!IsValidEntity(client))
+				return Plugin_Handled; 
 			
 			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
 			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iJINRAIPlayer[4]);
@@ -306,11 +294,203 @@ public Action SpecClientCommand(int client, int args)
 			PrintToChatAll("%N is observing %i %N", client, g_iJINRAIPlayer[4], g_iJINRAIPlayer[4]);
 			#endif
 		}
+		case 6:
+		{
+			if(g_iNSFPlayer[0] < 1)
+				return Plugin_Handled;
+			
+			if(g_bIsDead[g_iNSFPlayer[0]])
+			{
+				//PrintCenterText(client, "%N is dead.", g_iNSFPlayer[0]);
+				
+				//SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
+				//TeleportEntity(client, g_fDeathOrigin[g_iNSFPlayer[0]], NULL_VECTOR, NULL_VECTOR);
+				return Plugin_Handled;
+			}
+			
+			/*
+			if(g_bEnteredFPPOV[client][5])
+			{
+				EnterFPPOV(client, false);
+				g_bEnteredFPPOV[client][5] = false;
+			}		
+			else if(!g_bEnteredFPPOV[client][5])
+			{
+				EnterFPPOV(client, true);
+				g_bEnteredFPPOV[client][5] = true;
+			}*/
+			
+			if(!IsValidEntity(client))
+				return Plugin_Handled;
+			
+			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
+			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iNSFPlayer[0]);
+			#if DEBUG >0
+			PrintToChatAll("%N is observing %i %N", client, g_iNSFPlayer[0], g_iNSFPlayer[0]);
+			#endif
+		}
+		case 7:
+		{
+			if(g_iNSFPlayer[1] < 1)
+				return Plugin_Handled;
+			
+			if(g_bIsDead[g_iNSFPlayer[1]])
+			{
+				//PrintCenterText(client, "%N is dead.", g_iNSFPlayer[1]);
+				
+				//SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
+				//TeleportEntity(client, g_fDeathOrigin[g_iNSFPlayer[1]], NULL_VECTOR, NULL_VECTOR);
+				return Plugin_Handled;
+			}
+			
+			/*
+			if(g_bEnteredFPPOV[client][6])
+			{
+				EnterFPPOV(client, false);
+				g_bEnteredFPPOV[client][6] = false;
+			}		
+			else if(!g_bEnteredFPPOV[client][6])
+			{
+				EnterFPPOV(client, true);
+				g_bEnteredFPPOV[client][6] = true;
+			}*/
+			
+			if(!IsValidEntity(client))
+				return Plugin_Handled;
+			
+			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
+			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iNSFPlayer[1]);
+			#if DEBUG >0
+			PrintToChatAll("%N is observing %i %N", client, g_iNSFPlayer[1], g_iNSFPlayer[1]);
+			#endif
+		}
+		case 8:
+		{
+			if(g_iNSFPlayer[2] < 1)
+				return Plugin_Handled;
+			
+			if(g_bIsDead[g_iNSFPlayer[2]])
+			{
+				//PrintCenterText(client, "%N is dead.", g_iNSFPlayer[2]);
+				
+				//SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
+				//TeleportEntity(client, g_fDeathOrigin[g_iNSFPlayer[2]], NULL_VECTOR, NULL_VECTOR);
+				return Plugin_Handled;
+			}
+			
+			/*
+			if(g_bEnteredFPPOV[client][7])
+			{
+				EnterFPPOV(client, false);
+				g_bEnteredFPPOV[client][7] = false;
+			}		
+			else if(!g_bEnteredFPPOV[client][7])
+			{
+				EnterFPPOV(client, true);
+				g_bEnteredFPPOV[client][7] = true;
+			}*/
+			
+			if(!IsValidEntity(client))
+				return Plugin_Handled;
+			
+			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
+			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iNSFPlayer[2]);
+			#if DEBUG >0
+			PrintToChatAll("%N is observing %i %N", client, g_iNSFPlayer[2], g_iNSFPlayer[2]);
+			#endif
+		}
+		case 9:
+		{
+			if(g_iNSFPlayer[3] < 1)
+				return Plugin_Handled;
+			
+			if(g_bIsDead[g_iNSFPlayer[3]])
+			{
+				//PrintCenterText(client, "%N is dead.", g_iNSFPlayer[3]);
+				
+				//SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
+				//TeleportEntity(client, g_fDeathOrigin[g_iNSFPlayer[3]], NULL_VECTOR, NULL_VECTOR);
+				return Plugin_Handled;
+			}
+			
+			/*
+			if(g_bEnteredFPPOV[client][8])
+			{
+				EnterFPPOV(client, false);
+				g_bEnteredFPPOV[client][8] = false;
+			}		
+			else if(!g_bEnteredFPPOV[client][8])
+			{
+				EnterFPPOV(client, true);
+				g_bEnteredFPPOV[client][8] = true;
+			}*/
+			
+			if(!IsValidEntity(client))
+				return Plugin_Handled;
+			
+			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
+			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iNSFPlayer[3]);
+			#if DEBUG >0
+			PrintToChatAll("%N is observing %i %N", client, g_iNSFPlayer[3], g_iNSFPlayer[3]);
+			#endif
+		}
+		case 10:
+		{
+			if(g_iNSFPlayer[4] < 1)
+				return Plugin_Handled;
+			
+			if(g_bIsDead[g_iNSFPlayer[4]])
+			{
+				//PrintCenterText(client, "%N is dead.", g_iNSFPlayer[4]);
+				
+				//SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
+				//TeleportEntity(client, g_fDeathOrigin[g_iNSFPlayer[4]], NULL_VECTOR, NULL_VECTOR);
+				return Plugin_Handled;
+			}
+			
+			/*
+			if(g_bEnteredFPPOV[client][9])
+			{
+				EnterFPPOV(client, false);
+				g_bEnteredFPPOV[client][9] = false;
+			}		
+			else if(!g_bEnteredFPPOV[client][9])
+			{
+				EnterFPPOV(client, true);
+				g_bEnteredFPPOV[client][9] = true;
+			}*/
+			
+			if(!IsValidEntity(client))
+				return Plugin_Handled;
+			
+			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
+			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iNSFPlayer[4]);
+			#if DEBUG > 0
+			PrintToChatAll("%N is observing %i %N", client, g_iNSFPlayer[4], g_iNSFPlayer[4]);
+			#endif
+		}
 	}
 	return Plugin_Handled;
 }
 
 
+public void EnterFPPOV(int client, bool state)
+{
+	if(state)
+	{
+		ClientCommand(client, "sm_spec_pov 1");	
+	}
+	else if(!state)
+	{
+		ClientCommand(client, "sm_spec_pov 0");	
+		SetEntProp(client, Prop_Send, "m_iVision", 0);
+		ClientCommand(client, "spec_mode");	
+		
+		//SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
+		//Client_SetObserverMode(client, view_as<Obs_Mode>(4));
+		
+	}
+}
 
 
 
@@ -340,29 +520,40 @@ public ProcessCookies(int client)
 }
 
 
-public Action CastBindCallback(int client, args)
+public Action SpecBindsCommand(int client, int args)
 {
 	if(!IsClientObserver(client))
+	{
+		PrintToChat(client, "You cannot use this command while not being in spectator team");
 		return;
+	}
+	WriteCFG(client, 3);
 	
 	g_bWantsBinds[client] = true;
 	
-	CreateTimer(0.0, UpdateAlivePlayersArrays);
+	CreateTimer(0.1, UpdateAlivePlayersArrays);
 	
-	if(!g_bDefaultCFGSaved)
+	if(g_bDefaultCFGSaved[client])
 	{
-		WriteCFG(client, 1);
+		PrintToChat(client, "Your current config was saved to config_backup.cfg");
+		PrintToChat(client, "Type !specunbind to restore it when needed.");
+		CreateTimer(0.5, timer_SetBindsInit, client);
 	}
-	
-	SetBindsInit(client);
-	WriteCFG(client, 2);
 }
+
+
+public Action SpecUnbindCommand(int client, int args)
+{
+	ExecCFG(client, 3);
+	PrintToChat(client, "Your previous config was restored.");
+}
+
+
 
 public Action WriteCFG(int client, int type)
 {
 	if(type == 1)
-	{
-		g_bDefaultCFGSaved[client] = true;
+	{		
 		ClientCommand(client, "host_writeconfig config.cfg");
 	}
 	if(type == 2)
@@ -371,8 +562,9 @@ public Action WriteCFG(int client, int type)
 	}
 	if(type == 3)
 	{
-		SetClientCookie(client, g_cookies[0], "backedup");
 		ClientCommand(client, "host_writeconfig config_backup.cfg");
+		g_bDefaultCFGSaved[client] = true;
+		SetClientCookie(client, g_cookies[0], "backedup");
 	}
 }
 
@@ -390,11 +582,11 @@ public Action ExecCFG(int client, int type)
 
 
 
-
-
-
-public Action SetBindsInit(int client)
+public Action timer_SetBindsInit(Handle timer, int client)
 {
+	if(!g_bWantsBinds[client])
+		return;
+	
 	ClientCommand(client, "bind 1 \"slot1; sm_spec_client 1\" ");
 	ClientCommand(client, "bind 2 \"slot2; sm_spec_client 2\" ");
 	ClientCommand(client, "bind 3 \"slot3; sm_spec_client 3\" ");
@@ -409,14 +601,6 @@ public Action SetBindsInit(int client)
 }
 
 
-//reverting to default NT bindings
-public void RebindKeyDefault(int client, int key)
-{
-	
-	ClientCommand(client, "bind %i '\"'slot%i;", g_iNumber[1]);
-}
-
-
 public Action UpdateAlivePlayersArrays(Handle timer)
 {
 	int countNSF = 0;
@@ -425,6 +609,9 @@ public Action UpdateAlivePlayersArrays(Handle timer)
 	
 	for(int i = 1; i < 32; i++)
 	{
+		if(!IsValidEntity(i))
+			continue; 
+		
 		if(!IsClientConnected(i) || !IsClientInGame(i)) //|| !IsFakeClient(i) 
 			continue;
 		
@@ -462,16 +649,24 @@ public Action UpdateAlivePlayersArrays(Handle timer)
 
 public void OnRoundStart(Handle event, const char[] name, bool Broadcast)
 {
-	CreateTimer(5.0, UpdateAlivePlayersArrays);
-	
 	for(int client = 1; client < MaxClients; client++)
 	{
-		if(!g_bWantsBinds[client] || GetClientTeam(client) > 1)
-			return;
-
-		SetBindsInit(client);
+		if(!IsClientConnected(client) || !IsClientInGame(client) || !IsValidEntity(client))
+			continue;
+		if(GetClientTeam(client) > 1)
+			continue;
+		CreateTimer(0.5, timer_ChangeSpecMode, client);	
 	}
+	
+	CreateTimer(14.0, UpdateAlivePlayersArrays); // just in case
 }
+
+public Action timer_ChangeSpecMode(Handle timer, int client)
+{
+	//ClientCommand(client, "spec_mode");	
+	SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
+}
+
 
 
 public void OnPlayerDeath(Handle event, const char[] name, bool Broadcast)
@@ -479,19 +674,11 @@ public void OnPlayerDeath(Handle event, const char[] name, bool Broadcast)
 	int victim = GetClientOfUserId(GetEventInt(event, "userid"));
 
 	GetClientAbsOrigin(victim, g_fDeathOrigin[victim]);
-	g_fDeathOrigin[victim][2] += 70.0;
+	g_fDeathOrigin[victim][2] += 40.0;
 	
 	g_bIsDead[victim] = true;
 	
-	
-	
 	CreateTimer(2.0, UpdateAlivePlayersArrays);
-	
-	for(int i = 1; i < MaxClients; i++)
-	{
-		if(!g_bWantsBinds[i])
-			continue;
-	}	
 }
 
 
@@ -499,7 +686,7 @@ public void OnPlayerDisconnect(Handle event, const char[] name, bool Broadcast)
 {
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
 	
-	g_bDefaultCFGSaved[client] = false; //for the next guy
+	g_bDefaultCFGSaved[client] = false;
 	
 	CreateTimer(1.0, UpdateAlivePlayersArrays);
 }
