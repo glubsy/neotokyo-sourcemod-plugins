@@ -3,7 +3,7 @@
 #include <sdkhooks>
 #include <smlib>
 #include <neotokyo>
-#define DEBUG 1
+#define DEBUG 0
 #define PLUGIN_VERSION "0.2"
 
 #pragma semicolon 1
@@ -41,7 +41,7 @@ public void OnPluginStart()
 	AddCommandListener(OnSpecCmd, "spec_next");
 	AddCommandListener(OnSpecCmd, "spec_prev");
 	
-	RegConsoleCmd("sm_spec_pov", SpecCommand, "Spectate a specific client");
+	RegConsoleCmd("sm_spec_pov", SpecPOVCommand, "Spectate a specific client");
 }
 
 
@@ -49,16 +49,18 @@ public void OnPluginStart()
 public Action OnSpecCmd(int client, const char[] command, int args)
 {
 	if(!IsValidClient(client))
-		return;
+		return Plugin_Continue;
+	
 	int target = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
 
 	if(target <= 0)
-		return;
+		return Plugin_Continue;
+	#if DEBUG >0
 	PrintToChatAll("Observing: %i", target);
+	#endif
 	
-	
-	if(!bFirstPersonSpec[client])
-			return; // Not in first person mode
+	if(bFirstPersonSpec[client])
+			return Plugin_Handled;
 
 	// Loop trough observers
 	for(int cursor = 0; cursor < 5; cursor++)
@@ -71,10 +73,11 @@ public Action OnSpecCmd(int client, const char[] command, int args)
 			break;
 		}
 	}
+	return Plugin_Continue;
 }
 
 
-public Action SpecCommand(int client, int args)
+public Action SpecPOVCommand(int client, int args)
 {
 	if(GetClientTeam(client) > 1)
 	{
@@ -141,7 +144,7 @@ public Action SpecCommand(int client, int args)
 	   
 		CreateTimer(0.1, timer_ActivateFPPOV, client);
 	}
-	else
+	else if(observer_mode == 0)
 	{
 		SDKUnhook(iObserverTarget[iObserverCursor], SDKHook_SetTransmit, Hook_ShouldHide);
 		iShouldHide[iObserver[iObserverCursor]][0] = 0;
@@ -172,6 +175,8 @@ public Action SpecCommand(int client, int args)
 		
 		Client_SetObserverMode(client, view_as<Obs_Mode>(5)); // 5 = free roaming
 		bFirstPersonSpec[client] = false;
+		
+		//ClientCommand(client, "r_screenoverlay off");
 	}		
 	iObserverCursor++;	
 	
@@ -182,6 +187,7 @@ public Action SpecCommand(int client, int args)
 public Action timer_ActivateFPPOV(Handle timer, int client)
 {
 	bFirstPersonSpec[client] = true;
+	//ClientCommand(client, "r_screenoverlay effects/combine_binocoverlay.vmt");
 }
 
 //Blocking transmit from observed player to observer
