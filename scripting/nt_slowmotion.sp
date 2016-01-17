@@ -80,7 +80,12 @@ public Action:Event_RoundStart(Handle:event, const String:name[], bool:dontBroad
 		
 		if(GetConVarBool(hCheatCvar))
 		{
-			ServerCommand("sm_exec @all cl_phys_timescale 1.0");
+			for(int i = 1; i < MaxClients; i++)
+			{
+				if(!IsClientConnected(i) || !IsClientInGame(i) || !IsValidEntity(i))
+					continue;
+				ClientCommand(i, "cl_phys_timescale 1.0");
+			}
 			ActivateCheats(0);
 		}
 		
@@ -110,7 +115,14 @@ public Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 			SetConVarFloat(hPhysTimeScale, 0.2);
 			
 			if(GetConVarBool(hCheatCvar))
-				ServerCommand("sm_exec @all cl_phys_timescale 0.2");
+			{
+				for(int i = 1; i < MaxClients; i++)
+				{
+					if(!IsClientConnected(i) || !IsClientInGame(i) || !IsValidEntity(i))
+						continue;
+					ClientCommand(i, "cl_phys_timescale 0.2"); //FIXME: might need a very short timer for this to work?
+				}
+			}
 			
 			SetConVarInt(hGravity, 220);
 			
@@ -150,9 +162,16 @@ public Action timer_DefaultTimeScale(Handle timer)
 	//ServerCommand("host_timescale 1.0");
 	SetConVarFloat(hPhysTimeScale, 1.0);
 	if(GetConVarBool(hCheatCvar))
-		ServerCommand("sm_exec @all cl_phys_timescale 1.0");
+	{
+		for(int i = 1; i < MaxClients; i++)
+		{
+			if(!IsClientConnected(i) || !IsClientInGame(i) || !IsValidEntity(i))
+				continue;
+			ClientCommand(i, "cl_phys_timescale 1.0");
+		}
+	}
 	
-	CreateTimer(1.0, timer_DeactivateCheats);
+	CreateTimer(1.5, timer_DeactivateCheats);
 	
 	SetConVarInt(hGravity, 800);
 	
