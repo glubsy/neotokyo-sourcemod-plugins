@@ -96,8 +96,13 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 		
 		TE_WriteNum("m_bTracer", 1);
 		if(GetConVarBool(convar_shake))
+		{
 			ShakeScreen(client, 20.0, 2.0, 1.0);
-		
+			float angles[3];
+			GetClientEyeAngles(client, angles);
+			angles[0] -= 1.3;
+			TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+		}
 		return Plugin_Continue; // don't block it
 	}
 	
