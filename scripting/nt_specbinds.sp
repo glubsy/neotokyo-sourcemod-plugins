@@ -36,6 +36,7 @@ public void OnPluginStart()
 {
 	RegConsoleCmd("sm_specbinds", SpecBindsCommand, "Binds key nums to spectator modes");
 	RegConsoleCmd("sm_specunbind", SpecUnbindCommand, "Restores config_backup.cfg for the client");
+	RegConsoleCmd("sm_resetbinds", ResetbindsCommand, "Restores config_backup.cfg for the client");
 	
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("game_round_start", OnRoundStart);
@@ -509,7 +510,8 @@ public ProcessCookies(int client)
 
 	if (StrEqual(cookie, "backedup")) 
 	{
-		ExecCFG(client, 3); //restoring backup
+		ResetbindsCommand(client, 1);
+		//ExecCFG(client, 3); //restoring backup
 		return;
 	}
 	else 
@@ -548,6 +550,22 @@ public Action SpecUnbindCommand(int client, int args)
 	PrintToChat(client, "Your previous config was restored.");
 }
 
+public Action ResetbindsCommand(int client, int args)
+{
+	ClientCommand(client, "bind 1 \"slot1\" ");
+	ClientCommand(client, "bind 2 \"slot2\" ");
+	ClientCommand(client, "bind 3 \"slot3\" ");
+	ClientCommand(client, "bind 4 \"slot4\" ");
+	ClientCommand(client, "bind 5 \"slot5\" ");
+	
+	ClientCommand(client, "bind 6 \"slot6\" ");
+	ClientCommand(client, "bind 7 \"slot7\" ");
+	ClientCommand(client, "bind 8 \"slot8\" ");
+	ClientCommand(client, "bind 9 \"slot9\" ");
+	ClientCommand(client, "bind 0 \"slot10\" ");
+	
+	PrintToConsole(client, "Reset your binds to default NT ones\n");
+}
 
 
 public Action WriteCFG(int client, int type)
@@ -607,20 +625,22 @@ public Action UpdateAlivePlayersArrays(Handle timer)
 	int countJinrai = 0;
 	int totalcount = 0;
 	
-	for(int i = 1; i < 32; i++)
+	for(int i = 1; i < MaxClients; i++)
 	{
 		if(!IsValidEntity(i))
 			continue; 
 		
-		if(!IsClientConnected(i) || !IsClientInGame(i)) //|| !IsFakeClient(i) 
+		if(!IsValidClient(i)) //|| !IsFakeClient(i) 
 			continue;
 		
 		if(GetClientTeam(i) <= 1)
-			continue;		
+			continue;
+		
+		if(countNSF >= 5 || countJinrai >= 5)
+			continue;
 		
 		if(totalcount > 10)
-			break; 
-
+			break;
 
 		if(GetClientTeam(i) == 3)
 		{
@@ -689,9 +709,9 @@ public void OnPlayerDisconnect(Handle event, const char[] name, bool Broadcast)
 	g_bDefaultCFGSaved[client] = false;
 	
 	CreateTimer(1.0, UpdateAlivePlayersArrays);
-}
+}	
 	
-
+	
 	
 
 stock SendDialogToOne(int client, const char[] text, any:...)
@@ -708,3 +728,4 @@ stock SendDialogToOne(int client, const char[] text, any:...)
 
 	delete kv;
 }
+
