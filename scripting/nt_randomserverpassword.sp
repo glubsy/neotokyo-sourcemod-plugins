@@ -41,15 +41,17 @@ public OnClientConnected(client)
 
 public OnClientDisconnect(client)
 {
-	if(IsServerEmpty){
-	passwordChangeTimer = CreateTimer(TIMER_INTERVAL, CheckEmpty);
+	if(IsServerEmpty())
+	{
+		passwordChangeTimer = CreateTimer(TIMER_INTERVAL, CheckEmpty);
 	}
-	else {
-	return;
+	else
+	{
+		return;
 	}
 }
 
-public IsServerEmpty()
+public bool IsServerEmpty()
 {
   for(new i=1; i<GetMaxClients(); i++){
     if( IsClientInGame(i) && !IsFakeClient(i) ){ // human player & in game

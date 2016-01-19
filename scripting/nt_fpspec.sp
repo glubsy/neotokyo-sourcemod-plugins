@@ -440,4 +440,8 @@ public void OnGameFrame()
 stock void GetVelocity(int client, float output[3])
 {
 	GetEntPropVector(client, Prop_Data, "m_vecVelocity", output);
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> origin/master
