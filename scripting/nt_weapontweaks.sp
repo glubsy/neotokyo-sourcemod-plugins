@@ -9,9 +9,10 @@
 bool g_bAttackHeld[MAXPLAYERS+1];
 bool g_AntiSwitchBool[MAXPLAYERS+1];
 float g_fLastAttackUse[MAXPLAYERS+1];
-Handle convar_shake = INVALID_HANDLE; 
+Handle convar_shake = INVALID_HANDLE;
+Handle convar_weapontweaks = INVALID_HANDLE;
 bool g_bSwitchHookSuccessful[MAXPLAYERS+1];
-bool g_bFireHookSuccessful[MAXPLAYERS+1];
+//bool g_bFireHookSuccessful[MAXPLAYERS+1];
 
 public Plugin:myinfo = 
 {
@@ -24,9 +25,11 @@ public Plugin:myinfo =
 
 public void OnPluginStart()
 {
-	convar_shake = CreateConVar("sm_nt_weaponshake", "1", "Enable shake kickback effect on some weapons");
-	HookEvent("player_disconnect", OnPlayerDisconnect);	
+	convar_shake = CreateConVar("sm_nt_weaponshake", "1", "Enable added shake kickback effect on weapons");
+	convar_weapontweaks = CreateConVar("sm_nt_weapontweaks", "1", "Enable balancing some weapons");
 	
+	HookEvent("player_disconnect", OnPlayerDisconnect);	
+
 	AddTempEntHook("Shotgun Shot", TE_ShotHook);
 	
 	for(int client = 1; client < MaxClients; client++)
@@ -39,6 +42,7 @@ public void OnPluginStart()
 		else
 			g_bSwitchHookSuccessful[client] = false;
 		
+		/*
 		if(SDKHookEx(client, SDKHook_FireBulletsPost, Hook_FireBulletsPost))
 			g_bFireHookSuccessful[client] = true;
 		else
@@ -48,6 +52,7 @@ public void OnPluginStart()
 			#endif 
 			g_bFireHookSuccessful[client] = false;
 		}
+		*/
 	}
 	
 	// init random number generator
@@ -64,6 +69,7 @@ public void OnClientPostAdminCheck(int client)
 			g_bSwitchHookSuccessful[client] = false;
 	}
 	
+	/*
 	if(!g_bFireHookSuccessful[client])
 	{
 		if(SDKHookEx(client, SDKHook_FireBulletsPost, Hook_FireBulletsPost))
@@ -76,6 +82,7 @@ public void OnClientPostAdminCheck(int client)
 			g_bFireHookSuccessful[client] = false;
 		}
 	}
+	*/
 }
 
 
@@ -94,69 +101,72 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 		return Plugin_Continue; // don't block it
 	}
 	
-	if(weapon == 8) //8 is weapon_zr68l
+	if(GetConVarBool(convar_weapontweaks))
 	{
-		int client = TE_ReadNum("m_iPlayer") + 1;
-		int randombool;
-		int randomroll = UTIL_GetRandomInt(0, 100);
-		if(randomroll <= 62)
-			randombool = 0;
-		else 
-			randombool = 1;
-		
-		TE_WriteNum("m_bTracer", randombool);
-		if(GetConVarBool(convar_shake))
-			ShakeScreen(client, 2.5, 1.2, 0.7);		
-		return Plugin_Continue;
-	}
+		if(weapon == 8) //8 is weapon_zr68l
+		{
+			int client = TE_ReadNum("m_iPlayer") + 1;
+			int randombool;
+			int randomroll = UTIL_GetRandomInt(0, 100);
+			if(randomroll <= 62)
+				randombool = 0;
+			else 
+				randombool = 1;
+			
+			TE_WriteNum("m_bTracer", randombool);
+			if(GetConVarBool(convar_shake))
+				ShakeScreen(client, 2.5, 1.2, 0.7);		
+			return Plugin_Continue;
+		}
 
-	if(weapon == 25) //25 is weapon_aa13
-	{
-		int client = TE_ReadNum("m_iPlayer") + 1;
-		TE_WriteNum("m_bTracer", 1);
-		if(GetConVarBool(convar_shake))
-			ShakeScreen(client, 12.0, 4.5, 1.2);
-		float angles[3];
-		GetClientEyeAngles(client, angles);
-		angles[0] -= 2.5;
-		TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+		if(weapon == 25) //25 is weapon_aa13
+		{
+			int client = TE_ReadNum("m_iPlayer") + 1;
+			TE_WriteNum("m_bTracer", 1);
+			if(GetConVarBool(convar_shake))
+				ShakeScreen(client, 12.0, 4.5, 1.2);
+			float angles[3];
+			GetClientEyeAngles(client, angles);
+			angles[0] -= 2.5;
+			TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+			
+			return Plugin_Continue;
+		}
 		
-		return Plugin_Continue;
-	}
-	
-	if(weapon == 2) //2 is weapon_supa7
-	{
-		int client = TE_ReadNum("m_iPlayer") + 1;
-		TE_WriteNum("m_bTracer", 1);
-		float angles[3];
-		GetClientEyeAngles(client, angles);
-		angles[0] -= 1.5;
-		TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+		if(weapon == 2) //2 is weapon_supa7
+		{
+			int client = TE_ReadNum("m_iPlayer") + 1;
+			TE_WriteNum("m_bTracer", 1);
+			float angles[3];
+			GetClientEyeAngles(client, angles);
+			angles[0] -= 1.5;
+			TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+			
+			return Plugin_Continue;
+		}
 		
-		return Plugin_Continue;
-	}
-	
-	if(weapon == 20) //20 is weapon_m41
-	{
-		int client = TE_ReadNum("m_iPlayer") + 1;
-		TE_WriteNum("m_bTracer", 1);
-		float angles[3];
-		GetClientEyeAngles(client, angles);
-		angles[0] -= 0.9;
-		TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+		if(weapon == 20) //20 is weapon_m41
+		{
+			int client = TE_ReadNum("m_iPlayer") + 1;
+			TE_WriteNum("m_bTracer", 1);
+			float angles[3];
+			GetClientEyeAngles(client, angles);
+			angles[0] -= 0.9;
+			TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+			
+			return Plugin_Continue;
+		}
 		
-		return Plugin_Continue;
-	}
-	
-	if(weapon == 29) //29 is weapon_m41s
-	{
-		int client = TE_ReadNum("m_iPlayer") + 1;
-		float angles[3];
-		GetClientEyeAngles(client, angles);
-		angles[0] -= 0.8;
-		TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
-		
-		return Plugin_Continue;
+		if(weapon == 29) //29 is weapon_m41s
+		{
+			int client = TE_ReadNum("m_iPlayer") + 1;
+			float angles[3];
+			GetClientEyeAngles(client, angles);
+			angles[0] -= 0.8;
+			TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+			
+			return Plugin_Continue;
+		}
 	}
 	
 	#if DEBUG > 0
@@ -263,13 +273,15 @@ public Action Hook_CannotSwitch(int client, int weapon)
 		return Plugin_Continue;
 }
 
+/*
+//This is not working in Neotokyo :(
 public Hook_FireBulletsPost(int client, int shots, const char[] weaponname)
 {
 	#if DEBUG > 0
 	PrintToChatAll("FireBulletsPost: %i is firing.", client);
 	#endif
 }
-
+*/
 
 
 public void OnPlayerDisconnect(Handle event, const char[] name, bool dontBroadcast)
@@ -284,11 +296,13 @@ public void OnPlayerDisconnect(Handle event, const char[] name, bool dontBroadca
 	
 	g_AntiSwitchBool[client] = false;
 	
+	/*
 	if(g_bFireHookSuccessful[client])
 	{
 		SDKUnhook(client, SDKHook_FireBulletsPost, Hook_FireBulletsPost);
 		g_bFireHookSuccessful[client] = false;
 	}
+	*/
 }
 
 
@@ -326,7 +340,7 @@ public void ShakeScreen(int client, float amplitude, float frequency, float dura
 }
 
 
-public Action TE_RelayShotTempent(int weaponID, float origin[3], float angle0, float angle1, float spread, int seed, int mode)
+stock Action TE_RelayShotTempent(int weaponID, float origin[3], float angle0, float angle1, float spread, int seed, int mode)
 {
 	TE_Start("Shotgun Shot");
 	TE_WriteNum("m_iWeaponID", weaponID);
