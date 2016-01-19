@@ -157,20 +157,23 @@ public OnPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 
 public Action:Command_JoinTeam(client, const String:command[], argc) 
 {
-	//new clientTeam = GetClientTeam(client);
-	if(!IsPlayerAlive(client))
+	if(client > 0)
 	{
-		CreateTimer(0.0, ClearOverlay, client);
-		//ClientCommand(client, "r_screenoverlay off");  //doesn't fire for some reason, need a timer of 0.0
-		//g_OverlayActive[client] = false;
-		//PrintToServer("Hook: Changed team to %d", clientTeam); 
-	}	
+		if(!IsPlayerAlive(client))
+		{
+			CreateTimer(0.0, ClearOverlay, client);
+			//ClientCommand(client, "r_screenoverlay off");  //doesn't fire for some reason, need a timer of 0.0
+			//g_OverlayActive[client] = false;
+			//PrintToServer("Hook: Changed team to %d", clientTeam); 
+		}	
+		return Plugin_Continue;
+	}
 	return Plugin_Continue;
 }
 
 public Action:ClearOverlay(Handle:timer, client)
 {
-	if(IsClientConnected(client) && IsClientInGame(client) && !IsPlayerAlive(client))
+	if(IsClientConnected(client) && IsClientInGame(client))
 	{
 		ClientCommand(client, "r_screenoverlay off");
 		g_OverlayActive[client] = false;
@@ -179,7 +182,7 @@ public Action:ClearOverlay(Handle:timer, client)
 
 public OnMapEnd()
 {
-	for(new i; i < GetMaxClients(); i++)
+	for(new i = 1; i < GetMaxClients(); i++)
 	{
 		if((IsClientInGame(i) && IsPlayerAlive(i)) && g_OverlayActive[i] == true)
 		{
@@ -191,7 +194,7 @@ public OnMapEnd()
 
 public OnClientDisconnect(client)
 {
-	ClientCommand(client, "r_screenoverlay off");
+	//ClientCommand(client, "r_screenoverlay off");
 	g_OverlayActive[client] = false;
 	g_OverlayDisabled[client] = false;
 }

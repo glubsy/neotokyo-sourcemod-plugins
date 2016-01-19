@@ -62,15 +62,7 @@ public OnPluginStart()
 	RegServerCmd("neo_restart_match", Restart);
 	RegServerCmd("neo_restart_round", RestartRound);
 	HookConVarChange(FindConVar("neo_restart_this"), Event_Restart);
-	AddCommandListener(Roundtest, "round");
 }
-
-public Action Roundtest(int client, const char[] command, int argc)
-{
-	PrintToChatAll("RoundNumb is: %i", RoundNum);
-	return Plugin_Handled;
-}
-
 
 public Action:Restart(args)
 {
@@ -179,7 +171,7 @@ public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 	g_bRestarting = false;
 	
 	RoundNum = GameRules_GetProp("m_iRoundNumber");
-	
+
 	//saving snapshot once freeze time ended
 	CreateTimer(2.0, SaveCurrentScores); 
 }

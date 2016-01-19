@@ -80,6 +80,9 @@ public event_PlayerSpawn(Handle:event, const String:name[], bool:dontBroadcast)
 	if(IsPlayerSupport(client) == true)
 		IsClientSupport[client] = true;
 	
+	if(GetClientTeam(client) < 2)
+		return;
+	
 	if(IsClientSupport[client])  //FIXME: this is dumb, still needs a rewrite
 	{
 		#if DEBUG > 0
@@ -101,6 +104,9 @@ public event_PlayerSpawn(Handle:event, const String:name[], bool:dontBroadcast)
 
 public Action timer_DelayGiveKnife(Handle timer, int client)
 {
+	if(GetClientTeam(client) < 2)
+		return;
+	
 	if(GivePlayerItem(client, "weapon_knife") != -1)
 		CreateTimer(0.0, timer_SwitchToWeaponSlot, client)
 }
@@ -162,7 +168,8 @@ public Action timer_SwitchToWeaponSlot(Handle timer, client)
 		//SwitchToWeaponSlot(client, 3);
 		//SwitchToWeaponSlot(client, 0);
 		
-		SwitchToLastWeapon(client);
+		if(IsValidEntity(client))
+			SwitchToLastWeapon(client);
 
 		#if DEBUG > 0
 		PrintToChatAll("[SUPPORTKNIFE] client %N attempted switch back weapon", client);
