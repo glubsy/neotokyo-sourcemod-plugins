@@ -1,7 +1,7 @@
 #include <sourcemod>
 #include <sdktools>
 #include <neotokyo>
-#define PLUGIN_VERSION "0.2"
+#define PLUGIN_VERSION "0.3"
 #define MESSAGE_LASTMAN "You are the last man standing! Time to !seppuku"
 #define MESSAGE_DUEL 	"You are dueling against enemy last player, don't drag this out!"
 
@@ -13,6 +13,7 @@ bool g_bSoundFilesExist[2], g_bLastManStanding[MAXPLAYERS+1];
 Handle convar_slowmotion_enabled = INVALID_HANDLE;
 Handle g_TimerSlowMotion = INVALID_HANDLE;
 Handle hGravity, hPhysTimeScale;
+Handle hCheatCvar = INVALID_HANDLE;
 
 new const String:g_SloMoSound[][] = { 
 	"custom/slowmoin.mp3",
@@ -38,6 +39,7 @@ public OnPluginStart()
 	
 	hGravity = FindConVar("sv_gravity");
 	hPhysTimeScale = FindConVar("phys_timescale");
+	hCheatCvar = FindConVar("sv_cheats");
 }
 
 public OnConfigsExecuted()
@@ -75,7 +77,18 @@ public Action:Event_RoundStart(Handle:event, const String:name[], bool:dontBroad
 		//just in case something went wrong
 		//ServerCommand("host_timescale 1.0");
 		SetConVarFloat(hPhysTimeScale, 1.0);
-		ServerCommand("sm_exec @all cl_phys_timescale 1.0");
+		
+		if(GetConVarBool(hCheatCvar))
+		{
+			for(int i = 1; i < MaxClients; i++)
+			{
+				if(!IsClientConnected(i) || !IsClientInGame(i) || !IsValidEntity(i))
+					continue;
+				ClientCommand(i, "cl_phys_timescale 1.0");
+			}
+			ActivateCheats(0);
+		}
+		
 		SetConVarInt(hGravity, 800);	
 		
 		for (int i; i <= MaxClients; i++)
@@ -96,9 +109,21 @@ public Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 		
 		if(client == lastJin && g_bLastManStanding[client] || client == lastNsf && g_bLastManStanding[client])
 		{
+			ActivateCheats(1);
+			
 			//ServerCommand("host_timescale 0.6");
 			SetConVarFloat(hPhysTimeScale, 0.2);
-			ServerCommand("sm_exec @all cl_phys_timescale 0.2");
+			
+			if(GetConVarBool(hCheatCvar))
+			{
+				for(int i = 1; i < MaxClients; i++)
+				{
+					if(!IsClientConnected(i) || !IsClientInGame(i) || !IsValidEntity(i))
+						continue;
+					ClientCommand(i, "cl_phys_timescale 0.2"); //FIXME: might need a very short timer for this to work?
+				}
+			}
+			
 			SetConVarInt(hGravity, 220);
 			
 			if(g_bSoundFilesExist[0])
@@ -133,12 +158,51 @@ public Action timer_DefaultTimeScale(Handle timer)
 	{
 		EmitSoundToAll(g_SloMoSound[1], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 160, SND_NOFLAGS, 0.6);
 	}
+	
 	//ServerCommand("host_timescale 1.0");
 	SetConVarFloat(hPhysTimeScale, 1.0);
-	ServerCommand("sm_exec @all cl_phys_timescale 1.0");
+	if(GetConVarBool(hCheatCvar))
+	{
+		for(int i = 1; i < MaxClients; i++)
+		{
+			if(!IsClientConnected(i) || !IsClientInGame(i) || !IsValidEntity(i))
+				continue;
+			ClientCommand(i, "cl_phys_timescale 1.0");
+		}
+	}
+	
+	CreateTimer(1.5, timer_DeactivateCheats);
+	
 	SetConVarInt(hGravity, 800);
 	
 }
+
+public Action timer_DeactivateCheats(Handle timer)
+{
+	ActivateCheats(0);
+}
+
+
+public ActivateCheats(int value)
+{
+	if( hCheatCvar == INVALID_HANDLE )
+		return;
+	
+	char val[2];
+	IntToString(value, val, 2);
+	new flags = GetConVarFlags(hCheatCvar);
+	SetConVarFlags(hCheatCvar, flags & ~FCVAR_NOTIFY);
+	SetConVarString(hCheatCvar, val);
+	SetConVarFlags(hCheatCvar, flags);
+	
+	for(int i = 1; i < MaxClients; i++)
+	{
+		if(!IsClientConnected(i) || !IsClientInGame(i) || IsFakeClient(i))
+			continue;
+		SendConVarValue(i, hCheatCvar, val);
+	}
+}
+
 
 
 
