@@ -13,6 +13,7 @@ Handle convar_shake = INVALID_HANDLE;
 Handle convar_weapontweaks = INVALID_HANDLE;
 bool g_bSwitchHookSuccessful[MAXPLAYERS+1];
 //bool g_bFireHookSuccessful[MAXPLAYERS+1];
+int randombool, randomroll;
 
 public Plugin:myinfo = 
 {
@@ -111,8 +112,7 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 		if(weapon == 8) //8 is weapon_zr68l
 		{
 			int client = TE_ReadNum("m_iPlayer") + 1;
-			int randombool;
-			int randomroll = UTIL_GetRandomInt(0, 100);
+			randomroll = GetRandomInt(0, 100);
 			if(randomroll <= 62)
 				randombool = 0;
 			else 
@@ -153,7 +153,14 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 		if(weapon == 20) //20 is weapon_m41
 		{
 			int client = TE_ReadNum("m_iPlayer") + 1;
-			TE_WriteNum("m_bTracer", 1);
+			
+			randomroll = GetRandomInt(0, 100);
+			if(randomroll <= 80)
+				randombool = 0;
+			else 
+				randombool = 1;
+			TE_WriteNum("m_bTracer", randombool);
+			
 			float angles[3];
 			GetClientEyeAngles(client, angles);
 			angles[0] -= 0.9;
@@ -201,25 +208,29 @@ public Action OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 {
 	if(!IsValidEntity(client))
 		return;
-	
-	int active_weapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
-	if(active_weapon < 1)
-		return; 
-	
-	char classbuffer[30];
-	GetEntityClassname(active_weapon, classbuffer, sizeof(classbuffer));
 
-	if(!StrEqual(classbuffer, "weapon_srs", false))
-		return;
 	
 	if((buttons & IN_ATTACK) == IN_ATTACK)
 	{
+		int iActiveWeapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
+		
+		if(iActiveWeapon < 1)
+			return; 
+		
+		char classbuffer[40];
+		GetEntityClassname(iActiveWeapon, classbuffer, sizeof(classbuffer));
+
+		if(!StrEqual(classbuffer, "weapon_srs", false))
+			return;
+		
+		
+		
 		if(g_bAttackHeld[client])
 		{
 			if((GetGameTime() - g_fLastAttackUse[client]) > SPAM_TIME)
 			{
 				#if DEBUG > 0
-				//PrintToChatAll("ALLOWED after SPAM_TIME");
+				PrintToChatAll("ALLOWED after SPAM_TIME");
 				#endif
 				
 				g_AntiSwitchBool[client] = true;
@@ -379,7 +390,7 @@ stock Action TE_SendCustom(const char[] TEname, int player, int weaponID, float 
 }
 
 
-UTIL_GetRandomInt(int start, int end) {
+stock UTIL_GetRandomInt(int start, int end) {
     int rand;
     rand = GetURandomInt();
     return ( rand % (1 + end - start) ) + start;

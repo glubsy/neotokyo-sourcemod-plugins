@@ -287,7 +287,10 @@ public Action CountPlayers(Handle timer)
 
 public Action LastManStanding(Handle timer, int client)
 {
-	if(!IsClientConnected(client) || !IsPlayerAlive(client) || g_MessageShownLast[client])
+	if(!IsClientConnected(client))
+		return;
+	
+	if(!IsPlayerAlive(client) || g_MessageShownLast[client])
 		return;
 
 	PrintToChat(client, MESSAGE_LASTMAN);
