@@ -34,7 +34,6 @@ char g_sStockSound[][] = {
 	"physics/metal/metal_computer_impact_soft2.wav",
 	"physics/wood/wood_box_impact_bullet4.wav",
 	"buttons/button1.wav",
-	"buttons/button9.wav",
 	"buttons/button15.wav", //can be played super fast over short time
 	"buttons/combine_button3.wav", //default jump sound candidate, various pitches
 	"ambient/levels/prison/radio_random11.wav"
@@ -139,24 +138,28 @@ public Action EmitBasicJumpSound(int client, int soundindex, bool classoverride)
 	
 	g_bSoundLocked[client] = true;
 	
-	float vecEyeAngles[3];
+	float vecEyeAngles[3], vecOrigin[3];
 	GetClientEyeAngles(client, vecEyeAngles);
+	GetEntPropVector(client, Prop_Send, "m_vecOrigin", vecOrigin);
+	vecOrigin[0] += 15.0 * Cosine(DegToRad(vecEyeAngles[1]));
+	vecOrigin[1] += 15.0 * Sine(DegToRad(vecEyeAngles[1]));
+	vecOrigin[2] -= 15;
 	
 	if(classoverride)
 	{
 		if(soundindex == 2) //pururin
 		{
-			EmitSoundToAll(g_sCustomJumpSound[soundindex], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 60, SND_NOFLAGS, SNDVOL_NORMAL, 100, -1, NULL_VECTOR, vecEyeAngles);
+			EmitSoundToAll(g_sCustomJumpSound[soundindex], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, SNDVOL_NORMAL, 100, -1, vecOrigin, vecEyeAngles);
 			StopSoundPerm(client, g_sCustomJumpSound[soundindex]);
 		}
 		if(soundindex == 1) //timewalk
 		{
-			EmitSoundToAll(g_sCustomJumpSound[soundindex], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 70, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, NULL_VECTOR, vecEyeAngles);
+			EmitSoundToAll(g_sCustomJumpSound[soundindex], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, vecEyeAngles);
 			StopSoundPerm(client, g_sCustomJumpSound[soundindex]);
 		}
 		if(soundindex == 0) //nyanpasu
 		{
-			EmitSoundToAll(g_sCustomJumpSound[soundindex], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 60, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, NULL_VECTOR, vecEyeAngles);
+			EmitSoundToAll(g_sCustomJumpSound[soundindex], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, vecEyeAngles);
 			StopSoundPerm(client, g_sCustomJumpSound[soundindex]);
 		}
 	}
@@ -165,15 +168,15 @@ public Action EmitBasicJumpSound(int client, int soundindex, bool classoverride)
 		int PlayerClass = GetEntProp(client, Prop_Send, "m_iClassType");
 		if(PlayerClass == 1) //recon
 		{		
-			EmitSoundToAll(g_sStockSound[5], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 110, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, NULL_VECTOR, vecEyeAngles);
+			EmitSoundToAll(g_sStockSound[5], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, vecEyeAngles);
 		}
 		else if(PlayerClass == 2) //assault
 		{
-			EmitSoundToAll(g_sStockSound[8], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 110, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, NULL_VECTOR, vecEyeAngles);
+			EmitSoundToAll(g_sStockSound[8], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, vecEyeAngles);
 		}
 		else if(PlayerClass == 3) //support
 		{
-			EmitSoundToAll(g_sStockSound[3], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 110, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, NULL_VECTOR, vecEyeAngles);
+			EmitSoundToAll(g_sStockSound[3], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, vecEyeAngles);
 		}
 	}
 	
