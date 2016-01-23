@@ -95,7 +95,13 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 	{
 		int client = TE_ReadNum("m_iPlayer") + 1; //is shifted by 1 for some reason
 		
-		TE_WriteNum("m_bTracer", 1);
+		randomroll = GetRandomInt(0, 100);
+		if(randomroll <= 82)
+			randombool = 0;
+		else 
+			randombool = 1;
+		
+		TE_WriteNum("m_bTracer", randombool);
 		if(GetConVarBool(convar_shake))
 		{
 			ShakeScreen(client, 20.0, 2.0, 1.0);
@@ -129,7 +135,7 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 			int client = TE_ReadNum("m_iPlayer") + 1;
 			TE_WriteNum("m_bTracer", 1);
 			if(GetConVarBool(convar_shake))
-				ShakeScreen(client, 12.0, 4.5, 1.2);
+				ShakeScreen(client, 8.0, 4.5, 0.7);
 			float angles[3];
 			GetClientEyeAngles(client, angles);
 			angles[0] -= 2.5;

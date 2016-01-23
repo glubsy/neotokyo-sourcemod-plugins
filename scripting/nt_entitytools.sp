@@ -37,6 +37,9 @@ public OnPluginStart()
 	RegAdminCmd("dontcollide", CommandPropNoCollide, ADMFLAG_SLAY, "test")
 	RegAdminCmd("collide", CommandPropCollide, ADMFLAG_SLAY)
 	RegAdminCmd("makeladder", CommandMakeLadder, ADMFLAG_SLAY)
+	RegAdminCmd("spawnghostcapzone", CommandSpawnGhostCapZone, ADMFLAG_SLAY)
+	RegAdminCmd("spawnvipentity", CommandSpawnVIPEntity, ADMFLAG_SLAY)
+	
 	RegAdminCmd("movetype", ChangeEntityMoveType, ADMFLAG_SLAY)
 	RegConsoleCmd("strapon", CommandStrapon, "strapon self/all/target to stick a dick on people")
 	//RegAdminCmd("strapon", CommandStrapon, ADMFLAG_SLAY,  "strapon self/all/target to stick a dick on people")
@@ -67,20 +70,121 @@ public OnClientPutInServer(client){
 
 public Action:PlayerSpawn(Handle:event, const String:name[], bool:dontBroadcast)
 {
-	new client;
-	client = GetClientOfUserId(GetEventInt(event, "userid"));
+	new client = GetClientOfUserId(GetEventInt(event, "userid"));
 	gRemaining[client] = GetConVarInt(cvNumProps);
-	return Plugin_Continue;
+	//return Plugin_Continue;
 }
 
 public Action:event_RoundStart(Handle:event, const String:name[], bool:dontBroadcast)
 {
-	new client;
-	client = GetClientOfUserId(GetEventInt(event, "userid"));
+	new client = GetClientOfUserId(GetEventInt(event, "userid"));
 	gRemaining[client] = GetConVarInt(cvNumProps);
-	return Plugin_Continue;  //??? change if needed
+	//return Plugin_Continue;  //??? change if needed
 }
 
+public Action:CommandSpawnGhostCapZone(client, args)
+{
+	new aimed  = GetClientAimTarget(client, false);
+	if(aimed != -1)
+	{
+		new String:arg1[5];
+		//GetCmdArg(1, arg1, sizeof(arg1));
+		GetCmdArgString(arg1,sizeof(arg1));
+		
+		new EntIndex = CreateEntityByName("neo_ghost_retrieval_point");
+		if(EntIndex != -1)
+		{
+			PrintToChatAll("Aimed at: %i, Created: %i", aimed, EntIndex);
+			new Float:VecOrigin[3];
+			GetClientEyePosition(aimed, VecOrigin);
+			DispatchKeyValueVector(EntIndex, "Origin", VecOrigin); // works!
+			DispatchKeyValue(EntIndex, "team", "2");
+			SetEntProp(EntIndex, Prop_Data, "m_iTeamNum", 1);
+
+			
+			
+			DispatchKeyValue(EntIndex, "Radius", "128");
+			
+			
+			//DispatchKeyValue(EntIndex, "model", "models/nt/a_lil_tiger.mdl");
+			//SetEntityMoveType(EntIndex, MOVETYPE_NOCLIP);
+
+			SetVariantString("!activator");
+			AcceptEntityInput(EntIndex, "SetParent", aimed); 
+			
+			//SetEntPropEnt(EntIndex, Prop_Data, "m_iParent", aimed);		
+			
+			
+			PrintToChatAll("dispatching %i", EntIndex);
+			AcceptEntityInput(EntIndex, "start");
+			
+			//if(GetEdictFlags(EntIndex) & FL_EDICT_ALWAYS)
+			SetEdictFlags(EntIndex, GetEdictFlags(EntIndex) ^ FL_EDICT_ALWAYS);
+			
+			
+			SetEntPropEnt(EntIndex, Prop_Data, "m_hEffectEntity", aimed);
+			CreateTimer(1.0, TimerSetParent, EntIndex, TIMER_REPEAT)
+		}
+	}
+	return Plugin_Handled;
+}
+
+
+public Action CommandSpawnVIPEntity(int client, args)
+{
+	char arg1[30];
+	//GetCmdArg(1, arg1, sizeof(arg1));
+	GetCmdArgString(arg1,sizeof(arg1));
+
+	int newentity = CreateEntityByName(arg1); //use "neo_escape_point" or "neo_vip_entity"
+	
+	if(newentity != -1)
+	{
+		char classname[20];
+		GetEdictClassname(newentity, classname, sizeof(classname))
+		PrintToChatAll("[ENTITY] create %s, %i", classname, newentity);
+		float VecOrigin[3], VecAngles[3], normal[3];
+		
+		GetClientEyePosition(client, VecOrigin);
+		GetClientEyeAngles(client, VecAngles);
+		
+		TR_TraceRayFilter(VecOrigin, VecAngles, MASK_SOLID, RayType_Infinite, TraceEntityFilterPlayer, client);
+		TR_GetEndPosition(VecOrigin);
+		TR_GetPlaneNormal(INVALID_HANDLE, normal);
+		GetVectorAngles(normal, normal);
+		normal[0] += 90.0;
+		
+		//DispatchKeyValueVector(EntIndex, "Origin", VecOrigin);
+		//DispatchKeyValueVector(EntIndex, "Angles", normal);
+		
+		DispatchKeyValue(newentity, "Radius", "140");
+		//DispatchKeyValue(newentity, "Model", "models/player/vip.mdl");
+		DispatchKeyValue(newentity, "modelindex", "353");
+		
+		float position[3];
+		GetEntPropVector(newentity, Prop_Send, "m_Position", position);
+		
+		int radius;
+		GetEntProp(newentity, Prop_Send, "m_Radius", radius);
+		
+		PrintToChatAll("Position of %s: %f %f %f", classname, VecOrigin[0], VecOrigin[1], VecOrigin[2]);
+		PrintToChatAll("Position getentprop of %s: %f %f %f radius %i", classname, position[0], position[1], position[2], radius);
+		
+		TeleportEntity(newentity, VecOrigin, normal, NULL_VECTOR);
+		DispatchSpawn(newentity);
+	}
+	return Plugin_Handled;
+}
+
+
+public Action:TimerSetParent(Handle:timer, entity)
+{
+	//SetVariantString("grenade2");
+	//AcceptEntityInput(entity, "SetParentAttachment"); 
+	//SetVariantString("grenade2");
+	//AcceptEntityInput(entity, "SetParentAttachmentMaintainOffset");
+	DispatchSpawn(entity);
+}
 
 
 public Action:CommandMakeLadder(client, args)
@@ -118,7 +222,7 @@ public Action:CommandMakeLadder(client, args)
 	DispatchKeyValueVector(EntIndex, "Origin", VecOrigin); // works!
 	DispatchKeyValueVector(EntIndex, "Angles", normal); // works!
 	
-	//SetEntityMoveType(EntIndex, MOVETYPE_LADDER);
+	SetEntityMoveType(EntIndex, MOVETYPE_LADDER);
 	TeleportEntity(EntIndex, VecOrigin, normal, NULL_VECTOR);
 	DispatchSpawn(EntIndex);
 	
@@ -162,9 +266,10 @@ public Action:ChangeEntityMoveType(client, args)   // doesn't seem to do shit
 
 public Action:CommandDickSpawn(client, args) 
 {
- 	if(args < 1)
+ 	if(args > 2)
 	{
 		PrintToConsole(client, "usage: sm_dick [scale 1-5] [1 for static]");
+		PrintToChat(client, "usage: !dick [scale 1-5] [1 for static]");
 		return Plugin_Handled;
 	}
 	
@@ -180,31 +285,51 @@ public Action:CommandDickSpawn(client, args)
 	//PrintToConsole(client, "modelnum %s modelprop %d num %d", modelnum, modelpropnum, num);
 
 	
-	if (gRemaining[client]>0)
+	if (gRemaining[client] > 0)
 		{
+			if(GetCmdArgs() == 0)
+			{
+				if(gRemaining[client] >= 4)
+				{
+					g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnames, 50);  //defaults to 50 health points
+					gRemaining[client]-=4;
+					PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
+					return Plugin_Handled;
+				}
+				if(gRemaining[client] < 4)
+				{
+					PrintToChat(client, "[] You don't have enough credits. Credits remaining: %d", gRemaining[client]);
+					return Plugin_Handled;
+				}
+			}
 			if(GetCmdArgs() == 1)
 			{
 				if(num == 1)
 				{
-					if(gRemaining[client] >= 1)
+					if(gRemaining[client] >= 4)
 					{
 						g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnames, 50);  //defaults to 50 health points
-						gRemaining[client]-=1;
+						gRemaining[client]-=4;
 						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
+						return Plugin_Handled;
+					}
+					if(gRemaining[client] < 4)
+					{
+						PrintToChat(client, "[] You don't have enough credits. Credits remaining: %d", gRemaining[client]);
 						return Plugin_Handled;
 					}
 				}
 				if(num == 2)
 				{   //if(StrEqual(modelnum, casenumber[1])){    //checks if the first argument is 1 to 5
-					if(gRemaining[client] >= 5)
+					if(gRemaining[client] >= 7)
 					{
 						g_propindex_d[client] = CreatePropPhysicsOverride(client, setmodelnameb, 120); 
-						gRemaining[client]-=5;
+						gRemaining[client]-=7;
 						CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
 						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
 						return Plugin_Handled;
 					}
-					if(gRemaining[client] < 5)
+					if(gRemaining[client] < 7)
 					{
 						PrintToChat(client, "[] You don't have enough credits. Credits remaining: %d", gRemaining[client]);
 						return Plugin_Handled;
@@ -238,7 +363,7 @@ public Action:CommandDickSpawn(client, args)
 						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
 						return Plugin_Handled;
 					}
-					if(gRemaining[client] < 10)
+					if(gRemaining[client] < 15)
 					{
 						PrintToChat(client, "[] You don't have enough credits. Credits remaining: %d", gRemaining[client]);
 						return Plugin_Handled;
@@ -264,31 +389,37 @@ public Action:CommandDickSpawn(client, args)
 				else
 				{
 					PrintToConsole(client, "\nUsage: sm_dick [scale 1-5] [1 for static]\n");
+					PrintToChat(client, "Usage: !dick [scale 1-5] [1 for static]");
 				}
 			}
 			if(GetCmdArgs() >= 2)
 			{
 				if(num == 1)
 				{
-					if(gRemaining[client] >= 1)
+					if(gRemaining[client] >= 4)
 					{
 						g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnames, 50); 
-						gRemaining[client]-=1;
+						gRemaining[client]-=4;
 						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
+						return Plugin_Handled;
+					}
+					if(gRemaining[client] < 4)
+					{
+						PrintToChat(client, "[] You don't have enough credits. Credits remaining: %d", gRemaining[client]);
 						return Plugin_Handled;
 					}
 				}
 				if(num == 2)
 				{
-					if(gRemaining[client] >= 5)
+					if(gRemaining[client] >= 7)
 					{
 						g_propindex_d[client] = CreatePropDynamicOverride(client, setmodelnameb, 120); 
-						gRemaining[client]-=5;
+						gRemaining[client]-=7;
 						CreateTimer(20.0, TimerKillEntity, g_propindex_d[client]);
 						PrintToChat(client, "[] You have %d credits remaining", gRemaining[client]);
 						return Plugin_Handled;
 					}
-					if(gRemaining[client] < 5)
+					if(gRemaining[client] < 7)
 					{
 						PrintToChat(client, "[] You don't have enough credits. Credits remaining: %d", gRemaining[client]);
 						return Plugin_Handled;
@@ -348,6 +479,7 @@ public Action:CommandDickSpawn(client, args)
 				else
 				{
 					PrintToConsole(client, "\nUsage: sm_dick [scale 1-5] [1 for static]\n");
+					PrintToChat(client, "Usage: !dick [scale 1-5] [1 for static]");
 				}
 			}
 		}
@@ -1247,7 +1379,12 @@ public Action:CommandStrapon(client, args)
 		new String:m_nSolidType[130];
 		int m_CollisionGroup, m_spawnflags;
 
-		GetEdictClassname(aimed, classname, 32);		
+		GetEdictClassname(aimed, classname, 32);
+		if(StrContains(classname, "player"))
+		{
+			PrintToChat(client, "Can't strapon");
+			return Plugin_Handled;
+		}
 		GetEntPropString(aimed, Prop_Data, "m_ModelName", m_ModelName, 130);
 		GetEntPropString(aimed, Prop_Data, "m_nSolidType", m_nSolidType, 130);
 		GetEntProp(aimed, Prop_Data, "m_CollisionGroup", m_CollisionGroup);
@@ -1266,7 +1403,7 @@ public Action:CommandStrapon(client, args)
 		AcceptEntityInput(aimed, "SetParentAttachment");  
 		SetVariantString("grenade2");
 		AcceptEntityInput(aimed, "SetParentAttachmentMaintainOffset");
-		/*new Float:coords[3];
+		/*new Float:angle[3];
 		coords[0] -= 60.0;
 		coords[1] -= 60.0;
 		coords[2] += 100.0;
@@ -1290,13 +1427,25 @@ public Action:CommandStrapon(client, args)
 		
 		SetVariantString("grenade2");
 		AcceptEntityInput(created, "SetParentAttachment");  
-		new Float:coords[3];
-		coords[0] += 60.0;
-		coords[1] += 60.0;
-		coords[2] += 10.0;
-		DispatchKeyValueVector(created, "Origin", coords);    //FIX testing offset coordinates, remove! -glub
 		SetVariantString("grenade2");
 		AcceptEntityInput(created, "SetParentAttachmentMaintainOffset");
+		
+		new Float:origin[3];
+		new Float:angle[3];
+		GetEntPropVector(created, Prop_Send, "m_vecOrigin", origin);
+		GetEntPropVector(created, Prop_Send, "m_angRotation", angle);
+
+		origin[0] += 0.0;
+		origin[1] += 0.0;
+		origin[2] += 0.0;
+
+		angle[0] += 0.0;
+		angle[1] += 3.0;
+		angle[2] += 0.3;
+		//DispatchKeyValueVector(created, "Origin", origin);    //FIX testing offset coordinates, remove! -glub
+		//DispatchKeyValueVector(created, "Angles", angle);
+		//DispatchSpawn(created);
+		PrintToChat(client, "origin: %f %f %f; angles: %f %f %f", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2]);
 
 		return Plugin_Handled;
 	}
@@ -1360,7 +1509,7 @@ public Action:CommandPropCreateMultiplayer(client, args)
 		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1)  // Prop_Send didn't work but this works!
 		
 		
-		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 0.5)  // doesn't do anything, need one more parameter or something!
+		SetEntPropFloat(EntIndex, Prop_Send, "m_flGravity", 0.5)  // doesn't do anything. FIXME: Changed from Prop_Data
 		
 //		DispatchKeyValue(EntIndex, "health", "100");    //not working
 //		DispatchKeyValue(EntIndex, "rendercolor", "255,255,80,80");  //no working

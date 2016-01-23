@@ -7,7 +7,7 @@
 #define PLUGIN_VERSION "0.2"
 
 #pragma semicolon 1
-#pragma newdecls required
+//#pragma newdecls required
 
 // Incremented id for observer
 int iObserverCursor;
@@ -144,13 +144,13 @@ public Action SpecPOVCommand(int client, int args)
 		//Client_SetObserverMode(client, view_as<Obs_Mode>(5), false); //OBS_MODE_NONE
 		//Client_SetObserverMode(client, view_as<Obs_Mode>(4), false); //OBS_MODE_NONE
 		
-		SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
-		SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
+		//SetEntProp(client, Prop_Send, "m_iObserverMode", 5);
+		//SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
 		SetEntProp(client, Prop_Send, "m_iObserverMode", 5); //5 works.
 
 		SetEntityMoveType(client, MOVETYPE_NONE);   // important, otherwise wasd still works: MOVETYPE_NONE
 
-	   
+	   	ClientCommand(client, "+strafe"); //TESTING: might not work. Prevents moving camera too much.
 		CreateTimer(0.1, timer_ActivateFPPOV, client);
 	}
 	else if(observer_mode == 0)
@@ -187,6 +187,7 @@ public Action SpecPOVCommand(int client, int args)
 		
 		//ClientCommand(client, "r_screenoverlay off");
 		SetEntProp(iObserver[iObserverCursor], Prop_Send, "m_iVision", 0);
+		ClientCommand(client, "-strafe");
 	}		
 	iObserverCursor++;	
 	
@@ -197,6 +198,7 @@ public Action SpecPOVCommand(int client, int args)
 public Action timer_ActivateFPPOV(Handle timer, int client)
 {
 	bFirstPersonSpec[client] = true;
+	ClientCommand(client, "spec_mode");
 	//ClientCommand(client, "r_screenoverlay effects/combine_binocoverlay.vmt");
 }
 
@@ -311,14 +313,37 @@ public void UpdateView(int caster) // only up to 5 casters
 			SetEntProp(client, Prop_Send, "m_bDucked", 0);			
 		}*/
 		
+		SetEntityMoveType(client, MOVETYPE_NONE); //this disables camera movements
 		
+		int flags = GetEntityFlags(target);
+		if(flags & FL_DUCKING)
+		{
+			SetEntityMoveType(client, MOVETYPE_OBSERVER);
+			SetEntityFlags(client, FL_DUCKING);
+			SetEntProp(client, Prop_Send, "m_bDucked", GetEntProp(target, Prop_Send, "m_bDucked"));
+			//SetEntProp(client, Prop_Data, "m_bDuckToggled", GetEntProp(target, Prop_Data, "m_bDuckToggled"));
+			SetEntProp(client, Prop_Send, "m_bDucking", GetEntProp(target, Prop_Send, "m_bDucking"));
+			//SetEntProp(client, Prop_Send, "m_bInDuckJump", GetEntProp(target, Prop_Send, "m_bInDuckJump"));
+			SetEntPropFloat(client, Prop_Send, "m_flDucktime", GetEntPropFloat(target, Prop_Send, "m_flDucktime"));
+			//SetEntPropFloat(client, Prop_Send, "m_flDuckJumpTime", GetEntPropFloat(target, Prop_Send, "m_flDuckJumpTime"));
+			//SetEntPropFloat(client, Prop_Send, "m_flJumpTime", GetEntPropFloat(target, Prop_Send, "m_flJumpTime"));
+			PrintToChatAll("Observer:  ducked %b   toggled %b ducking %b   induckjump %b ducktime %f   duckjumptime %f jumptime %f", GetEntProp(client, Prop_Send, "m_bDucked"), GetEntProp(client, Prop_Data, "m_bDuckToggled"), GetEntProp(client, Prop_Send, "m_bDucking"), GetEntProp(client, Prop_Send, "m_bInDuckJump"), GetEntPropFloat(client, Prop_Send, "m_flDucktime"), GetEntPropFloat(client, Prop_Send, "m_flDuckJumpTime"), GetEntPropFloat(client, Prop_Send, "m_flJumpTime"));
+			PrintToServer("Observer:  ducked %b   toggled %b ducking %b   induckjump %b ducktime %f   duckjumptime %f jumptime %f", GetEntProp(client, Prop_Send, "m_bDucked"), GetEntProp(client, Prop_Data, "m_bDuckToggled"), GetEntProp(client, Prop_Send, "m_bDucking"), GetEntProp(client, Prop_Send, "m_bInDuckJump"), GetEntPropFloat(client, Prop_Send, "m_flDucktime"), GetEntPropFloat(client, Prop_Send, "m_flDuckJumpTime"), GetEntPropFloat(client, Prop_Send, "m_flJumpTime"));
+			PrintToChatAll(" ");
+			PrintToServer(" ");
+			PrintToChatAll("Target:     ducked %b   toggled %b ducking %b   induckjump %b ducktime %f   duckjumptime %f jumptime %f", GetEntProp(target, Prop_Send, "m_bDucked"), GetEntProp(target, Prop_Data, "m_bDuckToggled"), GetEntProp(target, Prop_Send, "m_bDucking"), GetEntProp(target, Prop_Send, "m_bInDuckJump"), GetEntPropFloat(target, Prop_Send, "m_flDucktime"), GetEntPropFloat(target, Prop_Send, "m_flDuckJumpTime"), GetEntPropFloat(target, Prop_Send, "m_flJumpTime"));
+			PrintToServer("Target:     ducked %b   toggled %b ducking %b   induckjump %b ducktime %f   duckjumptime %f jumptime %f", GetEntProp(target, Prop_Send, "m_bDucked"), GetEntProp(target, Prop_Data, "m_bDuckToggled"), GetEntProp(target, Prop_Send, "m_bDucking"), GetEntProp(target, Prop_Send, "m_bInDuckJump"), GetEntPropFloat(target, Prop_Send, "m_flDucktime"), GetEntPropFloat(target, Prop_Send, "m_flDuckJumpTime"), GetEntPropFloat(target, Prop_Send, "m_flJumpTime"));
+			
+		}
+		
+		/*
 		SetEntProp(client, Prop_Send, "m_bDucked", GetEntProp(target, Prop_Send, "m_bDucked"));
 		SetEntProp(client, Prop_Data, "m_bDuckToggled", GetEntProp(target, Prop_Data, "m_bDuckToggled"));
 		SetEntProp(client, Prop_Send, "m_bDucking", GetEntProp(target, Prop_Send, "m_bDucking"));
 		SetEntProp(client, Prop_Send, "m_bInDuckJump", GetEntProp(target, Prop_Send, "m_bInDuckJump"));
 		SetEntPropFloat(client, Prop_Send, "m_flDucktime", GetEntPropFloat(target, Prop_Send, "m_flDucktime"));
 		SetEntPropFloat(client, Prop_Send, "m_flDuckJumpTime", GetEntPropFloat(target, Prop_Send, "m_flDuckJumpTime"));
-		SetEntPropFloat(client, Prop_Send, "m_flJumpTime", GetEntPropFloat(target, Prop_Send, "m_flJumpTime"));
+		SetEntPropFloat(client, Prop_Send, "m_flJumpTime", GetEntPropFloat(target, Prop_Send, "m_flJumpTime"));*/
 		
 		
 		
@@ -440,8 +465,4 @@ public void OnGameFrame()
 stock void GetVelocity(int client, float output[3])
 {
 	GetEntPropVector(client, Prop_Data, "m_vecVelocity", output);
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> origin/master
