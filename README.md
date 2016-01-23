@@ -1,5 +1,11 @@
 #Neotokyo server-side Sourcemod plugins
 
+**nt_jumpsounds**: adds a different jumping sound effect to each class, can enable additional custom sounds too.
+
+**nt_weapontweaks**: prevents SRS quick switch exploit, adds recoil, screen shaking and randomized tracers to some guns.
+
+**nt_specbinds**: binds number keys to 10 alive players for convenient camera switching.
+
 **nt_restartfix**: Agiel's plugin, rewritten to handle neo_restart_this 2 which resets only current round, reverting player scores as well.
 
 **nt_slowmotion**: simulates slow motion effect once last man standing dies.
