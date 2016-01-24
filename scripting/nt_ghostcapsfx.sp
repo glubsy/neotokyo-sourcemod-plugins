@@ -63,11 +63,6 @@ public Plugin myinfo =
 	url = "https://github.com/glubsy"
 };
 
-
-//
-//	TODO: add sound effect from HL2 radio chatter on capture
-//
-
 public void OnPluginStart()
 {
 	convar_ghostexplodes = CreateConVar("nt_ghostexplodes", "1", "Ghost explodes on removal", FCVAR_SPONLY, true, 0.0, true, 1.0);
