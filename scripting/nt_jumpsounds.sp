@@ -14,6 +14,7 @@
 
 int g_iJumpNum[MAXPLAYERS+1];
 bool g_bSoundLocked[MAXPLAYERS+1];
+bool g_bJumpsDisabled;
 
 Handle convar_nt_funnysounds = INVALID_HANDLE;
 Handle convar_nt_jumpsounds = INVALID_HANDLE;
@@ -36,7 +37,8 @@ char g_sStockSound[][] = {
 	"buttons/button1.wav",
 	"buttons/button15.wav", //can be played super fast over short time
 	"buttons/combine_button3.wav", //default jump sound candidate, various pitches
-	"ambient/levels/prison/radio_random11.wav"
+	"ambient/levels/prison/radio_random11.wav",
+	"weapons/physgun_off.wav"
 };
 
 public Plugin:myinfo = 
@@ -52,7 +54,8 @@ public void OnPluginStart()
 {
 	convar_nt_funnysounds = CreateConVar("sm_nt_funnyjumpsounds", "0", "Custom sound effect for jumping 0=disabled, 1-3");
 	convar_nt_jumpsounds = CreateConVar("sm_nt_jumpsounds", "1", "Enables jump sound effects");
-	OnConfigsExecuted();
+	//OnConfigsExecuted();
+	HookEvent("game_round_start", OnRoundStart);
 }
 
 public void OnConfigsExecuted()
@@ -69,6 +72,20 @@ public void OnConfigsExecuted()
 		PrecacheSound(g_sStockSound[snd], true);
 	}
 }
+
+public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
+{
+	g_bJumpsDisabled = true;
+	
+	CreateTimer(15.0, timer_clearsoundlock, _, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action timer_clearsoundlock(Handle timer)
+{
+	g_bJumpsDisabled = false;
+}
+
+
 
 /*
 public void OnGameFrame()
@@ -95,12 +112,15 @@ public void OnGameFrame()
 
 public Action OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:angles[3], &weapon)
 {
+	if(g_bJumpsDisabled)
+		return;
+
 	if(!GetConVarBool(convar_nt_jumpsounds))
 		return;
-	
+
 	if(!IsValidEntity(client) || !IsPlayerAlive(client))
 		return;
-	
+
 	if(buttons & IN_JUMP)
 	{
 		if(GetEntityMoveType(client) & MOVETYPE_LADDER)
@@ -149,7 +169,7 @@ public Action EmitBasicJumpSound(int client, int soundindex, bool classoverride)
 	{
 		if(soundindex == 2) //pururin
 		{
-			EmitSoundToAll(g_sCustomJumpSound[soundindex], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, SNDVOL_NORMAL, 100, -1, vecOrigin, vecEyeAngles);
+			EmitSoundToAll(g_sCustomJumpSound[soundindex], SOUND_FROM_WORLD, SNDCHAN_AUTO, 85, SND_NOFLAGS, SNDVOL_NORMAL, 100, -1, vecOrigin, vecEyeAngles);
 			StopSoundPerm(client, g_sCustomJumpSound[soundindex]);
 		}
 		if(soundindex == 1) //timewalk
