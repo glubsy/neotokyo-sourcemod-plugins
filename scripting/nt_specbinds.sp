@@ -1,3 +1,8 @@
+//
+//TODO: play sound for spectators when ghost is picked up
+//TODO: bind !cameraman for other spectators
+//
+
 #include <sourcemod>
 #include <sdktools>
 #include <sdkhooks>
@@ -37,6 +42,8 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_specbinds", SpecBindsCommand, "Binds key nums to spectator modes");
 	RegConsoleCmd("sm_specunbind", SpecUnbindCommand, "Restores config_backup.cfg for the client");
 	RegConsoleCmd("sm_resetbinds", ResetbindsCommand, "Restores config_backup.cfg for the client");
+	//RegConsoleCmd("sm_camerabind", CamerabindCommand "");
+	
 	
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("game_round_start", OnRoundStart);
@@ -287,7 +294,7 @@ public Action SpecClientCommand(int client, int args)
 			}*/
 			
 			if(!IsValidEntity(client))
-				return Plugin_Handled; 
+				return Plugin_Handled;
 			
 			SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
 			SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", g_iJINRAIPlayer[4]);
@@ -636,24 +643,25 @@ public Action UpdateAlivePlayersArrays(Handle timer)
 		if(GetClientTeam(i) <= 1)
 			continue;
 		
-		if(countNSF >= 5 || countJinrai >= 5)
-			continue;
-		
-		if(totalcount > 10)
+		if(totalcount >= 10)
 			break;
 
 		if(GetClientTeam(i) == 3)
 		{
 			g_iNSFPlayer[countNSF] = i;
 			
-			countNSF++;
+			if(countNSF < 5)
+				countNSF++;
+			
 			totalcount++;
 		}
 		else if(GetClientTeam(i) == 2)
 		{
 			g_iJINRAIPlayer[countJinrai] = i;
 
-			countJinrai++;
+			if(countJinrai < 5)
+				countJinrai++;
+			
 			totalcount++;
 		}
 	}
@@ -675,7 +683,7 @@ public void OnRoundStart(Handle event, const char[] name, bool Broadcast)
 			continue;
 		if(GetClientTeam(client) > 1)
 			continue;
-		CreateTimer(0.5, timer_ChangeSpecMode, client);	
+		CreateTimer(0.3, timer_ChangeSpecMode, client);	
 	}
 	
 	CreateTimer(14.0, UpdateAlivePlayersArrays); // just in case

@@ -18,7 +18,7 @@ int g_iTickCount = 95;
 Handle convar_ghostexplodes = INVALID_HANDLE;
 Handle convar_ghostexplosiondamages = INVALID_HANDLE;
 Handle convar_roundtimelimit = INVALID_HANDLE;
-Handle GhostTimer[MAX_SOUND_OCCURENCES] = INVALID_HANDLE;
+Handle GhostTimer[MAX_SOUND_OCCURENCES] = { INVALID_HANDLE, ...};
 
 char g_sRadioChatterSoundEffect[][] =
 {
@@ -102,51 +102,53 @@ public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 		if(GhostTimer[i] != INVALID_HANDLE)
 		{
 			KillTimer(GhostTimer[i]);
-			GhostTimer[i] = INVALID_HANDLE;
+			GhostTimer[i] = INVALID_HANDLE; 
 		}
 	}
 	
-	GhostTimer[0] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 3.8, timer_SoundEffect, 0, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[1] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 33.0, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //30 sec before timeout
-	GhostTimer[2] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 26.0, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //sparks
-	GhostTimer[3] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 21.0, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[4] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 16.0, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[5] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 12.5, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[6] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 11.0, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[7] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 10.8, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[8] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 10.0, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[9] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 4.8, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //sparks inbetween ticks
-	GhostTimer[10] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 5.3, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[11] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 6.5, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[12] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 8.0, timer_SoundEffect, 3, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //beeps countdown
-	GhostTimer[13] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 7.0, timer_SoundEffect, 3, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[14] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 6.0, timer_SoundEffect, 3, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[15] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 5.0, timer_SoundEffect, 3, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[16] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 4.0, timer_SoundEffect, 3, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[17] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 3.0, timer_SoundEffect, 3, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[18] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 2.0, timer_SoundEffect, 3, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[19] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 1.0, timer_SoundEffect, 3, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //end beeps countdown
-	GhostTimer[20] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 0.0, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //crazy sparks
-	GhostTimer[21] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 0.3, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[22] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 0.4, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[23] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 0.9, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[24] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 1.7, timer_SoundEffect, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[25] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 2.0, timer_SoundEffect, 2, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //crazy ticks
-	GhostTimer[26] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 2.1, timer_SoundEffect, 2, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[27] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 2.2, timer_SoundEffect, 2, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[28] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 2.3, timer_SoundEffect, 2, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[29] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 2.4, timer_SoundEffect, 2, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[0] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 3.8, timer_SoundEffect0, 0, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[1] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 33.0, timer_SoundEffect1, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //30 sec before timeout
+	GhostTimer[2] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 26.0, timer_SoundEffect1, 2, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //sparks
+	GhostTimer[3] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 21.0, timer_SoundEffect1, 3, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[4] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 16.0, timer_SoundEffect1, 4, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[5] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 12.5, timer_SoundEffect1, 5, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[6] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 11.0, timer_SoundEffect1, 6, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[7] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 10.8, timer_SoundEffect1, 7, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[8] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 10.0, timer_SoundEffect1, 8, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[9] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 4.8, timer_SoundEffect1, 9, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //sparks inbetween ticks
+	GhostTimer[10] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 5.3, timer_SoundEffect1, 10, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[11] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 6.5, timer_SoundEffect1, 11, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[12] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 8.0, timer_SoundEffect3, 12, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //beeps countdown
+	GhostTimer[13] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 7.0, timer_SoundEffect3, 13, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[14] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 6.0, timer_SoundEffect3, 14, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[15] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 5.0, timer_SoundEffect3, 15, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[16] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 4.0, timer_SoundEffect3, 16, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[17] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 3.0, timer_SoundEffect3, 17, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[18] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 2.0, timer_SoundEffect3, 18, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[19] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 1.0, timer_SoundEffect3, 19, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //end beeps countdown
+	GhostTimer[20] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 0.0, timer_SoundEffect1, 20, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //crazy sparks
+	GhostTimer[21] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 0.3, timer_SoundEffect1, 21, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[22] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 0.4, timer_SoundEffect1, 22, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[23] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 0.9, timer_SoundEffect1, 23, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[24] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 1.7, timer_SoundEffect1, 24, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[25] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 2.0, timer_SoundEffect2, 25, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //crazy ticks
+	GhostTimer[26] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 2.1, timer_SoundEffect2, 26, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[27] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 2.2, timer_SoundEffect2, 27, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[28] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 2.3, timer_SoundEffect2, 28, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[29] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 2.4, timer_SoundEffect2, 29, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 }
 
 
-public Action timer_SoundEffect(Handle timer, int soundtype)
+public Action timer_SoundEffect0(Handle timer, int timernumber)
 {
+	GhostTimer[timernumber] = INVALID_HANDLE;
+	
 	if(g_bGhostIsCaptured)
-		return Plugin_Handled;
+		return Plugin_Stop;
 	
 	if(!IsValidEntity(ghost))
 	{
-		return Plugin_Handled;
+		return Plugin_Stop;
 	}
 	
 	float vecOrigin[3];
@@ -159,29 +161,95 @@ public Action timer_SoundEffect(Handle timer, int soundtype)
 	
 	vecOrigin[2] += 10;
 
-	switch(soundtype)
+	g_bEndOfRound = true; //it's ok to hook entity destruction for a bit	
+	EmitSoundToAll(g_sSoundEffect[0], SOUND_FROM_WORLD, SNDCHAN_AUTO, 100, SND_NOFLAGS, SNDVOL_NORMAL, 100, -1, vecOrigin); //charging effect
+
+	return Plugin_Stop;
+}
+
+
+public Action timer_SoundEffect1(Handle timer, int timernumber)
+{
+	GhostTimer[timernumber] = INVALID_HANDLE;
+	
+	if(g_bGhostIsCaptured)
+		return Plugin_Stop;
+	
+	if(!IsValidEntity(ghost))
 	{
-		case 0:
-		{	
-			g_bEndOfRound = true; //it's ok to hook entity destruction for a bit	
-			EmitSoundToAll(g_sSoundEffect[soundtype], SOUND_FROM_WORLD, SNDCHAN_AUTO, 100, SND_NOFLAGS, SNDVOL_NORMAL, 100, -1, vecOrigin); //charging effect
-		}
-		case 1:
-		{
-			EmitSoundToAll(g_sSoundEffect[GetRandomInt(3,5)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(90, 110), -1, vecOrigin); //sparks
-		}
-		case 2:
-		{
-			EmitSoundToAll(g_sSoundEffect[6], SOUND_FROM_WORLD, SNDCHAN_AUTO, 120, SND_NOFLAGS, SNDVOL_NORMAL, g_iTickCount, -1, vecOrigin); //ticks
-			g_iTickCount += 5;
-		}
-		case 3:
-		{
-			EmitSoundToAll(g_sSoundEffect[10], SOUND_FROM_WORLD, SNDCHAN_AUTO, 55, SND_NOFLAGS, SNDVOL_NORMAL, g_iTickCount, -1, vecOrigin); //beeps
-			g_iTickCount += 5;
-		}
+		return Plugin_Stop;
 	}
-	return Plugin_Handled;
+	
+	float vecOrigin[3];
+	int carrier = GetEntPropEnt(ghost, Prop_Data, "m_hOwnerEntity");
+
+	if(MaxClients > carrier > 0)
+		GetEntPropVector(carrier, Prop_Send, "m_vecOrigin", vecOrigin);
+	else
+		GetEntPropVector(ghost, Prop_Send, "m_vecOrigin", vecOrigin);
+	
+	vecOrigin[2] += 10;
+
+	EmitSoundToAll(g_sSoundEffect[GetRandomInt(3,5)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(90, 110), -1, vecOrigin); //sparks
+
+	return Plugin_Stop;
+}
+
+
+public Action timer_SoundEffect2(Handle timer, int timernumber)
+{
+	GhostTimer[timernumber] = INVALID_HANDLE;
+	
+	if(g_bGhostIsCaptured)
+		return Plugin_Stop;
+	
+	if(!IsValidEntity(ghost))
+	{
+		return Plugin_Stop;
+	}
+	
+	float vecOrigin[3];
+	int carrier = GetEntPropEnt(ghost, Prop_Data, "m_hOwnerEntity");
+
+	if(MaxClients > carrier > 0)
+		GetEntPropVector(carrier, Prop_Send, "m_vecOrigin", vecOrigin);
+	else
+		GetEntPropVector(ghost, Prop_Send, "m_vecOrigin", vecOrigin);
+	
+	vecOrigin[2] += 10;
+
+	EmitSoundToAll(g_sSoundEffect[6], SOUND_FROM_WORLD, SNDCHAN_AUTO, 120, SND_NOFLAGS, SNDVOL_NORMAL, g_iTickCount, -1, vecOrigin); //ticks
+	g_iTickCount += 5;
+
+	return Plugin_Stop;
+}
+
+public Action timer_SoundEffect3(Handle timer, int timernumber)
+{
+	GhostTimer[timernumber] = INVALID_HANDLE;
+	
+	if(g_bGhostIsCaptured)
+		return Plugin_Stop;
+	
+	if(!IsValidEntity(ghost))
+	{
+		return Plugin_Stop;
+	}
+	
+	float vecOrigin[3];
+	int carrier = GetEntPropEnt(ghost, Prop_Data, "m_hOwnerEntity");
+
+	if(MaxClients > carrier > 0)
+		GetEntPropVector(carrier, Prop_Send, "m_vecOrigin", vecOrigin);
+	else
+		GetEntPropVector(ghost, Prop_Send, "m_vecOrigin", vecOrigin);
+	
+	vecOrigin[2] += 10;
+
+	EmitSoundToAll(g_sSoundEffect[10], SOUND_FROM_WORLD, SNDCHAN_AUTO, 55, SND_NOFLAGS, SNDVOL_NORMAL, g_iTickCount, -1, vecOrigin); //beeps
+	g_iTickCount += 5;
+
+	return Plugin_Stop;
 }
 
 public void OnGhostSpawn(int entity)
@@ -331,6 +399,7 @@ public void OnMapEnd()
 {
 	for(int i = 0; i < MAX_SOUND_OCCURENCES; i++)
 	{
-		GhostTimer[i] = INVALID_HANDLE;
+		if(GhostTimer[i] != INVALID_HANDLE)
+			GhostTimer[i] = INVALID_HANDLE;
 	}
 }

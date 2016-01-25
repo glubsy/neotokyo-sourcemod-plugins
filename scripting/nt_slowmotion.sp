@@ -1,9 +1,10 @@
 #include <sourcemod>
 #include <sdktools>
 #include <neotokyo>
-#define PLUGIN_VERSION "0.3"
+#define PLUGIN_VERSION "0.4"
 #define MESSAGE_LASTMAN "You are the last man standing! Time to !seppuku"
 #define MESSAGE_DUEL 	"You are dueling against enemy last player, don't drag this out!"
+#define DEBUG 0
 
 bool g_MessageShownLast[MAXPLAYERS+1];
 Handle hPlayerCounter;
@@ -11,9 +12,12 @@ Handle hPlayerCounter;
 int lastJin, lastNsf;
 bool g_bSoundFilesExist[2], g_bLastManStanding[MAXPLAYERS+1];
 Handle convar_slowmotion_enabled = INVALID_HANDLE;
+Handle convar_slowmotion_clientside = INVALID_HANDLE;
 Handle g_TimerSlowMotion = INVALID_HANDLE;
 Handle hGravity, hPhysTimeScale;
 Handle hCheatCvar = INVALID_HANDLE;
+Handle hHostTimeScale = INVALID_HANDLE;
+
 
 new const String:g_SloMoSound[][] = { 
 	"custom/slowmoin.mp3",
@@ -32,7 +36,8 @@ public Plugin myinfo =
 
 public OnPluginStart()
 {
-	convar_slowmotion_enabled = CreateConVar("sm_slowmotion_enabled", "1", "Enable Slow-Motion on last man standing death", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
+	convar_slowmotion_enabled = CreateConVar("sm_slowmotion_enabled", "1", "Enable Slow-Motion on last man standing death", FCVAR_PLUGIN|FCVAR_SPONLY);
+	convar_slowmotion_clientside = CreateConVar("sm_slowmotion_clientsideonly", "0", "cl_phys_timescale is changed clientside (not recommended)", FCVAR_PLUGIN|FCVAR_SPONLY);
 	HookEvent("game_round_start", Event_RoundStart, EventHookMode_Post);
 	HookEvent("player_death", Event_PlayerDeath, EventHookMode_Pre);
 	HookEvent("player_disconnect", Event_PlayerDisconnect, EventHookMode_Post);
@@ -40,9 +45,12 @@ public OnPluginStart()
 	hGravity = FindConVar("sv_gravity");
 	hPhysTimeScale = FindConVar("phys_timescale");
 	hCheatCvar = FindConVar("sv_cheats");
+	hHostTimeScale = FindConVar("host_timescale");
+	
+	//OnConfigsExecuted();
 }
 
-public OnConfigsExecuted()
+public void OnConfigsExecuted()
 {
 	if(GetConVarBool(convar_slowmotion_enabled))
 	{
@@ -62,34 +70,48 @@ public OnConfigsExecuted()
 	}
 }
 
-public Action:Event_RoundStart(Handle:event, const String:name[], bool:dontBroadcast)
+public Action Event_RoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
 	if(hPlayerCounter != INVALID_HANDLE)
+	{
 		KillTimer(hPlayerCounter);
+		hPlayerCounter = INVALID_HANDLE;
+	}
 
-	hPlayerCounter = INVALID_HANDLE;
 	
 	lastJin = 0;
 	lastNsf = 0;
 	
 	if(GetConVarBool(convar_slowmotion_enabled))
 	{
-		//just in case something went wrong
-		//ServerCommand("host_timescale 1.0");
-		SetConVarFloat(hPhysTimeScale, 1.0);
+		#if DEBUG > 0
+		PrintToChatAll("Resetting cvars");
+		#endif 
 		
 		if(GetConVarBool(hCheatCvar))
-		{
-			for(int i = 1; i < MaxClients; i++)
+		{			
+			if(GetConVarBool(convar_slowmotion_clientside))
 			{
-				if(!IsClientConnected(i) || !IsClientInGame(i) || !IsValidEntity(i))
-					continue;
-				ClientCommand(i, "cl_phys_timescale 1.0");
+				for(int i = 1; i < MaxClients; i++)
+				{
+					if(!IsClientConnected(i) || !IsClientInGame(i) || !IsValidEntity(i))
+						continue;
+					ClientCommand(i, "cl_phys_timescale 1.0");
+				}
+				
+				SetConVarFloat(hPhysTimeScale, 1.0);
+				
+				SetConVarInt(hGravity, 800);
+			}
+			else
+			{
+				//SetConVarFloat(hHostTimeScale, 1.0);
+				ChangeHostTimeScale(1.0);
 			}
 			ActivateCheats(0);
 		}
 		
-		SetConVarInt(hGravity, 800);	
+
 		
 		for (int i; i <= MaxClients; i++)
 		{
@@ -104,86 +126,117 @@ public Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 		hPlayerCounter = CreateTimer(0.1, CountPlayers);
 	
 	if(GetConVarBool(convar_slowmotion_enabled))
-	{
+	{		
 		int client = GetClientOfUserId(GetEventInt(event, "userid"));
 		
 		if(client == lastJin && g_bLastManStanding[client] || client == lastNsf && g_bLastManStanding[client])
 		{
-			ActivateCheats(1);
+			#if DEBUG > 0
+			PrintToChatAll("Starting slowmotion");
+			#endif 
 			
-			//ServerCommand("host_timescale 0.6");
-			SetConVarFloat(hPhysTimeScale, 0.2);
+			ActivateCheats(1);
 			
 			if(GetConVarBool(hCheatCvar))
 			{
-				for(int i = 1; i < MaxClients; i++)
+				if(GetConVarBool(convar_slowmotion_clientside))
 				{
-					if(!IsClientConnected(i) || !IsClientInGame(i) || !IsValidEntity(i))
-						continue;
-					ClientCommand(i, "cl_phys_timescale 0.2"); //FIXME: might need a very short timer for this to work?
+					for(int i = 1; i < MaxClients; i++)
+					{
+						if(!IsClientConnected(i) || !IsClientInGame(i) || !IsValidEntity(i))
+							continue;
+						ClientCommand(i, "cl_phys_timescale 0.2"); //FIXME: might need a very short timer for this to work?
+					}
+					
+					SetConVarFloat(hPhysTimeScale, 0.2);
+					
+					SetConVarInt(hGravity, 220);
+				}
+				else
+				{
+					//SetConVarFloat(hHostTimeScale, 0.6);
+					ChangeHostTimeScale(0.2);
 				}
 			}
-			
-			SetConVarInt(hGravity, 220);
 			
 			if(g_bSoundFilesExist[0])
 			{
 				EmitSoundToAll(g_SloMoSound[0], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 160, SND_NOFLAGS, 0.6);
 			}
-			g_TimerSlowMotion = CreateTimer(4.0, timer_DefaultTimeScale, _, TIMER_FLAG_NO_MAPCHANGE);
+			if(GetConVarBool(convar_slowmotion_clientside))
+				g_TimerSlowMotion = CreateTimer(4.0, timer_DefaultTimeScale);
+			else
+				g_TimerSlowMotion = CreateTimer(0.5, timer_DefaultTimeScale);
 		}
 	}
 }
 
-public Action timer_SlowMoScalePost(Handle timer)
-{
-	//ServerCommand("host_timescale 0.2");
-	ServerCommand("phys_timescale 0.2");
-	ServerCommand("sm_exec @all cl_phys_timescale 0.2");
-	g_TimerSlowMotion = CreateTimer(0.6, timer_StopSlowMo, _, TIMER_FLAG_NO_MAPCHANGE);
-}
-
-public Action timer_StopSlowMo(Handle timer)
-{
-	//progressively scaling back up
-	//ServerCommand("host_timescale 0.6");
-	ServerCommand("phys_timescale 0.2");
-	ServerCommand("sm_exec @all cl_phys_timescale 0.2");
-	g_TimerSlowMotion = CreateTimer(0.3, timer_DefaultTimeScale, _, TIMER_FLAG_NO_MAPCHANGE);
-}
-
 public Action timer_DefaultTimeScale(Handle timer)
 {
+	g_TimerSlowMotion = INVALID_HANDLE;
+	
 	if(g_bSoundFilesExist[1])
 	{
 		EmitSoundToAll(g_SloMoSound[1], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 160, SND_NOFLAGS, 0.6);
 	}
 	
-	//ServerCommand("host_timescale 1.0");
-	SetConVarFloat(hPhysTimeScale, 1.0);
 	if(GetConVarBool(hCheatCvar))
 	{
-		for(int i = 1; i < MaxClients; i++)
+		if(GetConVarBool(convar_slowmotion_clientside))
 		{
-			if(!IsClientConnected(i) || !IsClientInGame(i) || !IsValidEntity(i))
-				continue;
-			ClientCommand(i, "cl_phys_timescale 1.0");
+			for(int i = 1; i < MaxClients; i++)
+			{
+				if(!IsClientConnected(i) || !IsClientInGame(i) || !IsValidEntity(i))
+					continue;
+				ClientCommand(i, "cl_phys_timescale 1.0");
+			}
+			
+			SetConVarFloat(hPhysTimeScale, 1.0);
+			
+			SetConVarInt(hGravity, 800);
+		}
+		else
+		{
+			//SetConVarFloat(hHostTimeScale, 1.0);
+			ChangeHostTimeScale(1.0);
 		}
 	}
 	
-	CreateTimer(1.5, timer_DeactivateCheats);
-	
-	SetConVarInt(hGravity, 800);
-	
+	CreateTimer(1.0, timer_DeactivateCheats);	
 }
 
 public Action timer_DeactivateCheats(Handle timer)
 {
 	ActivateCheats(0);
+	return Plugin_Handled;
+}
+
+stock ChangeHostTimeScale(float value)
+{
+	if( hHostTimeScale == INVALID_HANDLE )
+		return;
+	
+	char val[10];
+	FloatToString(value, val, 10);
+	new flags = GetConVarFlags(hHostTimeScale);
+	SetConVarFlags(hHostTimeScale, flags & ~FCVAR_NOTIFY);
+	SetConVarFloat(hHostTimeScale, value);
+	SetConVarFlags(hHostTimeScale, flags);
+	
+	for(int i = 1; i < MaxClients; i++)
+	{
+		if(!IsClientConnected(i) || !IsClientInGame(i) || IsFakeClient(i))
+			continue;
+		SendConVarValue(i, hHostTimeScale, val);
+	}
+	#if DEBUG > 0
+	PrintToChatAll("timescale %f", GetConVarFloat(hHostTimeScale));
+	PrintToServer("timescale %f", GetConVarFloat(hHostTimeScale));
+	#endif
 }
 
 
-public ActivateCheats(int value)
+stock ActivateCheats(int value)
 {
 	if( hCheatCvar == INVALID_HANDLE )
 		return;
