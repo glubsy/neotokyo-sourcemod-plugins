@@ -90,6 +90,13 @@ public void OnClientPostAdminCheck(int client)
 public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClients, float delay)
 {
 	int weapon = TE_ReadNum("m_iWeaponID");
+
+	#if DEBUG > 0
+	int clientnum = TE_ReadNum("m_iPlayer") + 1;
+	PrintToChatAll("Latency both: %f", GetClientAvgLatency(clientnum, NetFlow_Both));
+	PrintToChatAll("Latency out: %f", GetClientAvgLatency(clientnum, NetFlow_Outgoing));
+	PrintToChatAll("Latency in: %f", GetClientAvgLatency(clientnum, NetFlow_Incoming));
+	#endif 
 	
 	if(weapon == 28) //28 is weapon_SRS
 	{
@@ -105,6 +112,7 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 		if(GetConVarBool(convar_shake))
 		{
 			ShakeScreen(client, 8.0, 2.0, 1.0);
+			
 			float angles[3];
 			GetClientEyeAngles(client, angles);
 			angles[0] -= 1.3;
@@ -118,6 +126,7 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 		if(weapon == 8) //8 is weapon_zr68l
 		{
 			int client = TE_ReadNum("m_iPlayer") + 1;
+			
 			randomroll = GetRandomInt(0, 100);
 			if(randomroll <= 62)
 				randombool = 0;
@@ -125,21 +134,29 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 				randombool = 1;
 			
 			TE_WriteNum("m_bTracer", randombool);
+			
 			if(GetConVarBool(convar_shake))
 				ShakeScreen(client, 2.5, 1.2, 0.7);		
+			
 			return Plugin_Continue;
 		}
 
 		if(weapon == 25) //25 is weapon_aa13
 		{
 			int client = TE_ReadNum("m_iPlayer") + 1;
+			
 			TE_WriteNum("m_bTracer", 1);
+			
 			if(GetConVarBool(convar_shake))
 				ShakeScreen(client, 8.0, 4.5, 0.7);
-			float angles[3];
-			GetClientEyeAngles(client, angles);
-			angles[0] -= 2.5;
-			TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+			
+			if(GetClientAvgLatency(client, NetFlow_Both) <= 0.22)
+			{
+				float angles[3];
+				GetClientEyeAngles(client, angles);
+				angles[0] -= 1.5;
+				TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+			}
 			
 			return Plugin_Continue;
 		}
@@ -147,11 +164,16 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 		if(weapon == 2) //2 is weapon_supa7
 		{
 			int client = TE_ReadNum("m_iPlayer") + 1;
+			
 			TE_WriteNum("m_bTracer", 1);
-			float angles[3];
-			GetClientEyeAngles(client, angles);
-			angles[0] -= 1.5;
-			TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+			
+			if(GetClientAvgLatency(client, NetFlow_Both) <= 0.22)
+			{
+				float angles[3];
+				GetClientEyeAngles(client, angles);
+				angles[0] -= 1.5;
+				TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+			}
 			
 			return Plugin_Continue;
 		}
@@ -167,10 +189,13 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 				randombool = 1;
 			TE_WriteNum("m_bTracer", randombool);
 			
-			float angles[3];
-			GetClientEyeAngles(client, angles);
-			angles[0] -= 0.9;
-			TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+			if(GetClientAvgLatency(client, NetFlow_Both) <= 0.22)
+			{
+				float angles[3];
+				GetClientEyeAngles(client, angles);
+				angles[0] -= 0.9;
+				TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+			}
 			
 			return Plugin_Continue;
 		}
@@ -178,10 +203,14 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 		if(weapon == 29) //29 is weapon_m41s
 		{
 			int client = TE_ReadNum("m_iPlayer") + 1;
-			float angles[3];
-			GetClientEyeAngles(client, angles);
-			angles[0] -= 0.8;
-			TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+			
+			if(GetClientAvgLatency(client, NetFlow_Both) <= 0.22)
+			{
+				float angles[3];
+				GetClientEyeAngles(client, angles);
+				angles[0] -= 0.8;
+				TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
+			}
 			
 			return Plugin_Continue;
 		}
@@ -343,7 +372,7 @@ public void OnPlayerDisconnect(Handle event, const char[] name, bool dontBroadca
 
 public void ShakeScreen(int client, float amplitude, float frequency, float duration)
 {
-	#if DEBUG > 0
+	#if DEBUG > 1
 	PrintToChat(client, "SHAKIN' BOOTY");
 	#endif 
 	
