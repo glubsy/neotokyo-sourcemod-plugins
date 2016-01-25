@@ -6,9 +6,7 @@
 #define DEBUG 0
 #define MAX_SOUND_OCCURENCES 30
 
-#define PLUGIN_VERSION	"0.1"
-
-//requires nt_ghostcap and nt_doublecap plugins!
+#define PLUGIN_VERSION	"0.2"
 
 int ghost;
 bool g_bGhostIsCaptured;
@@ -19,6 +17,8 @@ Handle convar_ghostexplodes = INVALID_HANDLE;
 Handle convar_ghostexplosiondamages = INVALID_HANDLE;
 Handle convar_roundtimelimit = INVALID_HANDLE;
 Handle GhostTimer[MAX_SOUND_OCCURENCES] = { INVALID_HANDLE, ...};
+Handle convar_nt_doublecap_version = INVALID_HANDLE;
+Handle convar_nt_ghostcap_version = INVALID_HANDLE;
 
 char g_sRadioChatterSoundEffect[][] =
 {
@@ -57,7 +57,7 @@ char g_sSoundEffect[][] =
 public Plugin myinfo =
 {
 	name = "NEOTOKYO° Ghost cap special effect",
-	author = "soft as HELL",
+	author = "glub",
 	description = "SFX on ghost capture event",
 	version = PLUGIN_VERSION,
 	url = "https://github.com/glubsy"
@@ -72,6 +72,18 @@ public void OnPluginStart()
 	HookEvent("game_round_start", OnRoundStart); //needs start in case we foce restart
 	
 	convar_roundtimelimit = FindConVar("neo_round_timelimit");
+	
+	convar_nt_doublecap_version = FindConVar("nt_doublecap_version");
+	convar_nt_ghostcap_version = FindConVar("sm_ntghostcap_version");
+	
+	if(convar_nt_ghostcap_version == INVALID_HANDLE)
+		ThrowError("Couldn't find nt_ghostcap plugin! Aborting.");
+	
+	if(convar_nt_doublecap_version == INVALID_HANDLE)
+		ThrowError("Couldn't find nt_doublecap plugin! Aborting.");
+	
+	if(GetConVarFloat(convar_nt_doublecap_version) < 0.42)
+		ThrowError("nt_doublecap plugin is outdated (version is %f and should be at least 0.42)! Aborting.", GetConVarFloat(convar_nt_doublecap_version));
 }
 
 public void OnConfigsExecuted()
@@ -84,7 +96,6 @@ public void OnConfigsExecuted()
 	{
 		PrecacheSound(g_sSoundEffect[snd], true);
 	}
-	
 }
 
 
