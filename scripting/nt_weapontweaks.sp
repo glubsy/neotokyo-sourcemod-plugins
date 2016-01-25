@@ -91,13 +91,6 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 {
 	int weapon = TE_ReadNum("m_iWeaponID");
 
-	#if DEBUG > 0
-	int clientnum = TE_ReadNum("m_iPlayer") + 1;
-	PrintToChatAll("Latency both: %f", GetClientAvgLatency(clientnum, NetFlow_Both));
-	PrintToChatAll("Latency out: %f", GetClientAvgLatency(clientnum, NetFlow_Outgoing));
-	PrintToChatAll("Latency in: %f", GetClientAvgLatency(clientnum, NetFlow_Incoming));
-	#endif 
-	
 	if(weapon == 28) //28 is weapon_SRS
 	{
 		int client = TE_ReadNum("m_iPlayer") + 1; //is shifted by 1 for some reason
@@ -115,10 +108,10 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 			
 			float angles[3];
 			GetClientEyeAngles(client, angles);
-			angles[0] -= 1.3;
+			angles[0] -= 1.2;
 			TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
 		}
-		return Plugin_Continue; // don't block it
+		return Plugin_Continue; // don't block it, otherwise nothing comes out!
 	}
 	
 	if(GetConVarBool(convar_weapontweaks))
@@ -148,76 +141,57 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 			TE_WriteNum("m_bTracer", 1);
 			
 			if(GetConVarBool(convar_shake))
-				ShakeScreen(client, 8.0, 4.5, 0.7);
-			
-			if(GetClientAvgLatency(client, NetFlow_Both) <= 0.22)
-			{
-				float angles[3];
-				GetClientEyeAngles(client, angles);
-				angles[0] -= 1.5;
-				TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
-			}
+				ShakeScreen(client, 7.0, 3.0, 0.7);
 			
 			return Plugin_Continue;
 		}
 		
 		if(weapon == 2) //2 is weapon_supa7
 		{
-			int client = TE_ReadNum("m_iPlayer") + 1;
-			
 			TE_WriteNum("m_bTracer", 1);
-			
-			if(GetClientAvgLatency(client, NetFlow_Both) <= 0.22)
-			{
-				float angles[3];
-				GetClientEyeAngles(client, angles);
-				angles[0] -= 1.5;
-				TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
-			}
-			
+
 			return Plugin_Continue;
 		}
 		
 		if(weapon == 20) //20 is weapon_m41
 		{
-			int client = TE_ReadNum("m_iPlayer") + 1;
-			
 			randomroll = GetRandomInt(0, 100);
-			if(randomroll <= 80)
+			if(randomroll <= 60)
 				randombool = 0;
 			else 
 				randombool = 1;
 			TE_WriteNum("m_bTracer", randombool);
-			
-			if(GetClientAvgLatency(client, NetFlow_Both) <= 0.22)
-			{
-				float angles[3];
-				GetClientEyeAngles(client, angles);
-				angles[0] -= 0.9;
-				TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
-			}
 			
 			return Plugin_Continue;
 		}
 		
 		if(weapon == 29) //29 is weapon_m41s
 		{
-			int client = TE_ReadNum("m_iPlayer") + 1;
+			randomroll = GetRandomInt(0, 100);
+			if(randomroll <= 93)
+				randombool = 0;
+			else 
+				randombool = 1;
+			TE_WriteNum("m_bTracer", randombool);
 			
-			if(GetClientAvgLatency(client, NetFlow_Both) <= 0.22)
-			{
-				float angles[3];
-				GetClientEyeAngles(client, angles);
-				angles[0] -= 0.8;
-				TeleportEntity(client, NULL_VECTOR, angles, NULL_VECTOR);
-			}
+			return Plugin_Continue;
+		}
+		
+		if(weapon == 27) //27 is mx_silenced
+		{
+			randomroll = GetRandomInt(0, 100);
+			if(randomroll <= 95)
+				randombool = 0;
+			else 
+				randombool = 1;
+			TE_WriteNum("m_bTracer", randombool);
 			
 			return Plugin_Continue;
 		}
 	}
 	
 	#if DEBUG > 0
-	//Unchanged wpn values: 27 mx_silenced, 17 jittescoped, 16 kitte, 11 srm, 12 srm_s, 26 knife, 5 tachi, 10 milso, 24 kyla
+	//Unchanged wpn values: 17 jittescoped, 16 jitte, 11 srm, 12 srm_s, 26 knife, 5 tachi, 10 milso, 24 kyla
 	else
 	{
 		int client = TE_ReadNum("m_iPlayer") + 1;
