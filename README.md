@@ -1,6 +1,6 @@
 #Neotokyo server-side Sourcemod plugins
 
-**nt_ghostcapsfx**: special effects on ghost cap or end of round (ghost explodes, can also damage player) and various added sound effects.
+**nt_ghostcapsfx**: special effects on ghost cap or end of round (ghost explodes, can also damage player) and various added sound effects (requires nt_ghostcap and nt_doublecap 0.42 plugins).
 
 **nt_jumpsounds**: adds a different jumping sound effect to each class, can enable additional custom sounds too.
 
