@@ -12,7 +12,7 @@ public Plugin:myinfo =
 	name = "NEOTOKYO° Vision modes for spectators",
 	author = "glub, soft as HELL",
 	description = "Thermal vision and night vision for spectators",
-	version = "0.1",
+	version = "0.10",
 	url = "https://github.com/glubsy"
 }
 
@@ -24,7 +24,7 @@ public void OnPluginStart()
 
 public Action OnPlayerRunCmd(int client, int &buttons)
 {	
-	if(GetClientTeam(client) != TEAM_SPECTATOR || IsPlayerAlive(client))
+	if(IsPlayerAlive(client))
 		return;
 
 	if((buttons & IN_VISION) == IN_VISION)
