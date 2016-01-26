@@ -5,18 +5,25 @@
 #pragma newdecls required
 #define DEBUG 0
 #define MAX_SOUND_OCCURENCES 30
+#define MAX_ANNOUNCER_OCCURENCES 6
+#define MAX_FUZZ_OCCURENCES 3
 
-#define PLUGIN_VERSION	"0.21"
+#define PLUGIN_VERSION	"0.22"
 
-int ghost;
+int ghost, ghostCarrier, ghostCarrierTeam;
 bool g_bGhostIsCaptured;
 bool g_bEndOfRound;
 int g_iTickCount = 95;
+bool g_bGhostIsHeld;
+float g_fFuzzRepeatDelay = 0.0;
 
 Handle convar_ghostexplodes = INVALID_HANDLE;
 Handle convar_ghostexplosiondamages = INVALID_HANDLE;
 Handle convar_roundtimelimit = INVALID_HANDLE;
 Handle GhostTimer[MAX_SOUND_OCCURENCES] = { INVALID_HANDLE, ...};
+Handle AnnouncerTimer[MAX_ANNOUNCER_OCCURENCES] = { INVALID_HANDLE, ...};
+Handle FuzzTimer[MAX_FUZZ_OCCURENCES] = { INVALID_HANDLE, ...};
+Handle TimerStarter[2] = { INVALID_HANDLE, ... };
 Handle convar_nt_doublecap_version = INVALID_HANDLE;
 Handle convar_nt_ghostcap_version = INVALID_HANDLE;
 
@@ -50,7 +57,11 @@ char g_sSoundEffect[][] =
 	"weapons/explode3.wav",
 	"weapons/explode4.wav",
 	"weapons/explode5.wav",
-	"buttons/button17.wav"
+	"buttons/button17.wav",
+	"HL1/fvox/fuzz.wav",
+	"HL1/fvox/warning.wav",
+	"HL1/fvox/targetting_system.wav",
+	"HL1/fvox/acquired.wav"
 };
 
 
@@ -77,13 +88,16 @@ public void OnPluginStart()
 	convar_nt_ghostcap_version = FindConVar("sm_ntghostcap_version");
 	
 	if(convar_nt_ghostcap_version == INVALID_HANDLE)
-		ThrowError("Couldn't find nt_ghostcap plugin! Aborting.");
+		ThrowError("[nt_ghostcapsfx] Couldn't find nt_ghostcap plugin. Wrong version? Aborting.");
+	
+	if(GetConVarFloat(convar_nt_ghostcap_version) < 1.6)
+		ThrowError("[nt_ghostcapsfx] nt_ghostcap plugin is outdated (version is %f and should be at least 1.6)! Aborting.", GetConVarFloat(convar_nt_ghostcap_version));
 	
 	if(convar_nt_doublecap_version == INVALID_HANDLE)
-		ThrowError("Couldn't find nt_doublecap plugin! Aborting.");
+		ThrowError("[nt_ghostcapsfx] Couldn't find nt_doublecap plugin. Wrong version? Aborting.");
 	
-	if(GetConVarFloat(convar_nt_doublecap_version) < 0.42)
-		ThrowError("nt_doublecap plugin is outdated (version is %f and should be at least 0.42)! Aborting.", GetConVarFloat(convar_nt_doublecap_version));
+	if(GetConVarFloat(convar_nt_doublecap_version) < 0.43)
+		ThrowError("[nt_ghostcapsfx] nt_doublecap plugin is outdated (version is %f and should be at least 0.43)! Aborting.", GetConVarFloat(convar_nt_doublecap_version));
 }
 
 public void OnConfigsExecuted()
@@ -101,6 +115,9 @@ public void OnConfigsExecuted()
 
 public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
+	g_bGhostIsHeld = false;
+	g_fFuzzRepeatDelay = 0.0;
+	
 	if(!GetConVarBool(convar_ghostexplodes))
 		return; 
 
@@ -267,11 +284,13 @@ public void OnGhostSpawn(int entity)
 {
 	ghost = entity;
 	g_bGhostIsCaptured = false;
+	g_bGhostIsHeld = false;
 }
 
 public void OnGhostCapture(int client)
 {
 	g_bGhostIsCaptured = true;
+	g_bGhostIsHeld = false;
 	
 	EmmitCapSound(client);
 	
@@ -297,25 +316,177 @@ public void OnGhostCapture(int client)
 	CreateTimer(11.0, timer_DoSparks, client);
 }
 
-public Action timer_EmitRaidoChatterSound(Handle timer, int client)
+public void OnGhostPickedUp(int client)
 {
-	float vecOrigin[3];
-	GetEntPropVector(client, Prop_Send, "m_vecOrigin", vecOrigin);
-	vecOrigin[2] += 20.0;
+	g_bGhostIsHeld = true;
+	
+	ghostCarrier = client;
 
-	EmitSoundToAll(g_sRadioChatterSoundEffect[GetRandomInt(0, sizeof(g_sRadioChatterSoundEffect) -1)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 130, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
+	ghostCarrierTeam = GetClientTeam(ghostCarrier);
+	
+
+	TimerStarter[0] = CreateTimer(0.0, timer_CreateAnnouncerTimers, 0, TIMER_FLAG_NO_MAPCHANGE);
+	TimerStarter[1] = CreateTimer(g_fFuzzRepeatDelay + 15.0, timer_CreateFuzzTimers, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	
+	g_fFuzzRepeatDelay = 15.0;
+	
+	if(TimerStarter[1] != INVALID_HANDLE)
+		TriggerTimer(TimerStarter[1]);
 }
 
-void EmmitCapSound(int client)
+public void OnGhostDropped(int client)
 {
-	float vecOrigin[3];
-	GetEntPropVector(client, Prop_Send, "m_vecOrigin", vecOrigin);
-	vecOrigin[2] += 20.0;
-
-	EmitSoundToAll(g_sSoundEffect[GetRandomInt(1, 2)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 130, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
+	g_bGhostIsHeld = false; 
+	ghostCarrier = -1;
+	g_fFuzzRepeatDelay = 0.0;
+	
+	for(int i; i < sizeof(AnnouncerTimer); i++)
+	{
+		if(AnnouncerTimer[i] != INVALID_HANDLE)
+		{
+			KillTimer(AnnouncerTimer[i]);
+			AnnouncerTimer[i] = INVALID_HANDLE;
+		}
+	}
+	
+	for(int i; i < sizeof(TimerStarter); i++)
+	{
+		if(TimerStarter[i] != INVALID_HANDLE)
+		{
+			KillTimer(TimerStarter[i]);
+			TimerStarter[i] = INVALID_HANDLE;
+		}
+	}
 }
 
 
+public Action timer_CreateFuzzTimers(Handle timer, int timerindex)
+{
+	for(int i; i < sizeof(FuzzTimer); i++)
+	{
+		if(FuzzTimer[i] != INVALID_HANDLE)
+		{
+			KillTimer(FuzzTimer[i]);
+			FuzzTimer[i] = INVALID_HANDLE;
+		}
+	}
+	
+	FuzzTimer[0] = CreateTimer(1.0, timer_EmmitPickupSound1, 0, TIMER_FLAG_NO_MAPCHANGE);
+	FuzzTimer[1] = CreateTimer(1.5, timer_EmmitPickupSound1, 1, TIMER_FLAG_NO_MAPCHANGE);
+	FuzzTimer[2] = CreateTimer(2.0, timer_EmmitPickupSound1, 2, TIMER_FLAG_NO_MAPCHANGE);
+	
+	return Plugin_Continue;
+}
+
+public Action timer_CreateAnnouncerTimers(Handle timer, int timerindex)
+{
+	TimerStarter[timerindex] = INVALID_HANDLE;
+
+	for(int i; i < sizeof(AnnouncerTimer); i++)
+	{
+		if(AnnouncerTimer[i] != INVALID_HANDLE)
+		{
+			KillTimer(AnnouncerTimer[i]);
+			AnnouncerTimer[i] = INVALID_HANDLE;
+		}
+	}
+	
+	AnnouncerTimer[0] = CreateTimer(3.5, timer_EmmitPickupSound2, 0, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //2 = warning
+	AnnouncerTimer[1] = CreateTimer(4.5, timer_EmmitPickupSound2, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //2 = warning
+	AnnouncerTimer[2] = CreateTimer(6.5, timer_EmmitPickupSound3, 2, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //3 = automatic targetting system
+	AnnouncerTimer[3] = CreateTimer(10.3, timer_EmmitPickupSound4, 3, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //4 = acquired
+	AnnouncerTimer[4] = CreateTimer(12.0, timer_EmmitPickupSound2, 4, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //2 = warning
+	AnnouncerTimer[5] = CreateTimer(13.0, timer_EmmitPickupSound2, 5, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //2 = warning
+}
+
+
+
+public Action timer_EmmitPickupSound1(Handle timer, int timerindex) //fuzz
+{
+	FuzzTimer[timerindex] = INVALID_HANDLE;
+	
+	if(!g_bGhostIsHeld)
+		return Plugin_Stop;
+	
+	for(int client = 1; client < MaxClients; client++)
+	{
+		if(!IsClientInGame(client) || !IsPlayerAlive(client))
+			continue;
+		
+		if(client == ghostCarrier)
+			continue;
+		
+		EmitSoundToClient(client, g_sSoundEffect[11], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 60, SND_NOFLAGS, 0.4, 100, -1, NULL_VECTOR, NULL_VECTOR);
+	}
+	
+	return Plugin_Stop;
+}
+
+public Action timer_EmmitPickupSound2(Handle timer, int timerindex) //warning  
+{
+	AnnouncerTimer[timerindex] = INVALID_HANDLE;
+	
+	if(!g_bGhostIsHeld)
+		return Plugin_Stop;
+	
+	for(int client = 1; client < MaxClients; client++)
+	{
+		if(!IsClientInGame(client) || !IsPlayerAlive(client))
+			continue;
+		
+		if(client == ghostCarrier)
+			continue;
+		
+		if(GetClientTeam(client) == ghostCarrierTeam)
+			continue;
+		
+		EmitSoundToClient(client, g_sSoundEffect[12], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 60, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
+	}
+	
+	return Plugin_Stop;
+}
+
+public Action timer_EmmitPickupSound3(Handle timer, int timerindex) //automatic target aquisition system
+{
+	AnnouncerTimer[timerindex] = INVALID_HANDLE;
+	
+	if(!g_bGhostIsHeld)
+		return Plugin_Stop;
+	
+	for(int client = 1; client < MaxClients; client++)
+	{
+		if(!IsClientInGame(client) || !IsPlayerAlive(client))
+			continue;
+		
+		if(client == ghostCarrier)
+			continue;
+		
+		EmitSoundToClient(client, g_sSoundEffect[13], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 60, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
+	}
+	
+	return Plugin_Stop;
+}
+
+public Action timer_EmmitPickupSound4(Handle timer, int timerindex) //acquired
+{
+	AnnouncerTimer[timerindex] = INVALID_HANDLE;
+	
+	if(!g_bGhostIsHeld)
+		return Plugin_Stop;
+	
+	for(int client = 1; client < MaxClients; client++)
+	{
+		if(!IsClientInGame(client) || !IsPlayerAlive(client))
+			continue;
+		
+		if(client == ghostCarrier)
+			continue;
+		
+		EmitSoundToClient(client, g_sSoundEffect[14], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 60, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
+	}
+	
+	return Plugin_Stop;
+}
 
 
 
@@ -361,6 +532,7 @@ public void OnEntityDestroyed(int entity)
 	
     if (StrEqual(classname, "weapon_ghost"))
     {
+		g_bGhostIsHeld = false; 
 		Explode(entity);
     }
 }
@@ -412,11 +584,56 @@ public void EmitExplosionSound(int entity, float position[3])
 	EmitSoundToAll(g_sSoundEffect[GetRandomInt(7, 9)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 85, SND_NOFLAGS, 0.7, GetRandomInt(85, 110), -1, position, NULL_VECTOR);
 }
 
+
+
+
+public Action timer_EmitRaidoChatterSound(Handle timer, int client)
+{
+	float vecOrigin[3];
+	GetEntPropVector(client, Prop_Send, "m_vecOrigin", vecOrigin);
+	vecOrigin[2] += 20.0;
+
+	EmitSoundToAll(g_sRadioChatterSoundEffect[GetRandomInt(0, sizeof(g_sRadioChatterSoundEffect) -1)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 130, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
+}
+
+void EmmitCapSound(int client)
+{
+	float vecOrigin[3];
+	GetEntPropVector(client, Prop_Send, "m_vecOrigin", vecOrigin);
+	vecOrigin[2] += 20.0;
+
+	EmitSoundToAll(g_sSoundEffect[GetRandomInt(1,2)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 100, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
+}
+
+
+
+
+
+
 public void OnMapEnd()
 {
-	for(int i = 0; i < MAX_SOUND_OCCURENCES; i++)
+	int i;
+	for(i = 0; i < MAX_SOUND_OCCURENCES; i++)
 	{
 		if(GhostTimer[i] != INVALID_HANDLE)
 			GhostTimer[i] = INVALID_HANDLE;
+	}
+	
+	for(i = 0; i < MAX_ANNOUNCER_OCCURENCES; i++)
+	{
+		if(AnnouncerTimer[i] != INVALID_HANDLE)
+			AnnouncerTimer[i] = INVALID_HANDLE;
+	}
+	
+	for(i = 0; i < sizeof(FuzzTimer); i++)
+	{
+		if(FuzzTimer[i] != INVALID_HANDLE)
+			FuzzTimer[i] = INVALID_HANDLE;
+	}
+	
+	for(i = 0; i < sizeof(TimerStarter); i++)
+	{
+		if(TimerStarter[i] != INVALID_HANDLE)
+			TimerStarter[i] = INVALID_HANDLE;
 	}
 }

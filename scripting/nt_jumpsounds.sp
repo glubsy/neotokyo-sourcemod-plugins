@@ -33,14 +33,15 @@ char g_sStockSound[][] = {
 	"physics/flesh/flesh_strider_impact_bullet2.wav",		//medium, a bit choppy
 	"physics/metal/metal_computer_impact_soft1.wav",		//light, not very good (sounds like a spring)
 	"physics/metal/metal_computer_impact_soft2.wav",		//light, not very good (sounds like a spring)
-	"physics/metal/metal_grenade_impact_soft3.wav",			//medium, decent for lighter classes
+	"physics/metal/metal_grenade_impact_soft3.wav",			//medium, decent for lighter classes (recon!)
 	"physics/wood/wood_box_impact_bullet4.wav",				//wooden, sounds like a bottle cap being removed
 	"buttons/button1.wav",									//buzzing sound
 	"buttons/button15.wav",									//can be played super fast over short time
 	"buttons/combine_button3.wav",							//both high and low (not good)
 	"ambient/levels/prison/radio_random11.wav",				//high pitch (not very good)
 	"vehicles/atv_ammo_close.wav",							//dry and high, mediocre
-	"vehicles/atv_ammo_open.wav"							//more wet, better, good for heavy or assault
+	"vehicles/atv_ammo_open.wav",							//more wet, better, good for heavy or assault
+	"HL1/fvox/hiss.wav"										//light, vacuum style, good for recon!
 };
 
 public Plugin:myinfo = 
@@ -190,7 +191,7 @@ public Action EmitBasicJumpSound(int client, int soundindex, bool classoverride)
 		int PlayerClass = GetEntProp(client, Prop_Send, "m_iClassType");
 		if(PlayerClass == 1) //recon
 		{		
-			EmitSoundToAll(g_sStockSound[6], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.8, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
+			EmitSoundToAll(g_sStockSound[14], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.8, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
 		}
 		else if(PlayerClass == 2) //assault
 		{
