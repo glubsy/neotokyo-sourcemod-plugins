@@ -6,6 +6,8 @@
 
 **nt_weapontweaks**: prevents SRS quick switch exploit, adds recoil, screen shaking and randomized tracers to some guns.
 
+**nt_specvisions**: adds vision modes availability to spectators and dead players.
+
 **nt_specbinds**: binds number keys to 10 alive players for convenient camera switching.
 
 **nt_restartfix**: Agiel's plugin, rewritten to handle neo_restart_this 2 which resets only current round, reverting player scores as well.
