@@ -166,7 +166,7 @@ public Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 			if(GetConVarBool(convar_slowmotion_clientside))
 				g_TimerSlowMotion = CreateTimer(4.0, timer_DefaultTimeScale);
 			else
-				g_TimerSlowMotion = CreateTimer(0.5, timer_DefaultTimeScale);
+				g_TimerSlowMotion = CreateTimer(1.1, timer_DefaultTimeScale);
 		}
 	}
 }

@@ -6,7 +6,7 @@
 #define DEBUG 0
 #define MAX_SOUND_OCCURENCES 30
 
-#define PLUGIN_VERSION	"0.2"
+#define PLUGIN_VERSION	"0.21"
 
 int ghost;
 bool g_bGhostIsCaptured;
@@ -150,7 +150,7 @@ public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 }
 
 
-public Action timer_SoundEffect0(Handle timer, int timernumber)
+public Action timer_SoundEffect0(Handle timer, int timernumber) //charging sound effect
 {
 	GhostTimer[timernumber] = INVALID_HANDLE;
 	
@@ -173,13 +173,13 @@ public Action timer_SoundEffect0(Handle timer, int timernumber)
 	vecOrigin[2] += 10;
 
 	g_bEndOfRound = true; //it's ok to hook entity destruction for a bit	
-	EmitSoundToAll(g_sSoundEffect[0], SOUND_FROM_WORLD, SNDCHAN_AUTO, 100, SND_NOFLAGS, SNDVOL_NORMAL, 100, -1, vecOrigin); //charging effect
+	EmitSoundToAll(g_sSoundEffect[0], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.4, 100, -1, vecOrigin); //charging effect
 
 	return Plugin_Stop;
 }
 
 
-public Action timer_SoundEffect1(Handle timer, int timernumber)
+public Action timer_SoundEffect1(Handle timer, int timernumber)  //sparks sound effect
 {
 	GhostTimer[timernumber] = INVALID_HANDLE;
 	
@@ -201,13 +201,13 @@ public Action timer_SoundEffect1(Handle timer, int timernumber)
 	
 	vecOrigin[2] += 10;
 
-	EmitSoundToAll(g_sSoundEffect[GetRandomInt(3,5)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(90, 110), -1, vecOrigin); //sparks
+	EmitSoundToAll(g_sSoundEffect[GetRandomInt(3,5)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, GetRandomInt(90, 110), -1, vecOrigin); //sparks
 
 	return Plugin_Stop;
 }
 
 
-public Action timer_SoundEffect2(Handle timer, int timernumber)
+public Action timer_SoundEffect2(Handle timer, int timernumber) //grenade tick sound effect
 {
 	GhostTimer[timernumber] = INVALID_HANDLE;
 	
@@ -235,7 +235,7 @@ public Action timer_SoundEffect2(Handle timer, int timernumber)
 	return Plugin_Stop;
 }
 
-public Action timer_SoundEffect3(Handle timer, int timernumber)
+public Action timer_SoundEffect3(Handle timer, int timernumber) //beeps countdown 
 {
 	GhostTimer[timernumber] = INVALID_HANDLE;
 	
@@ -257,7 +257,7 @@ public Action timer_SoundEffect3(Handle timer, int timernumber)
 	
 	vecOrigin[2] += 10;
 
-	EmitSoundToAll(g_sSoundEffect[10], SOUND_FROM_WORLD, SNDCHAN_AUTO, 55, SND_NOFLAGS, SNDVOL_NORMAL, g_iTickCount, -1, vecOrigin); //beeps
+	EmitSoundToAll(g_sSoundEffect[10], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.5, g_iTickCount, -1, vecOrigin); //beeps
 	g_iTickCount += 5;
 
 	return Plugin_Stop;
@@ -275,12 +275,12 @@ public void OnGhostCapture(int client)
 	
 	EmmitCapSound(client);
 	
-	CreateTimer(1.1, timer_EmitRaidoChatterSound, client);
-	CreateTimer(1.4, timer_EmitRaidoChatterSound, client);
-	CreateTimer(1.7, timer_EmitRaidoChatterSound, client);
-	CreateTimer(1.9, timer_EmitRaidoChatterSound, client);
-	CreateTimer(2.3, timer_EmitRaidoChatterSound, client);
-	CreateTimer(2.6, timer_EmitRaidoChatterSound, client);
+	CreateTimer(6.1, timer_EmitRaidoChatterSound, client);
+	CreateTimer(6.4, timer_EmitRaidoChatterSound, client);
+	CreateTimer(6.7, timer_EmitRaidoChatterSound, client);
+	CreateTimer(6.9, timer_EmitRaidoChatterSound, client);
+	CreateTimer(7.3, timer_EmitRaidoChatterSound, client);
+	CreateTimer(7.6, timer_EmitRaidoChatterSound, client);
 	
 	
 	CreateTimer(1.0, timer_DoSparks, client);
@@ -289,6 +289,12 @@ public void OnGhostCapture(int client)
 	CreateTimer(2.2, timer_DoSparks, client);
 	CreateTimer(2.5, timer_DoSparks, client);
 	CreateTimer(2.9, timer_DoSparks, client);
+	CreateTimer(6.1, timer_DoSparks, client);
+	CreateTimer(7.0, timer_DoSparks, client);
+	CreateTimer(8.0, timer_DoSparks, client);
+	CreateTimer(9.0, timer_DoSparks, client);
+	CreateTimer(10.0, timer_DoSparks, client);
+	CreateTimer(11.0, timer_DoSparks, client);
 }
 
 public Action timer_EmitRaidoChatterSound(Handle timer, int client)
@@ -403,7 +409,7 @@ void Explode(int entity)
 
 public void EmitExplosionSound(int entity, float position[3])
 {
-	EmitSoundToAll(g_sSoundEffect[GetRandomInt(7, 9)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 100, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, position, NULL_VECTOR);
+	EmitSoundToAll(g_sSoundEffect[GetRandomInt(7, 9)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 85, SND_NOFLAGS, 0.7, GetRandomInt(85, 110), -1, position, NULL_VECTOR);
 }
 
 public void OnMapEnd()

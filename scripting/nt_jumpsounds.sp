@@ -190,15 +190,15 @@ public Action EmitBasicJumpSound(int client, int soundindex, bool classoverride)
 		int PlayerClass = GetEntProp(client, Prop_Send, "m_iClassType");
 		if(PlayerClass == 1) //recon
 		{		
-			EmitSoundToAll(g_sStockSound[6], SOUND_FROM_WORLD, SNDCHAN_AUTO, 90, SND_NOFLAGS, 0.7, GetRandomInt(85, 110), -1, vecOrigin, vecEyeAngles);
+			EmitSoundToAll(g_sStockSound[6], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.8, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
 		}
 		else if(PlayerClass == 2) //assault
 		{
-			EmitSoundToAll(g_sStockSound[1], SOUND_FROM_WORLD, SNDCHAN_AUTO, 90, SND_NOFLAGS, 0.7, GetRandomInt(85, 110), -1, vecOrigin, vecEyeAngles);
+			EmitSoundToAll(g_sStockSound[1], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.8, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
 		}
 		else if(PlayerClass == 3) //support
 		{
-			EmitSoundToAll(g_sStockSound[0], SOUND_FROM_WORLD, SNDCHAN_AUTO, 90, SND_NOFLAGS, 0.7, GetRandomInt(85, 110), -1, vecOrigin, vecEyeAngles);
+			EmitSoundToAll(g_sStockSound[0], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.8, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
 		}
 	}
 	
