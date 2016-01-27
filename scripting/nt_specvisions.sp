@@ -12,13 +12,26 @@ public Plugin:myinfo =
 	name = "NEOTOKYO° Vision modes for spectators",
 	author = "glub, soft as HELL",
 	description = "Thermal vision and night vision for spectators",
-	version = "0.10",
+	version = "0.11",
 	url = "https://github.com/glubsy"
 }
 
 public void OnPluginStart()
 {
+	HookEvent("player_spawn", OnPlayerSpawn);
+	
 	HookEvent("game_round_start", OnRoundStart);
+}
+
+public Action OnPlayerSpawn(Handle event, const char[] name, bool dontbroadcast)
+{
+	for(int client = 1; client < MaxClients; client++)
+	{
+		if(!IsClientConnected(client) || !IsClientInGame(client))
+			continue;
+		
+		SetEntProp(client, Prop_Send, "m_iVision", 0);
+	}
 }
 
 
@@ -119,8 +132,12 @@ public void OnRoundStart(Handle event, const char[] name, bool Broadcast)
 {
 	for(int client = 1; client < MaxClients; client++)
 	{
-		if(!IsClientConnected(client) || !IsClientInGame(client) || !IsValidEntity(client))
+		if(!IsClientConnected(client) || !IsClientInGame(client))
 			continue;
+		
+		if(GetClientTeam(client) <= 1)
+			continue;
+		
 		SetEntProp(client, Prop_Send, "m_iVision", 0);
 	}
 }

@@ -23,7 +23,8 @@ Handle convar_nt_jumpsounds = INVALID_HANDLE;
 char g_sCustomJumpSound[][] = {
 	"custom/nyanpasu.mp3",
 	"custom/Time_Walk.mp3",
-	"custom/pururin.mp3"
+	"custom/pururin.mp3",
+	"custom/mario.mp3"
 };
 
 char g_sStockSound[][] = {
@@ -55,7 +56,7 @@ public Plugin:myinfo =
 
 public void OnPluginStart()
 {
-	convar_nt_funnysounds = CreateConVar("nt_funnyjumpsounds", "0", "Custom sound effect for jumping 0=disabled, 1-3");
+	convar_nt_funnysounds = CreateConVar("nt_funnyjumpsounds", "0", "Custom sound effect for jumps 0 = disabled, 1-4");
 	convar_nt_jumpsounds = CreateConVar("nt_jumpsounds", "1", "Enables jump sound effects");
 	//OnConfigsExecuted();
 	HookEvent("game_round_start", OnRoundStart);
@@ -137,7 +138,7 @@ public Action OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:ang
 			{
 				CountJumps(client);
 				if(GetConVarInt(convar_nt_funnysounds) == 0)
-					EmitBasicJumpSound(client, 5, false);
+					EmitBasicJumpSound(client, 0, false);
 				else
 					EmitBasicJumpSound(client, (GetConVarInt(convar_nt_funnysounds) -1), true);
 			}
@@ -170,6 +171,11 @@ public Action EmitBasicJumpSound(int client, int soundindex, bool classoverride)
 	
 	if(classoverride)
 	{
+		if(soundindex == 3) //mario
+		{
+			EmitSoundToAll(g_sCustomJumpSound[soundindex], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.7, GetRandomInt(85, 110), -1, vecOrigin, vecEyeAngles);
+			StopSoundPerm(client, g_sCustomJumpSound[soundindex]);
+		}
 		if(soundindex == 2) //pururin
 		{
 			EmitSoundToAll(g_sCustomJumpSound[soundindex], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, SNDVOL_NORMAL, 100, -1, vecOrigin, vecEyeAngles);
@@ -191,15 +197,15 @@ public Action EmitBasicJumpSound(int client, int soundindex, bool classoverride)
 		int PlayerClass = GetEntProp(client, Prop_Send, "m_iClassType");
 		if(PlayerClass == 1) //recon
 		{		
-			EmitSoundToAll(g_sStockSound[14], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.8, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
+			EmitSoundToAll(g_sStockSound[14], SOUND_FROM_WORLD, SNDCHAN_AUTO, 75, SND_NOFLAGS, 0.7, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
 		}
 		else if(PlayerClass == 2) //assault
 		{
-			EmitSoundToAll(g_sStockSound[1], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.8, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
+			EmitSoundToAll(g_sStockSound[1], SOUND_FROM_WORLD, SNDCHAN_AUTO, 80, SND_NOFLAGS, 0.8, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
 		}
 		else if(PlayerClass == 3) //support
 		{
-			EmitSoundToAll(g_sStockSound[0], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.8, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
+			EmitSoundToAll(g_sStockSound[0], SOUND_FROM_WORLD, SNDCHAN_AUTO, 80, SND_NOFLAGS, 0.8, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
 		}
 	}
 	

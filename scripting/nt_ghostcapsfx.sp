@@ -80,7 +80,7 @@ public void OnPluginStart()
 	convar_ghostexplosiondamages = CreateConVar("nt_ghostexplosiondamages", "1", "Explosion from ghost damages players", FCVAR_SPONLY, true, 0.0, true, 1.0);
 	
 	
-	HookEvent("game_round_start", OnRoundStart); //needs start in case we foce restart
+	HookEvent("game_round_start", OnRoundStart);
 	
 	convar_roundtimelimit = FindConVar("neo_round_timelimit");
 	
@@ -328,7 +328,7 @@ public void OnGhostPickedUp(int client)
 	TimerStarter[0] = CreateTimer(0.0, timer_CreateAnnouncerTimers, 0, TIMER_FLAG_NO_MAPCHANGE);
 	TimerStarter[1] = CreateTimer(g_fFuzzRepeatDelay + 15.0, timer_CreateFuzzTimers, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 	
-	g_fFuzzRepeatDelay = 15.0;
+	g_fFuzzRepeatDelay = 10.0;
 	
 	if(TimerStarter[1] != INVALID_HANDLE)
 		TriggerTimer(TimerStarter[1]);
@@ -410,13 +410,19 @@ public Action timer_EmmitPickupSound1(Handle timer, int timerindex) //fuzz
 	
 	for(int client = 1; client < MaxClients; client++)
 	{
-		if(!IsClientInGame(client) || !IsPlayerAlive(client))
+		if(!IsClientInGame(client))
 			continue;
 		
-		if(client == ghostCarrier)
+		if(client == ghostCarrier) 
 			continue;
 		
-		EmitSoundToClient(client, g_sSoundEffect[11], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 60, SND_NOFLAGS, 0.4, 100, -1, NULL_VECTOR, NULL_VECTOR);
+		if(!IsPlayerAlive(client))
+		{
+			EmitSoundToClient(client, g_sSoundEffect[11], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 60, SND_NOFLAGS, 0.2, 100, -1, NULL_VECTOR, NULL_VECTOR);
+			continue;
+		}
+		
+		EmitSoundToClient(client, g_sSoundEffect[11], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.4, 100, -1, NULL_VECTOR, NULL_VECTOR);
 	}
 	
 	return Plugin_Stop;
@@ -440,7 +446,7 @@ public Action timer_EmmitPickupSound2(Handle timer, int timerindex) //warning
 		if(GetClientTeam(client) == ghostCarrierTeam)
 			continue;
 		
-		EmitSoundToClient(client, g_sSoundEffect[12], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 60, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
+		EmitSoundToClient(client, g_sSoundEffect[12], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
 	}
 	
 	return Plugin_Stop;
@@ -461,7 +467,7 @@ public Action timer_EmmitPickupSound3(Handle timer, int timerindex) //automatic 
 		if(client == ghostCarrier)
 			continue;
 		
-		EmitSoundToClient(client, g_sSoundEffect[13], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 60, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
+		EmitSoundToClient(client, g_sSoundEffect[13], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
 	}
 	
 	return Plugin_Stop;
@@ -482,7 +488,7 @@ public Action timer_EmmitPickupSound4(Handle timer, int timerindex) //acquired
 		if(client == ghostCarrier)
 			continue;
 		
-		EmitSoundToClient(client, g_sSoundEffect[14], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 60, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
+		EmitSoundToClient(client, g_sSoundEffect[14], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
 	}
 	
 	return Plugin_Stop;
