@@ -25,10 +25,10 @@ public void OnPluginStart()
 
 public Action OnPlayerSpawn(Handle event, const char[] name, bool dontbroadcast)
 {
-	for(int client = 1; client < MaxClients; client++)
+	int client = GetClientOfUserId(GetEventInt(event, "userid"));
 	{
 		if(!IsClientConnected(client) || !IsClientInGame(client))
-			continue;
+			return;
 		
 		SetEntProp(client, Prop_Send, "m_iVision", 0);
 	}

@@ -129,7 +129,7 @@ public Action TE_ShotHook(const char[] te_name, const int[] Players, int numClie
 			TE_WriteNum("m_bTracer", randombool);
 			
 			if(GetConVarBool(convar_shake))
-				ShakeScreen(client, 2.5, 1.2, 0.7);		
+				ShakeScreen(client, 2.5, 1.0, 0.5);		
 			
 			return Plugin_Continue;
 		}
