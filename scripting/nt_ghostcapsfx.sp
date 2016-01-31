@@ -523,6 +523,9 @@ public void DoSparkleEffect(int client)
 
 public void OnEntityDestroyed(int entity)
 {
+	if(!IsValidEntity(entity) || entity < MaxClients)
+		return;
+	
 	if(!GetConVarBool(convar_ghostexplodes))
 		return;
 	

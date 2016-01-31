@@ -82,7 +82,9 @@ public void Event_ServerCvar(Handle event, const char[] name, bool Dontbroadcast
 	if (StrContains(cvarName, "sv_alltalk") == 0 && StrEqual(cvarValue, "1")) //attempting to change sv_alltalk to 1!
 	{
 		SetConVarString(convar_nt_alltalk, "1");
+		//return Plugin_Handled; //should block notification... otherwise just remove flag and readd as usual
 	}
+	//return Plugin_Continue;
 }
 
 public void OnCvarChanged(Handle convar, char[] oldValue, char[] newValue)
@@ -93,7 +95,7 @@ public void OnCvarChanged(Handle convar, char[] oldValue, char[] newValue)
 	
 	if(StrEqual(ConVarName, "sv_alltalk") && (StringToInt(newValue) == 0))
 	{
-		SetConVarString(convar_alltalk, "1"); //reset sv_alltalk to 1 on change to 0
+		//SetConVarString(convar_alltalk, "1"); //reset sv_alltalk to 1 on change to 0
 		SetConVarString(convar_nt_alltalk, "0"); //we change sv_nt_alltalk instead
 		
 		#if DEBUG > 0
@@ -104,17 +106,17 @@ public void OnCvarChanged(Handle convar, char[] oldValue, char[] newValue)
 	
 	if(StrEqual(ConVarName, "nt_alltalk") && (StringToInt(newValue) == 1))
 	{
-		for(int client = 1; client < MaxClients; client++)
+		for(int client = 1; client <= MaxClients; client++)
 		{
-			if(!IsClientInGame(client))
+			if(!IsClientInGame(client) || IsFakeClient(client))
 				continue;
 			
 			if(GetClientListeningFlags(client) & VOICE_MUTED)
 				continue;
 			
-			SetClientListeningFlags(client, VOICE_NORMAL);
+			//SetClientListeningFlags(client, VOICE_NORMAL);
 			
-			for(int id = 1; id < MaxClients; id++)
+			for(int id = 1; id <= MaxClients; id++)
 			{
 				if(!IsClientInGame(id))
 					continue; 
@@ -131,17 +133,17 @@ public void OnCvarChanged(Handle convar, char[] oldValue, char[] newValue)
 	}
 	else if(StrEqual(ConVarName, "nt_alltalk") && (StringToInt(newValue) == 0))
 	{
-		for(int client = 1; client < MaxClients; client++)
+		for(int client = 1; client <= MaxClients; client++)
 		{
-			if(!IsClientInGame(client))
+			if(!IsClientInGame(client) || IsFakeClient(client))
 				continue;
 			
 			if(GetClientListeningFlags(client) & VOICE_MUTED)
 				continue;
 			
-			SetClientListeningFlags(client, VOICE_NORMAL);
+			//SetClientListeningFlags(client, VOICE_NORMAL);
 			
-			for(int id = 1; id < MaxClients; id++)
+			for(int id = 1; id <= MaxClients; id++)
 			{
 				if(!IsClientInGame(id))
 					continue; 
@@ -155,7 +157,7 @@ public void OnCvarChanged(Handle convar, char[] oldValue, char[] newValue)
 					SetListenOverride(client, id, Listen_Default);
 			}
 		}
-		RefreshOverrideFlags();
+		RefreshOverrideFlags2();
 	}
 }
 
@@ -175,11 +177,157 @@ public Action timer_clearAlltalk(Handle timer)
 }
 
 
+public void RefreshOverrideFlags2()
+{
+	for(int client = 1; client <= MaxClients; client++)
+	{
+		if(!IsClientInGame(client) || IsFakeClient(client))
+		{
+			g_iClientTeam[client] = 0;
+			continue;
+		}
+		
+		g_iClientTeam[client] = GetClientTeam(client);
+	}
+	
+	
+	
+	for(int client = 1; client <= MaxClients; client++)
+	{	
+		if(!IsClientInGame(client) || IsFakeClient(client))
+			continue;
+		
+		//g_iClientTeam[client] = GetClientTeam(client);
+
+		for(int id = 1; id <= MaxClients ; id++)
+		{
+			if(!IsClientInGame(id) || IsFakeClient(client))
+				continue;
+			
+			if(g_bMutedPlayerFor[id][client]) //unless they muted him before (refreshing mutes, meh)
+			{
+				SetListenOverride(id, client, Listen_No);
+			}
+			if(g_bMutedPlayerFor[client][id]) //vice-versa (refreshing mutes, meh)
+			{
+				SetListenOverride(client, id, Listen_No);
+			}
+			
+			if(g_iClientTeam[client] == g_iClientTeam[id]) //same team, we can hear each other
+			{
+				if(g_iClientTeam[client] <= 1) //we're both spectators -> we can hear each other
+				{
+					if(!g_bMutedPlayerFor[id][client]) //unless muted
+						SetListenOverride(id, client, Listen_Default);
+						
+					if(!g_bMutedPlayerFor[client][id])
+						SetListenOverride(client, id, Listen_Default);
+				}
+				else //we're not in spectator team, but the same PLAYING team
+				{
+					if(IsPlayerAlive(client) && IsPlayerAlive(id)) //both alive
+					{
+						if(!g_bMutedPlayerFor[id][client])
+							SetListenOverride(id, client, Listen_Default);
+						
+						if(!g_bMutedPlayerFor[client][id])
+							SetListenOverride(client, id, Listen_Default);
+					}
+					else if(IsPlayerAlive(client) && !IsPlayerAlive(id)) //id can hear if deadtalk > 0
+					{
+						if(GetConVarInt(convar_nt_deadtalk) == 2) //dead team mates can talk to alive but not oppposite team (CSGO-like. STRICT)
+						{
+							if(!g_bMutedPlayerFor[id][client])
+								SetListenOverride(id, client, Listen_Default);
+							
+							if(!g_bMutedPlayerFor[client][id])
+								SetListenOverride(client, id, Listen_Default);	
+						}
+						else //regular rules for same team
+						{
+							if(!g_bMutedPlayerFor[id][client])
+								SetListenOverride(id, client, Listen_Default);
+							
+							SetListenOverride(client, id, Listen_No);
+						}
+					}
+					else if(!IsPlayerAlive(client) && IsPlayerAlive(id))
+					{
+						if(GetConVarInt(convar_nt_deadtalk) == 2) //dead team mates can talk to alive but not oppposite team (CSGO-like. STRICT)
+						{
+							if(!g_bMutedPlayerFor[id][client])
+								SetListenOverride(id, client, Listen_Default);
+							
+							if(!g_bMutedPlayerFor[client][id])
+								SetListenOverride(client, id, Listen_Default);	
+						}
+						else //regular rules for same team
+						{
+							SetListenOverride(id, client, Listen_No);
+						
+							if(!g_bMutedPlayerFor[client][id])
+								SetListenOverride(client, id, Listen_Default);
+						}
+					}
+					else //we're both dead
+					{
+						if(!g_bMutedPlayerFor[id][client])
+							SetListenOverride(id, client, Listen_Default);
+						
+						if(!g_bMutedPlayerFor[client][id])
+							SetListenOverride(client, id, Listen_Default);
+					}
+				}				
+			}
+			else if(g_iClientTeam[client] != g_iClientTeam[id])  //not the same team
+			{
+				if(g_iClientTeam[client] <= 1) //spectating, we can hear them, they can't hear us, unless they're dead
+				{
+					if(!g_bMutedPlayerFor[client][id])
+						SetListenOverride(client, id, Listen_Default);
+					
+					if(IsPlayerAlive(id))
+						SetListenOverride(id, client, Listen_No);
+					else
+						if(!g_bMutedPlayerFor[id][client])
+							SetListenOverride(id, client, Listen_Default);
+				}
+				else //we are in a playing team, we follow deadtalk rules and alive/dead rules
+				{
+					if(IsPlayerAlive(client))
+					{
+						SetListenOverride(client, id, Listen_No);
+						//no need to set for id, it's in the loop already
+					}
+					else //we are dead
+					{
+						if(GetConVarInt(convar_nt_deadtalk) == 2)
+						{
+							SetListenOverride(client, id, Listen_No);
+						}
+						else if(GetConVarInt(convar_nt_deadtalk) == 1)
+						{
+							if(!g_bMutedPlayerFor[client][id])
+								SetListenOverride(client, id, Listen_Default);
+						}
+						else if(GetConVarInt(convar_nt_deadtalk) == 0)
+						{
+							SetListenOverride(client, id, Listen_No);
+						}		
+					}
+				}
+			}
+		}
+	}
+}
+
+
+/*
 public void RefreshOverrideFlags()
 {
-	for(int client = 1; client < MaxClients; client++)
+	for(int client = 1; client <= MaxClients; client++)
 	{	
-		if(!IsClientInGame(client))
+		if(!IsClientInGame(client) || IsFakeClient(client))
 			continue;
 		
 		g_iClientTeam[client] = GetClientTeam(client);
@@ -187,7 +335,7 @@ public void RefreshOverrideFlags()
 		if(IsPlayerAlive(client))
 		{
 			//can't hear spectators anymore
-			for(int id = 1; id < MaxClients ; id++)
+			for(int id = 1; id <= MaxClients ; id++)
 			{
 				if(id != client && IsClientInGame(id))
 				{
@@ -262,7 +410,7 @@ public void RefreshOverrideFlags()
 		}
 		else // player not alive, indeadlounge or spectator team
 		{
-			for(int id = 1; id < MaxClients ; id++)
+			for(int id = 1; id <= MaxClients ; id++)
 			{
 				if(id != client && IsClientInGame(id))
 				{
@@ -306,7 +454,7 @@ public void RefreshOverrideFlags()
 										SetListenOverride(id, client, Listen_Default); //id is in dead lounge too
 								}
 							}
-							else if(GetConVarInt(convar_nt_deadtalk) == 0) //dead players can't talk to opposite team at all but can hear TEAM alive
+							else if(GetConVarInt(convar_nt_deadtalk) == 0) //dead players can't talk to opposite team at all but can hear TEAM alive (NT STANDARD)
 							{
 								if(IsPlayerAlive(id))
 								{
@@ -440,6 +588,7 @@ public void RefreshOverrideFlags()
 		}
 	}
 }
+*/
 
 //====================================================================================================
 
@@ -457,7 +606,7 @@ public Action OnCommand(int client, const char[] command, int argc)
 	{
 		if(arg == 1) //we joined spectator, we are muted to all but spectators AND dead players
 		{			
-			for (int id = 1; id < MaxClients ; id++)
+			for (int id = 1; id <= MaxClients ; id++)
 			{
 				if(id != client && IsClientInGame(id) && GetClientTeam(id) > 1)
 				{
@@ -520,18 +669,22 @@ public Action OnCommand(int client, const char[] command, int argc)
 		}
 		else //we joined a team, we are not muted anymore
 		{
-			g_iClientTeam[client] = GetClientTeam(client);
+			//g_iClientTeam[client] = GetClientTeam(client);
 			
 			#if DEBUG > 0
 			PrintToServer("[OnCommand] %N [%d]: client is now in team %i", client, client, g_iClientTeam[client]);
 			#endif
 			
+			RefreshOverrideFlags2();
+			
+			
+			/*
 			
 			if(IsPlayerAlive(client))
 				return Plugin_Continue; //client must be in dead lounge to have its flags updated
 			
 			
-			for (int id = 1; id < MaxClients ; id++)
+			for (int id = 1; id <= MaxClients ; id++)
 			{
 				if(id != client && IsClientInGame(id) && GetClientTeam(id) > 1) //all the ids in teams can hear
 				{
@@ -557,7 +710,7 @@ public Action OnCommand(int client, const char[] command, int argc)
 					}
 				}
 			}
-			
+			*/
 			return Plugin_Continue;
 		}
 	}
@@ -572,11 +725,17 @@ public OnClientPutInServer(int client)
 {
 	g_iClientTeam[client] = 1;
 	
-	for (int id = 1; id < MaxClients ; id++)
+	for (int id = 1; id <= MaxClients ; id++)
 	{
-        if(id != client && IsClientInGame(id)) //everybody should ignore the new guy
+		if(IsFakeClient(client))
+			continue;
+		
+		if(id != client && IsClientInGame(id)) //everybody should ignore the new guy
 		{
-			SetClientListeningFlags(client, VOICE_NORMAL);
+			if(IsFakeClient(id))
+				continue;
+			
+			//SetClientListeningFlags(client, VOICE_NORMAL);
 			SetListenOverride(id, client, Listen_No); //was Listen_Yes -glub -> Default is ok, but should be no, and then default when joined a team to prevent spec transmitting
 			SetListenOverride(client, id, Listen_Default); //new guy can hear everyone
         }
@@ -585,23 +744,9 @@ public OnClientPutInServer(int client)
 
 public Action OnPlayerDeath(Handle event, const char[] name, bool Dontbroadcast)
 {
-	int client = GetClientOfUserId(GetEventInt(event, "userid"));
+	//int client = GetClientOfUserId(GetEventInt(event, "userid"));
 	
-	//hear spectators AND dead
-	for(int id = 1; id < MaxClients ; id++)
-	{
-        if(id != client && IsClientInGame(id))
-		{
-			if(g_bMutedPlayerFor[id][client]) //unless they muted him before
-			{
-				SetListenOverride(id, client, Listen_No);
-			}
-			else
-			{
-				SetListenOverride(id, client, Listen_Default); //id can listen to client
-			}
-        }
-    }
+	RefreshOverrideFlags2();
 }
 
 
@@ -612,10 +757,13 @@ public Action OnPlayerSpawn(Handle event, const char[] name, bool Dontbroadcast)
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
 	g_iClientTeam[client] = GetClientTeam(client);
 	
+	RefreshOverrideFlags2();
+	
+	/*
 	if(IsPlayerAlive(client))
 	{
 		//can't hear spectators anymore
-		for(int id = 1; id < MaxClients ; id++)
+		for(int id = 1; id <= MaxClients ; id++)
 		{
 			if(id != client && IsClientInGame(id))
 			{
@@ -692,6 +840,7 @@ public Action OnPlayerSpawn(Handle event, const char[] name, bool Dontbroadcast)
 	{
 		return Plugin_Continue;
 	}
+	*/
 }
 
 
@@ -709,9 +858,12 @@ public Action OnPlayerChangeTeam(Handle event, const char[] name, bool Dontbroad
 	PrintToChatAll("%N changed team: oldteam %i newteam %i", client, oldteam, newteam);
 	#endif
 	
+	RefreshOverrideFlags2();
+	
+	
 	if(disconnect == 1)
 	{
-		for(int id = 1; id < MaxClients; id++)
+		for(int id = 1; id <= MaxClients; id++)
 		{
 			if(id != client && IsClientInGame(id))
 				SetListenOverride(id, client, Listen_No);		
@@ -731,7 +883,7 @@ public Action OnPlayerChangeTeam(Handle event, const char[] name, bool Dontbroad
 		return Plugin_Continue;
 	}
 	
-	RefreshOverrideFlags();
+
 	
 	
 	return Plugin_Continue;	

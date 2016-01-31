@@ -6,6 +6,7 @@ bool g_bActiveVision[MAXPLAYERS+1][3];
 bool g_bVisionHeld[MAXPLAYERS+1];
 bool g_bLeanLHeld[MAXPLAYERS+1];
 bool g_bLeanRHeld[MAXPLAYERS+1];
+bool g_bCantUseVisions[MAXPLAYERS+1];
 
 public Plugin:myinfo = 
 {
@@ -21,9 +22,21 @@ public void OnPluginStart()
 	HookEvent("player_spawn", OnPlayerSpawn);
 	
 	HookEvent("game_round_start", OnRoundStart);
+	HookEvent("player_death", OnPlayerDeath);
+	HookEvent("player_disconnect", OnPlayerDisconnected);
 }
 
 public Action OnPlayerSpawn(Handle event, const char[] name, bool dontbroadcast)
+{
+	int client = GetClientOfUserId(GetEventInt(event, "userid"));
+
+	if(!IsClientConnected(client) || !IsClientInGame(client))
+		return;
+		
+	SetEntProp(client, Prop_Send, "m_iVision", 0);
+}
+
+public Action OnPlayerDeath(Handle event, const char[] name, bool dontbroadcast)
 {
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
 	{
@@ -31,13 +44,33 @@ public Action OnPlayerSpawn(Handle event, const char[] name, bool dontbroadcast)
 			return;
 		
 		SetEntProp(client, Prop_Send, "m_iVision", 0);
+		
+		g_bCantUseVisions[client] = true;
+		
+		CreateTimer(9.0, timer_AllowVisions, client);
 	}
+}
+
+public Action timer_AllowVisions(Handle timer, int client)
+{
+	g_bCantUseVisions[client] = false;	
+}
+
+
+public Action OnPlayerDisconnected(Handle event, const char[] name, bool dontbroadcast)
+{
+	int client = GetClientOfUserId(GetEventInt(event, "userid"));
+	
+	g_bCantUseVisions[client] = false;
 }
 
 
 public Action OnPlayerRunCmd(int client, int &buttons)
 {	
 	if(IsPlayerAlive(client))
+		return;
+	
+	if(g_bCantUseVisions[client])
 		return;
 
 	if((buttons & IN_VISION) == IN_VISION)

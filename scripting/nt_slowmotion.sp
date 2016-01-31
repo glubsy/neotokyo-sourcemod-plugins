@@ -166,7 +166,7 @@ public Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 			if(GetConVarBool(convar_slowmotion_clientside))
 				g_TimerSlowMotion = CreateTimer(4.0, timer_DefaultTimeScale);
 			else
-				g_TimerSlowMotion = CreateTimer(1.1, timer_DefaultTimeScale);
+				g_TimerSlowMotion = CreateTimer(1.0, timer_DefaultTimeScale);
 		}
 	}
 }
@@ -340,7 +340,7 @@ public Action CountPlayers(Handle timer)
 
 public Action LastManStanding(Handle timer, int client)
 {
-	if(!IsClientConnected(client))
+	if(!IsClientInGame(client))
 		return;
 	
 	if(!IsPlayerAlive(client) || g_MessageShownLast[client])
