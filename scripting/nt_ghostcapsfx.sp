@@ -294,12 +294,12 @@ public void OnGhostCapture(int client)
 	
 	EmmitCapSound(client);
 	
-	CreateTimer(6.1, timer_EmitRaidoChatterSound, client);
-	CreateTimer(6.4, timer_EmitRaidoChatterSound, client);
-	CreateTimer(6.7, timer_EmitRaidoChatterSound, client);
-	CreateTimer(6.9, timer_EmitRaidoChatterSound, client);
-	CreateTimer(7.3, timer_EmitRaidoChatterSound, client);
-	CreateTimer(7.6, timer_EmitRaidoChatterSound, client);
+	CreateTimer(6.1, timer_EmitRadioChatterSound, client);
+	CreateTimer(6.4, timer_EmitRadioChatterSound, client);
+	CreateTimer(6.7, timer_EmitRadioChatterSound, client);
+	CreateTimer(6.9, timer_EmitRadioChatterSound, client);
+	CreateTimer(7.3, timer_EmitRadioChatterSound, client);
+	CreateTimer(7.6, timer_EmitRadioChatterSound, client);
 	
 	
 	CreateTimer(1.0, timer_DoSparks, client);
@@ -503,6 +503,9 @@ public Action timer_DoSparks(Handle timer, int client)
 
 public void DoSparkleEffect(int client)
 {
+	if(!IsClientInGame(client))
+		return;
+	
 	float vecOrigin[3], vecEyeAngles[3];
 	GetClientEyePosition(client, vecOrigin);
 	vecOrigin[2] += 10.0;
@@ -596,8 +599,11 @@ public void EmitExplosionSound(int entity, float position[3])
 
 
 
-public Action timer_EmitRaidoChatterSound(Handle timer, int client)
+public Action timer_EmitRadioChatterSound(Handle timer, int client)
 {
+	if(!IsValidEntity(client))
+		return;
+	
 	float vecOrigin[3];
 	GetEntPropVector(client, Prop_Send, "m_vecOrigin", vecOrigin);
 	vecOrigin[2] += 20.0;
@@ -607,6 +613,9 @@ public Action timer_EmitRaidoChatterSound(Handle timer, int client)
 
 void EmmitCapSound(int client)
 {
+	if(!IsValidEntity(client))
+		return;
+	
 	float vecOrigin[3];
 	GetEntPropVector(client, Prop_Send, "m_vecOrigin", vecOrigin);
 	vecOrigin[2] += 20.0;

@@ -47,9 +47,23 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool dontbroadcast)
 		
 		g_bCantUseVisions[client] = true;
 		
+		CreateTimer(13.0, timer_ChangeSpecMode, client);
 		CreateTimer(9.0, timer_AllowVisions, client);
 	}
 }
+
+
+public Action timer_ChangeSpecMode(Handle timer, int client)
+{
+	if(!IsClientInGame(client))
+		return;
+
+	if(GetEntProp(client, Prop_Data, "m_iObserverMode") != 4)
+	{
+		SetEntProp(client, Prop_Data, "m_iObserverMode", 4);
+	}
+}
+
 
 public Action timer_AllowVisions(Handle timer, int client)
 {

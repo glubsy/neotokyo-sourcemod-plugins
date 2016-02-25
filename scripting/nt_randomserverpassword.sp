@@ -117,9 +117,16 @@ public Action:GeneratePassword(client, args)
 //	PrintToConsole(client, "password2 changed to: %s", password2);
 //	PrintToConsole(client, "password3 changed to: %s", password3);
 //	PrintToConsole(client, "password4 changed to: %s", password4);
-	PrintToConsole(client, "==================================");
-	PrintToConsole(client, "Server password changed to: %s", password);
-	PrintToConsole(client, "==================================");
+	
+	for(int id = 1; id < MaxClients; id++)
+	{
+		if(!IsClientInGame(id))
+			continue; 
+		
+		PrintToConsole(id, "==================================");
+		PrintToConsole(id, "Server password changed to: %s", password);
+		PrintToConsole(id, "==================================");
+	}
 	LogMessage("%s changed the server password to: %s", name, password);
 }
 
