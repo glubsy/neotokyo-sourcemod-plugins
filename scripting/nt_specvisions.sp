@@ -55,7 +55,7 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool dontbroadcast)
 
 public Action timer_ChangeSpecMode(Handle timer, int client)
 {
-	if(!IsClientInGame(client))
+	if(!IsClientInGame(client) || IsPlayerAlive(client))
 		return;
 
 	if(GetEntProp(client, Prop_Data, "m_iObserverMode") != 4)
@@ -177,7 +177,7 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 
 public void OnRoundStart(Handle event, const char[] name, bool Broadcast)
 {
-	for(int client = 1; client < MaxClients; client++)
+	for(int client = 1; client <= MaxClients; client++)
 	{
 		if(!IsClientConnected(client) || !IsClientInGame(client))
 			continue;

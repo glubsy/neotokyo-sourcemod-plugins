@@ -632,7 +632,7 @@ public Action UpdateAlivePlayersArrays(Handle timer)
 	int countJinrai = 0;
 	int totalcount = 0;
 	
-	for(int i = 1; i < MaxClients; i++)
+	for(int i = 1; i <= MaxClients; i++)
 	{
 		if(!IsValidEntity(i))
 			continue; 
@@ -650,7 +650,7 @@ public Action UpdateAlivePlayersArrays(Handle timer)
 		{
 			g_iNSFPlayer[countNSF] = i;
 			
-			if(countNSF < 5)
+			if(countNSF < 4)
 				countNSF++;
 			
 			totalcount++;
@@ -659,7 +659,7 @@ public Action UpdateAlivePlayersArrays(Handle timer)
 		{
 			g_iJINRAIPlayer[countJinrai] = i;
 
-			if(countJinrai < 5)
+			if(countJinrai < 4)
 				countJinrai++;
 			
 			totalcount++;
@@ -677,12 +677,14 @@ public Action UpdateAlivePlayersArrays(Handle timer)
 
 public void OnRoundStart(Handle event, const char[] name, bool Broadcast)
 {
-	for(int client = 1; client < MaxClients; client++)
+	for(int client = 1; client <= MaxClients; client++)
 	{
-		if(!IsClientConnected(client) || !IsClientInGame(client) || !IsValidEntity(client))
+		if(!IsClientInGame(client) || !IsValidEntity(client))
 			continue;
+
 		if(GetClientTeam(client) > 1)
 			continue;
+
 		CreateTimer(0.3, timer_ChangeSpecMode, client);	
 	}
 	
@@ -691,8 +693,12 @@ public void OnRoundStart(Handle event, const char[] name, bool Broadcast)
 
 public Action timer_ChangeSpecMode(Handle timer, int client)
 {
-	//ClientCommand(client, "spec_mode");	
-	SetEntProp(client, Prop_Send, "m_iObserverMode", 4);
+	if(!IsClientInGame(client) || IsPlayerAlive(client))
+		return;
+
+	//ClientCommand(client, "spec_mode");
+	//ClientCommand(client, "spec_mode");
+	SetEntProp(client, Prop_Send, "m_iObserverMode", 4);  //causes problems if player is alive and spawning?
 }
 
 
