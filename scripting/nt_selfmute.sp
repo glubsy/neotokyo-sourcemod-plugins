@@ -16,6 +16,7 @@ Handle convar_alltalk = INVALID_HANDLE;
 Handle convar_nt_alltalk = INVALID_HANDLE;
 Handle convar_nt_deadtalk = INVALID_HANDLE;
 Handle convar_voicefix = INVALID_HANDLE;
+Handle convar_endround_alltalk = INVALID_HANDLE;
 int g_iClientTeam[MAXPLAYERS+1];
 
 
@@ -740,14 +741,14 @@ public Action OnPlayerChangeTeam(Handle event, const char[] name, bool Dontbroad
 			}
 		}
 		
-		return Plugin_Continue;	
+		return Plugin_Continue;
 	}
-	return Plugin_Continue;	
 }
 
 
 
 // NOT USED ANYMORE
+
 public Action OnCommand(int client, const char[] command, int argc) 
 {
 	char sArg[3];
@@ -870,7 +871,6 @@ public Action OnCommand(int client, const char[] command, int argc)
 			return Plugin_Continue;
 		}
 	}
-	
 	return Plugin_Continue;
 }
 
@@ -900,7 +900,7 @@ public OnClientPutInServer(int client)
 public Action OnPlayerDeath(Handle event, const char[] name, bool Dontbroadcast)
 {
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
-	int team = GetClientTeam(client)
+	int team = GetClientTeam(client);
 	g_iClientTeam[client] = team;
 
 	if(GetConVarBool(convar_voicefix))
@@ -910,7 +910,7 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool Dontbroadcast)
 
 
 
-	if(team >= 1) //NSF
+	if(team >= 1) 
 	{
 		for (int id = 1; id <= MaxClients ; id++)
 		{
@@ -939,12 +939,7 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool Dontbroadcast)
 			}
 		}
 	}
-
-
-
-
 }
-
 
 
 
@@ -958,7 +953,7 @@ public Action OnPlayerSpawn(Handle event, const char[] name, bool Dontbroadcast)
 		RefreshOverrideFlags();
 	}
 	
-	/*
+	
 	if(IsPlayerAlive(client))
 	{
 		//can't hear spectators anymore
@@ -1039,7 +1034,7 @@ public Action OnPlayerSpawn(Handle event, const char[] name, bool Dontbroadcast)
 	{
 		return Plugin_Continue;
 	}
-	*/
+	
 }
 
 
