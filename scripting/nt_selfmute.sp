@@ -112,7 +112,7 @@ public void OnCvarChanged(Handle convar, char[] oldValue, char[] newValue)
 		SetConVarString(convar_alltalk, "1");
 		//return Plugin_Handled;
 	}
-	if(StrContains(cvarName, "nt_voicefix_enabled") == 0 && StrEqual(newValue, "0"))
+	if(StrContains(cvarName, "nt_voicefix_enabled") == 1 && StrEqual(newValue, "0"))
 	{
 		SetConVarString(convar_alltalk, "0");
 		//return Plugin_Handled;
@@ -188,7 +188,8 @@ public void OnCvarChanged(Handle convar, char[] oldValue, char[] newValue)
 						SetListenOverride(client, id, Listen_Default);
 				}
 			}
-			RefreshOverrideFlags();
+
+			CreateTimer(3.0, timer_ResetFlags);
 		}
 	}
 }
@@ -236,7 +237,7 @@ public Action timer_clearAlltalk(Handle timer)
 public Action timer_ResetFlags(Handle timer)
 {
 	#if DEBUG > 0
-	PrintToChatAll("Timer: Round start, refreshing override flags");
+	PrintToChatAll("Timer: refreshing override flags");
 	#endif
 	RefreshOverrideFlags();
 }
@@ -252,7 +253,7 @@ public void RefreshOverrideFlags()
 		if(!IsClientInGame(client) || IsFakeClient(client))
 			continue;
 
-		for(int id = 1; id <= MaxClients ; id++)
+		for(int id = 1; id <= MaxClients; id++)
 		{
 			if(!IsClientInGame(id) || IsFakeClient(client))
 				continue;
@@ -266,6 +267,49 @@ public void RefreshOverrideFlags()
 				SetListenOverride(client, id, Listen_No);
 			}
 			
+
+
+			if(g_iClientTeam[client] != g_iClientTeam[id])  //not the same team
+			{
+				if(g_iClientTeam[client] <= 1) //spectating, we can hear them, they can't hear us, unless they're dead
+				{
+					if(!g_bMutedPlayerFor[client][id])
+						SetListenOverride(client, id, Listen_Yes);
+					
+					if(IsPlayerAlive(id))
+						SetListenOverride(id, client, Listen_No);
+					else
+						if(!g_bMutedPlayerFor[id][client] && GetConVarBool(convar_spectator_voice_enabled))
+							SetListenOverride(id, client, Listen_Yes);
+				}
+				else //we are in different playing teams
+				{
+					if(IsPlayerAlive(client))
+					{
+						SetListenOverride(client, id, Listen_No);
+						//no need to set for id, it's in the loop already
+					}
+					else //client is dead
+					{
+						if(GetConVarInt(convar_nt_deadtalk) == 2)
+						{
+							SetListenOverride(client, id, Listen_No);
+						}
+						if(GetConVarInt(convar_nt_deadtalk) == 1)
+						{
+							if(!g_bMutedPlayerFor[client][id])
+							{
+								SetListenOverride(client, id, Listen_Yes);
+							}
+						}
+						if(GetConVarInt(convar_nt_deadtalk) == 0)
+						{
+							SetListenOverride(client, id, Listen_No);
+						}
+					}
+				}
+			}
+
 
 
 
@@ -325,56 +369,13 @@ public void RefreshOverrideFlags()
 								SetListenOverride(client, id, Listen_Yes);
 						}
 					}
-					else if(!IsPlayerAlive(client) && !IsPlayerAlive(id))//we're both dead
+					else if(!IsPlayerAlive(client) && !IsPlayerAlive(id))  //we're both dead
 					{
 						if(!g_bMutedPlayerFor[id][client])
 							SetListenOverride(id, client, Listen_Yes);
 						
 						if(!g_bMutedPlayerFor[client][id])
 							SetListenOverride(client, id, Listen_Yes);
-					}
-				}
-			}
-
-
-
-			if(g_iClientTeam[client] != g_iClientTeam[id])  //not the same team
-			{
-				if(g_iClientTeam[client] <= 1) //spectating, we can hear them, they can't hear us, unless they're dead
-				{
-					if(!g_bMutedPlayerFor[client][id])
-						SetListenOverride(client, id, Listen_Yes);
-					
-					if(IsPlayerAlive(id))
-						SetListenOverride(id, client, Listen_No);
-					else
-						if(!g_bMutedPlayerFor[id][client] && GetConVarBool(convar_spectator_voice_enabled))
-							SetListenOverride(id, client, Listen_Yes);
-				}
-				else //we are in a playing team, we follow deadtalk rules and alive/dead rules
-				{
-					if(IsPlayerAlive(client))
-					{
-						SetListenOverride(client, id, Listen_No);
-						//no need to set for id, it's in the loop already
-					}
-					else //client is dead
-					{
-						if(GetConVarInt(convar_nt_deadtalk) == 2)
-						{
-							SetListenOverride(client, id, Listen_No);
-						}
-						if(GetConVarInt(convar_nt_deadtalk) == 1)
-						{
-							if(!g_bMutedPlayerFor[client][id])
-							{
-								SetListenOverride(client, id, Listen_Yes);
-							}
-						}
-						if(GetConVarInt(convar_nt_deadtalk) == 0)
-						{
-							SetListenOverride(client, id, Listen_No);
-						}
 					}
 				}
 			}
