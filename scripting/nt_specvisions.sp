@@ -13,7 +13,7 @@ public Plugin:myinfo =
 	name = "NEOTOKYO° Vision modes for spectators",
 	author = "glub, soft as HELL",
 	description = "Thermal vision and night vision for spectators",
-	version = "0.11",
+	version = "0.12",
 	url = "https://github.com/glubsy"
 }
 
@@ -30,7 +30,7 @@ public Action OnPlayerSpawn(Handle event, const char[] name, bool dontbroadcast)
 {
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
 
-	if(!IsClientConnected(client) || !IsClientInGame(client))
+	if(!IsClientConnected(client) || !IsClientInGame(client) || IsFakeClient(client))
 		return;
 		
 	SetEntProp(client, Prop_Send, "m_iVision", 0);
@@ -55,7 +55,7 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool dontbroadcast)
 
 public Action timer_ChangeSpecMode(Handle timer, int client)
 {
-	if(!IsClientInGame(client) || IsPlayerAlive(client))
+	if(!IsClientInGame(client) || IsPlayerAlive(client) || IsFakeClient(client))
 		return;
 
 	if(GetEntProp(client, Prop_Data, "m_iObserverMode") != 4)
@@ -179,7 +179,7 @@ public void OnRoundStart(Handle event, const char[] name, bool Broadcast)
 {
 	for(int client = 1; client <= MaxClients; client++)
 	{
-		if(!IsClientConnected(client) || !IsClientInGame(client))
+		if(!IsClientConnected(client) || !IsClientInGame(client) || IsFakeClient(client))
 			continue;
 		
 		if(GetClientTeam(client) <= 1)

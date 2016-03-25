@@ -1,6 +1,4 @@
-//
-//TODO: play sound for spectators when ghost is picked up
-//TODO: bind !cameraman for other spectators
+//TODO: bind !cameraman to have casters use the same point of view
 //
 
 #include <sourcemod>
@@ -10,7 +8,7 @@
 #include <neotokyo>
 #include <clientprefs>
 #define DEBUG 0
-#define PLUGIN_VERSION "0.4"
+#define PLUGIN_VERSION "0.41"
 
 //Players
 int g_iNSFPlayer[5];
@@ -58,8 +56,8 @@ public void OnPluginStart()
 	
 	for(int client = 1; client < MaxClients; client++)
 	{
-		if(!IsValidEntity(client) || !IsClientConnected(client) || !IsClientInGame(client))
-			continue;	
+		if(!IsValidEntity(client) || !IsClientConnected(client) || !IsClientInGame(client) || IsFakeClient(client))
+			continue;
 		ProcessCookies(client);
 	}
 }
@@ -679,7 +677,7 @@ public void OnRoundStart(Handle event, const char[] name, bool Broadcast)
 {
 	for(int client = 1; client <= MaxClients; client++)
 	{
-		if(!IsClientInGame(client) || !IsValidEntity(client))
+		if(!IsClientInGame(client) || !IsValidEntity(client) || IsFakeClient(client))
 			continue;
 
 		if(GetClientTeam(client) > 1)
@@ -693,7 +691,7 @@ public void OnRoundStart(Handle event, const char[] name, bool Broadcast)
 
 public Action timer_ChangeSpecMode(Handle timer, int client)
 {
-	if(!IsClientInGame(client) || IsPlayerAlive(client))
+	if(!IsClientInGame(client) || IsPlayerAlive(client) || IsFakeClient(client))
 		return;
 
 	//ClientCommand(client, "spec_mode");
