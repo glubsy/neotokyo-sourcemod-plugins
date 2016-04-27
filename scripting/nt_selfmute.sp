@@ -5,7 +5,7 @@
 #include <adminmenu>
 
 #define DEBUG 0
-#define PLUGIN_VERSION "1.4"
+#define PLUGIN_VERSION "1.5"
 
 //TODO: make cookies to save muted players?
 //TODO: check last player death and activates alltalk -incompatible with slowmotion plugin!-
@@ -18,6 +18,7 @@ Handle convar_nt_deadtalk = INVALID_HANDLE;
 Handle convar_voicefix = INVALID_HANDLE;
 Handle convar_endround_alltalk = INVALID_HANDLE;
 int g_iClientTeam[MAXPLAYERS+1];
+bool g_bAllTalkVotedOn;
 
 
 public Plugin myinfo = 
@@ -42,7 +43,7 @@ public OnPluginStart()
 	CreateConVar("sm_selfmute_version", PLUGIN_VERSION, "Version of Self-Mute", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
 	
 	convar_spectator_voice_enabled = CreateConVar("sm_selfmute_spectator_voice_enabled", "1", "Enable spectators to talk to dead players", FCVAR_PLUGIN|FCVAR_SPONLY);
-	convar_voicefix = CreateConVar("nt_voicefix_enabled", "1", "Enables sv_alltalk and uses overrides to control voice broadcasting", FCVAR_PLUGIN|FCVAR_SPONLY);
+	convar_voicefix = CreateConVar("nt_voicefix_enabled", "0", "Enables sv_alltalk and uses overrides to control voice broadcasting", FCVAR_PLUGIN|FCVAR_SPONLY);
 	convar_endround_alltalk = CreateConVar("nt_endroundalltalk", "1", "Activates alltalk on ghost capture", FCVAR_PLUGIN|FCVAR_SPONLY);
 	
 	convar_nt_alltalk = CreateConVar("nt_alltalk", "0", "Alltalk for Neotokyo", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED);
@@ -73,6 +74,7 @@ public OnPluginStart()
 	HookEvent("server_cvar", Event_ServerCvar, EventHookMode_Pre);
 }
 
+
 public void OnConfigsExecuted()
 {
 	if(GetConVarBool(convar_voicefix))
@@ -83,6 +85,9 @@ public void OnConfigsExecuted()
 			LogError("Couldn't find sv_alltalk!");
 	}
 }
+
+
+
 
 public void Event_ServerCvar(Handle event, const char[] name, bool Dontbroadcast)
 {
@@ -100,6 +105,7 @@ public void Event_ServerCvar(Handle event, const char[] name, bool Dontbroadcast
 		//return Plugin_Continue;
 	}
 }
+
 
 public void OnCvarChanged(Handle convar, char[] oldValue, char[] newValue)
 {
@@ -194,14 +200,34 @@ public void OnCvarChanged(Handle convar, char[] oldValue, char[] newValue)
 	}
 }
 
+public OnVotedAllTalk(int cvarvalue)
+{
+	if(cvarvalue >= 1) //sv_alltalk has been voted 1
+	{
+		g_bAllTalkVotedOn = true;
+	}
+	if(cvarvalue == 0)
+	{
+		g_bAllTalkVotedOn = false;
+	}
+}
+
+
 public OnGhostCapture(int client)
 {
 	if(GetConVarBool(convar_endround_alltalk))
 	{
 		if(!GetConVarBool(convar_voicefix))
 		{
-			SetConVarString(convar_alltalk, "1");
-			SetConVarString(convar_nt_alltalk, "1");
+			if(g_bAllTalkVotedOn)
+			{
+				return;
+			}
+			else
+			{
+				SetConVarString(convar_alltalk, "1");
+				//SetConVarString(convar_nt_alltalk, "1");
+			}
 		}
 		else // we assume sv_alltalk is always 1 with voicefix active, we don't touch it
 		{
@@ -224,8 +250,15 @@ public Action timer_clearAlltalk(Handle timer)
 	{
 		if(!GetConVarBool(convar_voicefix))
 		{
-			SetConVarString(convar_alltalk, "0");
-			SetConVarString(convar_nt_alltalk, "0");
+			if(g_bAllTalkVotedOn)
+			{
+				return;  //we don't reset sv_alltalk because we voted to keep it on
+			}
+			else
+			{
+				SetConVarString(convar_alltalk, "0");
+				//SetConVarString(convar_nt_alltalk, "0");
+			}
 		}
 		else // we assume sv_alltalk is always 1 with voicefix active, we don't touch it
 		{
@@ -248,6 +281,9 @@ public Action timer_ResetFlags(Handle timer)
 
 public void RefreshOverrideFlags()
 {
+	if(GetConVarBool(convar_alltalk) && g_bAllTalkVotedOn)
+		return;
+
 	for(int client = 1; client <= MaxClients; client++)
 	{	
 		if(!IsClientInGame(client) || IsFakeClient(client))
@@ -426,7 +462,12 @@ public Action OnPlayerChangeTeam(Handle event, const char[] name, bool Dontbroad
 					}
 					else
 					{
-						if(GetConVarBool(convar_spectator_voice_enabled))
+						if(GetConVarBool(convar_alltalk) && !GetConVarBool(convar_voicefix)) //we use regular sv_alltalk 
+						{
+							SetListenOverride(id, client, Listen_Yes);
+						}
+
+						else if(GetConVarBool(convar_spectator_voice_enabled))
 						{
 							if(!GetConVarBool(convar_voicefix))
 								SetListenOverride(id, client, Listen_Default); //other can hear him
@@ -441,27 +482,37 @@ public Action OnPlayerChangeTeam(Handle event, const char[] name, bool Dontbroad
 					}
 					else
 					{
-						if(!GetConVarBool(convar_voicefix))
+						if(GetConVarBool(convar_alltalk) && !GetConVarBool(convar_voicefix)) //we use regular sv_alltalk 
+						{
+							SetListenOverride(id, client, Listen_Yes);
+						}
+
+						else if(!GetConVarBool(convar_alltalk) && !GetConVarBool(convar_voicefix))
 							SetListenOverride(client, id, Listen_Default);
 						else
 							SetListenOverride(client, id, Listen_Yes);
 					}
 				}
-				else //id is alive
+				else //id is alive, normally id cannot hear client, but client can hear id
 				{
 					if(g_bMutedPlayerFor[client][id])
 					{
 						SetListenOverride(client, id, Listen_No); //client muted id
 					}
-					else
+					else //client has not muted id
 					{
-						if(!GetConVarBool(convar_voicefix))
+						if(GetConVarBool(convar_alltalk) && !GetConVarBool(convar_voicefix)) //we use regular sv_alltalk 
+						{
+							SetListenOverride(client, id, Listen_Default);
+						}
+
+						else if(!GetConVarBool(convar_alltalk) && !GetConVarBool(convar_voicefix))
 							SetListenOverride(client, id, Listen_Default);
 						else
 							SetListenOverride(client, id, Listen_Yes); //client can hear id
 					}
 
-					if(GetConVarBool(convar_nt_alltalk)) //we assume sv_alltalk 1 and nt_alltalk 1, so voicefix_enabled 1 too
+					if(GetConVarBool(convar_nt_alltalk) && GetConVarBool(convar_voicefix)) //we assume sv_alltalk 1 and nt_alltalk 1, so voicefix_enabled 1 too
 						SetListenOverride(id, client, Listen_Yes);
 					else
 						SetListenOverride(id, client, Listen_No); //alive id in teams ignore the new spectator until they die
@@ -510,25 +561,30 @@ public Action OnPlayerChangeTeam(Handle event, const char[] name, bool Dontbroad
 		
 		for(int id = 1; id <= MaxClients; id++)
 		{
-			if(id != client && IsClientInGame(id) && GetClientTeam(id) >= 1) //all the ids in teams can hear
+			if(id != client && IsClientInGame(id) && GetClientTeam(id) >= 1) //all the ids in teams can hear client
 			{
 				if(g_bMutedPlayerFor[id][client]) //unless they muted him before
 				{
 					SetListenOverride(id, client, Listen_No);
 				}
-				else
+				else //id has not muted client
 				{
 					if(g_bMutedPlayerFor[client][id])
 						SetListenOverride(client, id, Listen_No); 
 					else
 					{
-						if(!GetConVarBool(convar_voicefix))
+						if(GetConVarBool(convar_alltalk) && !GetConVarBool(convar_voicefix)) //we use regular sv_alltalk 
+						{
+							SetListenOverride(client, id, Listen_Default);
+						}
+
+						if(!GetConVarBool(convar_alltalk) && !GetConVarBool(convar_voicefix))
 							SetListenOverride(client, id, Listen_Default);
 						else
-							SetListenOverride(client, id, Listen_Yes); //client in team can hear all ids
+							SetListenOverride(client, id, Listen_Yes); //client in team can hear ALL ids
 					}
 
-					if(IsPlayerAlive(id) && !GetConVarBool(convar_nt_alltalk))
+					if((IsPlayerAlive(id) && !GetConVarBool(convar_nt_alltalk)) || (IsPlayerAlive(id) && !GetConVarBool(convar_alltalk)))
 					{
 						SetListenOverride(id, client, Listen_No); //id in team can't hear client if id is alive
 					}
@@ -559,7 +615,7 @@ public Action OnPlayerSpawn(Handle event, const char[] name, bool Dontbroadcast)
 		//RefreshOverrideFlags();
 		return Plugin_Continue;
 	}
-	else
+	else //client is alive
 	{
 		for(int id = 1; id <= MaxClients ; id++)
 		{
@@ -574,6 +630,7 @@ public Action OnPlayerSpawn(Handle event, const char[] name, bool Dontbroadcast)
 					SetListenOverride(client, id, Listen_No);
 				}
 				
+
 				if(g_iClientTeam[id] != g_iClientTeam[client]) //not same team
 				{
 					if(g_iClientTeam[id] == 1) //id is spectating
@@ -587,7 +644,51 @@ public Action OnPlayerSpawn(Handle event, const char[] name, bool Dontbroadcast)
 					
 					if(g_iClientTeam[id] == 2) //but client is NOT 2 (could be 1 or 3)
 					{
-						if(GetConVarInt(convar_nt_alltalk) == 1) //custom alltalk is on
+						if(GetConVarInt(convar_nt_alltalk) == 1 && GetConVarBool(convar_voicefix)) //custom alltalk is on
+							if(!g_bMutedPlayerFor[id][client])
+								SetListenOverride(id, client, Listen_Yes);
+
+						if(GetConVarInt(convar_alltalk) == 1 && GetConVarBool(convar_voicefix)) //voicefix standard situation
+						{
+							if(g_iClientTeam[client] == 1) //client can listen to id
+							{
+								if(!g_bMutedPlayerFor[client][id])
+									SetListenOverride(client, id, Listen_Yes);
+
+								if(!g_bMutedPlayerFor[id][client])
+									SetListenOverride(id, client, Listen_No);
+							}
+							else //client and id are opposite teams!
+							{
+								SetListenOverride(id, client, Listen_No);	//opposite team (3), can't hear if alltalk is on
+								SetListenOverride(client, id, Listen_No);
+							}
+						}
+
+						if(GetConVarInt(convar_alltalk) == 1 && !GetConVarBool(convar_voicefix)) //sv_alltalk is on
+						{
+							if(g_iClientTeam[client] == 1)
+							{
+								if(!g_bMutedPlayerFor[client][id])
+									SetListenOverride(client, id, Listen_Default);
+
+								if(!g_bMutedPlayerFor[id][client])
+									SetListenOverride(id, client, Listen_Default);
+							}
+						}
+						
+						if(GetConVarInt(convar_alltalk) == 0 && !GetConVarBool(convar_voicefix))
+								SetListenOverride(id, client, Listen_No); //we don't use sv_alltalk
+					}
+					
+
+
+
+
+
+					if(g_iClientTeam[id] == 3)
+					{
+						if(GetConVarInt(convar_nt_alltalk) == 1 && GetConVarBool(convar_voicefix)) //custom alltalk is on
 							if(!g_bMutedPlayerFor[id][client])
 								SetListenOverride(id, client, Listen_Yes);
 
@@ -607,31 +708,16 @@ public Action OnPlayerSpawn(Handle event, const char[] name, bool Dontbroadcast)
 								SetListenOverride(client, id, Listen_No);
 							}
 						}
-						
-						if(GetConVarInt(convar_alltalk) == 0 && !GetConVarBool(convar_voicefix))
-								SetListenOverride(id, client, Listen_No); //we don't use sv_alltalk
-					}
-					
-					if(g_iClientTeam[id] == 3)
-					{
-						if(GetConVarInt(convar_nt_alltalk) == 1) //custom alltalk is on
-							if(!g_bMutedPlayerFor[id][client])
-								SetListenOverride(id, client, Listen_Yes);
 
-						if(GetConVarInt(convar_alltalk) == 1 && GetConVarBool(convar_voicefix))
+						if(GetConVarInt(convar_alltalk) == 1 && !GetConVarBool(convar_voicefix)) //sv_alltalk is on
 						{
 							if(g_iClientTeam[client] == 1)
 							{
 								if(!g_bMutedPlayerFor[client][id])
-									SetListenOverride(client, id, Listen_Yes);
+									SetListenOverride(client, id, Listen_Default);
 
 								if(!g_bMutedPlayerFor[id][client])
-									SetListenOverride(id, client, Listen_No);
-							}
-							else //client and id are opposite teams!
-							{
-								SetListenOverride(id, client, Listen_No);	//opposite team (3), can't hear if alltalk is on
-								SetListenOverride(client, id, Listen_No);
+									SetListenOverride(id, client, Listen_Default);
 							}
 						}
 
@@ -686,9 +772,9 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool Dontbroadcast)
 					{
 						SetListenOverride(id, client, Listen_No);
 					}
-					else
+					else //id has not muted client who just died
 					{
-						if(g_bMutedPlayerFor[client][id]) //if client muted id
+						if(g_bMutedPlayerFor[client][id])
 						{
 							SetListenOverride(client, id, Listen_No);
 						}
@@ -697,8 +783,13 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool Dontbroadcast)
 							SetListenOverride(client, id, Listen_Default); //client in team can hear all ids
 							
 							if(IsPlayerAlive(id))
-								SetListenOverride(id, client, Listen_No); //id in team can't hear client if id is alive
-							else
+							{
+								if(GetConVarBool(convar_alltalk))
+									SetListenOverride(id, client, Listen_Default); //id in team can't hear client if id is alive
+								else
+									SetListenOverride(id, client, Listen_No); //id in team can't hear client if id is alive
+							}
+							else // id is dead too
 								SetListenOverride(id, client, Listen_Default);
 						}
 					}
@@ -729,7 +820,14 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool Dontbroadcast)
 							SetListenOverride(client, id, Listen_Yes); //client in team can hear all ids
 							
 							if(IsPlayerAlive(id))
-								SetListenOverride(id, client, Listen_No); //id in team can't hear client if id is alive
+							{
+								if(GetConVarBool(convar_nt_alltalk))
+								{
+									SetListenOverride(id, client, Listen_Yes);
+								}
+								else
+									SetListenOverride(id, client, Listen_No); //id in team can't hear client if id is alive
+							}
 							else
 								SetListenOverride(id, client, Listen_Yes);
 						}
