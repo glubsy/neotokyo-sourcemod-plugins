@@ -4,7 +4,7 @@
 #define PLUGIN_VERSION "0.4"
 #define MESSAGE_LASTMAN "You are the last man standing! Time to !seppuku"
 #define MESSAGE_DUEL 	"You are dueling against enemy last player, don't drag this out!"
-#define DEBUG 0
+#define DEBUG 1
 
 bool g_MessageShownLast[MAXPLAYERS+1];
 Handle hPlayerCounter;
@@ -17,7 +17,9 @@ Handle g_TimerSlowMotion = INVALID_HANDLE;
 Handle hGravity, hPhysTimeScale;
 Handle hCheatCvar = INVALID_HANDLE;
 Handle hHostTimeScale = INVALID_HANDLE;
-
+Handle convar_nt_deathmatch = INVALID_HANDLE;
+Handle g_hForwardLastManDeath = INVALID_HANDLE;
+bool g_bStartedSlowmo, g_bDeathMatchActive;
 
 new const String:g_SloMoSound[][] = { 
 	"custom/slowmoin.mp3",
@@ -42,6 +44,8 @@ public OnPluginStart()
 	HookEvent("player_death", Event_PlayerDeath, EventHookMode_Pre);
 	HookEvent("player_disconnect", Event_PlayerDisconnect, EventHookMode_Post);
 	
+	g_hForwardLastManDeath = CreateGlobalForward("OnLastManDeath", ET_Event, Param_Cell);
+
 	hGravity = FindConVar("sv_gravity");
 	hPhysTimeScale = FindConVar("phys_timescale");
 	hCheatCvar = FindConVar("sv_cheats");
@@ -78,14 +82,24 @@ public Action Event_RoundStart(Handle event, const char[] name, bool dontBroadca
 		hPlayerCounter = INVALID_HANDLE;
 	}
 
-	
+	convar_nt_deathmatch = FindConVar("nt_tdm_enabled");
+	if(convar_nt_deathmatch != INVALID_HANDLE)
+	{
+		if(GetConVarFloat(convar_nt_deathmatch) > 0.0)
+			g_bDeathMatchActive = true;		//we don't want to fire slomo in deathmatch mode
+		else
+			g_bDeathMatchActive = false;
+	}
+
+	g_bStartedSlowmo = false;
+
 	lastJin = 0;
 	lastNsf = 0;
 	
 	if(GetConVarBool(convar_slowmotion_enabled))
 	{
 		#if DEBUG > 0
-		PrintToChatAll("Resetting cvars");
+		PrintToChatAll("Slowmo: Resetting cvars");
 		#endif 
 		
 		if(GetConVarBool(hCheatCvar))
@@ -125,12 +139,22 @@ public Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 	if(hPlayerCounter == INVALID_HANDLE)
 		hPlayerCounter = CreateTimer(0.1, CountPlayers);
 	
-	if(GetConVarBool(convar_slowmotion_enabled))
-	{		
-		int client = GetClientOfUserId(GetEventInt(event, "userid"));
-		
-		if(client == lastJin && g_bLastManStanding[client] || client == lastNsf && g_bLastManStanding[client])
+	if(g_bDeathMatchActive)
+		return;
+
+	int client = GetClientOfUserId(GetEventInt(event, "userid"));
+	
+	if(client == lastJin && g_bLastManStanding[client] || client == lastNsf && g_bLastManStanding[client])
+	{
+		PushOnLastManDeath(client); 				//calling forward for the last man standing who died
+	
+		if(GetConVarBool(convar_slowmotion_enabled))
 		{
+			if(g_bStartedSlowmo)
+				return;
+
+			g_bStartedSlowmo = true; 				//we don't want to fire twice in case of a duel ending with 2 deaths
+
 			#if DEBUG > 0
 			PrintToChatAll("Starting slowmotion");
 			#endif 
@@ -371,6 +395,15 @@ public OnMapEnd()
 	if(g_TimerSlowMotion != INVALID_HANDLE)
 		g_TimerSlowMotion = INVALID_HANDLE;	
 }
+
+void PushOnLastManDeath(int client)
+{
+	Call_StartForward(g_hForwardLastManDeath);
+	Call_PushCell(client);
+	Call_Finish();
+}
+
+
 
 /*
 stock void StopSoundPerm(char[] sound)

@@ -5,7 +5,7 @@
 #include <adminmenu>
 
 #define DEBUG 0
-#define PLUGIN_VERSION "1.6"
+#define PLUGIN_VERSION "1.61"
 
 //TODO: make cookies to save muted players?
 //TODO: check last player death and activates alltalk -incompatible with slowmotion plugin!-
@@ -17,6 +17,8 @@ Handle convar_nt_alltalk = INVALID_HANDLE;
 Handle convar_nt_deadtalk = INVALID_HANDLE;
 Handle convar_voicefix = INVALID_HANDLE;
 Handle convar_endround_alltalk = INVALID_HANDLE;
+Handle convar_roundtimelimit = INVALID_HANDLE;
+Handle TieTimer = INVALID_HANDLE;
 int g_iClientTeam[MAXPLAYERS+1];
 bool g_bAllTalkVotedOn;
 bool g_bEndOfRoundAllTalk;
@@ -33,7 +35,8 @@ public Plugin myinfo =
 
 //====================================================================================================
 //	If voicefix is active, it will set sv_alltalk to 1 by default. 
-//	NOTICE: you need to change sv_alltalk to nt_alltalk in funvotes.sp for !votealltalk to redirect to the new convar!
+//	NOTICE: you need to change sv_alltalk to nt_alltalk in funvotes.sp for !votealltalk to redirect to the new convar. Not recommended currently.
+//	DEPENDENCIES: funvotes-NT, nt_slowmotion, nt_ghostcap 1.6
 //
 //	CREDITS: based on Self-Mute plugin by Otokiru (Idea+Source) // TF2MOTDBackpack (PlayerList Menu)
 //====================================================================================================
@@ -50,6 +53,7 @@ public OnPluginStart()
 	convar_nt_alltalk = CreateConVar("nt_alltalk", "0", "Alltalk for Neotokyo", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED);
 	convar_nt_deadtalk = CreateConVar("nt_deadtalk", "1", "Neotokyo controls for how dead communicate. 0 - Off. 1 - Dead players ignore teams. 2 - Dead players talk to living teammates.", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY, true, 0.0, true, 2.0);
 	convar_alltalk = FindConVar("sv_alltalk");
+	convar_roundtimelimit = FindConVar("neo_round_timelimit");
 	
 	
 	RegAdminCmd("sm_sm", selfMute, 0, "Mute player by typing !selfmute [playername]");
@@ -219,6 +223,38 @@ public OnVotedAllTalk(int cvarvalue)
 
 public OnGhostCapture(int client)
 {
+	if(g_bEndOfRoundAllTalk) //already activated once
+		return;
+
+	ActivateEndRoundAllTalk();
+}
+
+public OnLastManDeath(int client)
+{
+	if(g_bEndOfRoundAllTalk) //already activated once
+		return;
+
+	#if DEBUG > 0
+	PrintToChatAll("selfmute: activating alltalk on last man death");
+	#endif
+
+	ActivateEndRoundAllTalk();
+}
+
+public Action timer_TieTimer(Handle timer)
+{
+	if(g_bEndOfRoundAllTalk) //already activated once
+		return;
+
+	#if DEBUG > 0
+	PrintToChatAll("selfmute: activating alltalk on TIE");
+	#endif
+
+	ActivateEndRoundAllTalk();
+}
+
+public void ActivateEndRoundAllTalk()
+{
 	if(GetConVarBool(convar_endround_alltalk))
 	{
 		if(!GetConVarBool(convar_voicefix))
@@ -247,6 +283,18 @@ public OnGhostCapture(int client)
 	}
 }
 
+public void StartTieCountDown()
+{
+	//killing all remaining timers
+	if(TieTimer != INVALID_HANDLE)
+	{
+		KillTimer(TieTimer);
+		TieTimer = INVALID_HANDLE; 
+	}
+	
+	TieTimer = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ), timer_TieTimer, 0, TIMER_FLAG_NO_MAPCHANGE);
+}
+
 
 
 public Action OnRoundStart(Handle event, const char[] name, bool dontbroadcast)
@@ -255,26 +303,29 @@ public Action OnRoundStart(Handle event, const char[] name, bool dontbroadcast)
 		CreateTimer(15.0, timer_clearAlltalk, _, TIMER_FLAG_NO_MAPCHANGE);
 
 	CreateTimer(16.0, timer_ResetFlags, _, TIMER_FLAG_NO_MAPCHANGE);
+
+	StartTieCountDown();
 }
 
 
 
 public Action timer_clearAlltalk(Handle timer)
 {
+	g_bEndOfRoundAllTalk = false;
+
 	if(GetConVarBool(convar_endround_alltalk))
 	{
 		if(!GetConVarBool(convar_voicefix))
 		{
 			if(g_bAllTalkVotedOn)
 			{
-				g_bEndOfRoundAllTalk = false;
+				
 				return;	//we don't reset sv_alltalk because we voted to keep it on
 			}
 			else
 			{
 				SetConVarString(convar_alltalk, "0");
 				//SetConVarString(convar_nt_alltalk, "0");
-				g_bEndOfRoundAllTalk = false;
 			}
 		}
 		else 									//we assume sv_alltalk is always 1 with voicefix active, we don't touch it
