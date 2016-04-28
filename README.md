@@ -1,6 +1,9 @@
 #Neotokyo server-side Sourcemod plugins
 
 **nt_selfmute**: Allows muting player locally (finally), dampens memory leaks by setting sv_alltalk 1 and using overrides to control voice broadcasting.
+*Requires funvotes-NT to work properly!*
+
+**funvotes-NT**: stock Sourcemod script with an added forward to keep track of !votealltalk. 
 
 **nt_ghostcapsfx**: special effects on ghost cap or end of round (ghost explodes, can also damage player) and various added sound effects while carried (requires nt_ghostcap 1.6 and nt_doublecap 0.42!).
 
