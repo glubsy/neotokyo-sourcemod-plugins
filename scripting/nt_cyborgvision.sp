@@ -5,31 +5,50 @@ public Plugin:myinfo =
 {
 	name = "Neotokyo Cyborg Vision",
 	author = "glub",
-	description = "Places an overlay on players' vision",
-	version = "0.1",
+	description = "Places an overlay on players' field of view",
+	version = "0.2",
 	url = "https://github.com/glubsy"
 };
 
 
 //new const String:overlayfile[] = "effects/combine_binocoverlay.vmt";
-bool:g_OverlayDisabled[MAXPLAYERS+1];
-bool:g_OverlayActive[MAXPLAYERS+1];
-new Handle:g_cookies[1];
+bool g_OverlayDisabled[MAXPLAYERS+1];
+bool g_OverlayActive[MAXPLAYERS+1];
+bool g_bPluginEnabled;
+Handle convar_cyborgvision_enabled = INVALID_HANDLE;
+Handle g_cookies[1];
 
 public OnPluginStart(){
 	RegConsoleCmd("sm_vision", Command_ToggleVision, "Toggles cyborg vision on/off.")
+	convar_cyborgvision_enabled = CreateConVar("nt_cyorgvision_enabled", "0", "Enables automatic cyborg vision on connect.")
+
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("player_death", OnPlayerDeath);
+
 	if(!AddCommandListener(Command_JoinTeam, "jointeam"))
 		PrintToServer("jointeam listening not available in this mod!")
 	
-	g_cookies[0] = RegClientCookie("overlay-disabled","cyborg vision disable status", CookieAccess_Public);	
+	g_cookies[0] = RegClientCookie("overlay-disabled","cyborg vision disable status", CookieAccess_Public);
 }
 
-public OnClientCookiesCached(client) {
-}
-public OnClientPostAdminCheck(client)
+public OnConfigsExecuted()
 {
+	if(GetConVarBool(convar_cyborgvision_enabled))
+		g_bPluginEnabled = true;
+}
+
+public OnClientCookiesCached(int client)
+{
+}
+
+public OnClientPostAdminCheck(int client)
+{
+	if(!g_bPluginEnabled)
+	{
+		g_OverlayDisabled[client] = true;
+		return;
+	}
+
 	if (AreClientCookiesCached(client))
 	{
 		ProcessCookies(client);
@@ -41,20 +60,21 @@ public OnClientPostAdminCheck(client)
 	}
 }
 
-public ProcessCookies(client)
+public ProcessCookies(int client)
 {
 	//if(FindClientCookie("overlay-disabled"))
 	//{
 	decl String:cookie[10];
 	GetClientCookie(client, g_cookies[0], cookie, sizeof(cookie));
 
-	
-	if (StrEqual(cookie, "enabled")) {
+	if (StrEqual(cookie, "enabled"))
+	{
 		g_OverlayDisabled[client] = false;
 		CreateTimer(22.0, DisplayNotification, client);
 		return;
 	}
-	if (StrEqual(cookie, "disabled")) {
+	if (StrEqual(cookie, "disabled"))
+	{
 		g_OverlayDisabled[client] = true;
 		CreateTimer(22.0, DisplayNotification, client);
 		return;
@@ -66,7 +86,7 @@ public ProcessCookies(client)
 	return;
 }
 
-public Action:DisplayNotification(Handle:timer, client)
+public Action DisplayNotification(Handle timer, int client)
 {
 	if(client > 0 && IsClientConnected(client) && IsClientInGame(client))
 	{
@@ -83,18 +103,21 @@ public Action:DisplayNotification(Handle:timer, client)
 	}
 }
 
-public Action:Command_ToggleVision(client, args)
+public Action Command_ToggleVision(int client, args)
 {
-	if(g_OverlayDisabled[client]) {
+	if(g_OverlayDisabled[client])
+	{
 		EnableVision(client);	
 		return Plugin_Handled;
 	}
-	else { 
+	else 
+	{ 
 		DisableVision(client);
 		return Plugin_Handled;
 	}
 }
-public Action:EnableVision(client)
+
+public Action EnableVision(int client)
 {
 	g_OverlayDisabled[client] = false;
 	if(IsPlayerAlive(client))
@@ -105,7 +128,8 @@ public Action:EnableVision(client)
 	PrintToChat(client, "[SM] Cyborg vision re-enabled.");
 	SetClientCookie(client, g_cookies[0], "enabled");
 }
-public Action:DisableVision(client)
+
+public Action DisableVision(int client)
 {
 	ClientCommand(client, "r_screenoverlay off");
 	g_OverlayActive[client] = false;
@@ -114,7 +138,7 @@ public Action:DisableVision(client)
 	SetClientCookie(client, g_cookies[0], "disabled");
 }
 
-public OnPlayerSpawn(Handle:event,const String:name[],bool:dontBroadcast)
+public OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
 {
 	new client = GetClientOfUserId(GetEventInt(event, "userid"));
 	new clientTeam = GetClientTeam(client);
@@ -133,7 +157,6 @@ public OnPlayerSpawn(Handle:event,const String:name[],bool:dontBroadcast)
 	
 	if(g_OverlayDisabled[client] == true && IsPlayerAlive(client) && !IsFakeClient(client))
 	{
-		//PrintToServer("overlay is disabled: %d, client: %d", g_OverlayDisabled[client], client); 
 		//do nothing
 		return;
 	}
@@ -144,7 +167,7 @@ public OnPlayerSpawn(Handle:event,const String:name[],bool:dontBroadcast)
 	}
 }
 
-public OnPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
+public OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 {
 	new client = GetClientOfUserId(GetEventInt(event, "userid"));
 	if(g_OverlayActive[client] == true)
@@ -155,9 +178,9 @@ public OnPlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 
 
 
-public Action:Command_JoinTeam(client, const String:command[], argc) 
+public Action Command_JoinTeam(int client, const char[] command, argc) 
 {
-	if(client > 0)
+	if(client > 0 && !g_OverlayDisabled[client])
 	{
 		if(!IsPlayerAlive(client))
 		{
@@ -171,7 +194,7 @@ public Action:Command_JoinTeam(client, const String:command[], argc)
 	return Plugin_Continue;
 }
 
-public Action:ClearOverlay(Handle:timer, client)
+public Action ClearOverlay(Handle timer, int client)
 {
 	if(IsClientConnected(client) && IsClientInGame(client))
 	{
@@ -182,9 +205,9 @@ public Action:ClearOverlay(Handle:timer, client)
 
 public OnMapEnd()
 {
-	for(new i = 1; i < GetMaxClients(); i++)
+	for(new i = 1; i <= MaxClients; i++)
 	{
-		if((IsClientInGame(i) && IsPlayerAlive(i)) && g_OverlayActive[i] == true)
+		if((IsClientInGame(i) && IsPlayerAlive(i)) && g_OverlayActive[i])
 		{
 			ClientCommand(i, "r_screenoverlay off");
 			g_OverlayActive[i] = false;
@@ -192,9 +215,10 @@ public OnMapEnd()
 	}
 }
 
-public OnClientDisconnect(client)
+public OnClientDisconnect(int client)
 {
 	//ClientCommand(client, "r_screenoverlay off");
 	g_OverlayActive[client] = false;
-	g_OverlayDisabled[client] = false;
+	if(g_bPluginEnabled)
+		g_OverlayDisabled[client] = false;
 }

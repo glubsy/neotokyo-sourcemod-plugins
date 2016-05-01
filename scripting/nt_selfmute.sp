@@ -7,9 +7,6 @@
 #define DEBUG 0
 #define PLUGIN_VERSION "1.61"
 
-//TODO: make cookies to save muted players?
-//TODO: check last player death and activates alltalk -incompatible with slowmotion plugin!-
-
 bool g_bMutedPlayerFor[MAXPLAYERS+1][MAXPLAYERS+1];
 Handle convar_spectator_voice_enabled = INVALID_HANDLE;
 Handle convar_alltalk = INVALID_HANDLE;
@@ -37,7 +34,7 @@ public Plugin myinfo =
 //	If voicefix is active, it will set sv_alltalk to 1 by default. 
 //	NOTICE: you need to change sv_alltalk to nt_alltalk in funvotes.sp for !votealltalk to redirect to the new convar. Not recommended currently.
 //	DEPENDENCIES: funvotes-NT, nt_slowmotion, nt_ghostcap 1.6
-//
+//	TODO: make cookies to save muted players?
 //	CREDITS: based on Self-Mute plugin by Otokiru (Idea+Source) // TF2MOTDBackpack (PlayerList Menu)
 //====================================================================================================
 
@@ -243,6 +240,8 @@ public OnLastManDeath(int client)
 
 public Action timer_TieTimer(Handle timer)
 {
+	TieTimer = INVALID_HANDLE; 
+
 	if(g_bEndOfRoundAllTalk) //already activated once
 		return;
 
@@ -1078,6 +1077,11 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool Dontbroadcast)
 	}
 }
 
+public void OnMapEnd()
+{
+	if(TieTimer != INVALID_HANDLE)
+		TieTimer = INVALID_HANDLE;
+}
 
 
 //====================================================================================================

@@ -4,7 +4,7 @@
 #define PLUGIN_VERSION "0.4"
 #define MESSAGE_LASTMAN "You are the last man standing! Time to !seppuku"
 #define MESSAGE_DUEL 	"You are dueling against enemy last player, don't drag this out!"
-#define DEBUG 1
+#define DEBUG 0
 
 bool g_MessageShownLast[MAXPLAYERS+1];
 Handle hPlayerCounter;
@@ -146,7 +146,7 @@ public Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
 	
 	if(client == lastJin && g_bLastManStanding[client] || client == lastNsf && g_bLastManStanding[client])
 	{
-		PushOnLastManDeath(client); 				//calling forward for the last man standing who died
+		PushOnLastManDeath(client); 				//calling forward for the last man standing who died (CAUTION: might get called twice!)
 	
 		if(GetConVarBool(convar_slowmotion_enabled))
 		{

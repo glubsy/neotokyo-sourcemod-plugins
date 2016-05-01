@@ -3,7 +3,7 @@
 #include <sdktools>
 #include <neotokyo>
 
-#define PLUGIN_VERSION "0.1"
+#define PLUGIN_VERSION "0.2"
 #pragma semicolon 1
 #define DEBUG 0
 #define SPAM_TIME 0.20
@@ -15,7 +15,7 @@
 int g_iJumpNum[MAXPLAYERS+1];
 bool g_bSoundLocked[MAXPLAYERS+1];
 bool g_bJumpsDisabled;
-
+bool g_bPluginDisabled;
 Handle convar_nt_funnysounds = INVALID_HANDLE;
 Handle convar_nt_jumpsounds = INVALID_HANDLE;
 
@@ -57,13 +57,19 @@ public Plugin:myinfo =
 public void OnPluginStart()
 {
 	convar_nt_funnysounds = CreateConVar("nt_funnyjumpsounds", "0", "Custom sound effect for jumps 0 = disabled, 1-4");
-	convar_nt_jumpsounds = CreateConVar("nt_jumpsounds", "1", "Enables jump sound effects");
+	convar_nt_jumpsounds = CreateConVar("nt_jumpsounds", "0", "Enables jump sound effects. Refreshed on new map.");
 	//OnConfigsExecuted();
 	HookEvent("game_round_start", OnRoundStart);
 }
 
 public void OnConfigsExecuted()
 {
+	if(!GetConVarBool(convar_nt_jumpsounds))
+	{
+		g_bPluginDisabled = true;
+		return;
+	}
+
 	for(int snd = 0; snd < sizeof(g_sCustomJumpSound); snd++)
 	{
 		PrecacheSound(g_sCustomJumpSound[snd], true);
@@ -75,13 +81,17 @@ public void OnConfigsExecuted()
 	{
 		PrecacheSound(g_sStockSound[snd], true);
 	}
+
 }
 
 public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
+	if(g_bPluginDisabled)
+		return;
+
 	g_bJumpsDisabled = true;
 	
-	CreateTimer(15.0, timer_clearsoundlock, _, TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(15.0, timer_clearsoundlock, _, TIMER_FLAG_NO_MAPCHANGE);  //15 seconds of freeze time
 }
 
 public Action timer_clearsoundlock(Handle timer)
@@ -116,10 +126,10 @@ public void OnGameFrame()
 
 public Action OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:angles[3], &weapon)
 {
-	if(g_bJumpsDisabled)
+	if(g_bPluginDisabled)
 		return;
 
-	if(!GetConVarBool(convar_nt_jumpsounds))
+	if(g_bJumpsDisabled)
 		return;
 
 	if(!IsValidEntity(client) || !IsPlayerAlive(client))
