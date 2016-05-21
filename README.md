@@ -5,7 +5,7 @@
 
 **funvotes-NT**: stock Sourcemod script with an added forward to keep track of !votealltalk. 
 
-**nt_ghostcapsfx**: special effects on ghost cap or end of round (ghost explodes, can also damage player) and various added sound effects while carried (requires nt_ghostcap 1.6 and nt_doublecap 0.42!).
+**nt_ghostcapsfx**: special effects on ghost cap or end of round (ghost explodes, can also damage player) and various added sound effects while carried (requires [nt_ghostcap 1.6](https://github.com/glubsy/nt-sourcemod-plugins/blob/master/scripting/nt_ghostcap.sp) and [nt_doublecap 0.42](https://github.com/glubsy/nt-sourcemod-plugins/blob/master/scripting/nt_doublecap.sp)!).
 
 **nt_jumpsounds**: adds a different jumping sound effect to each class, can enable additional custom sounds too.
 
