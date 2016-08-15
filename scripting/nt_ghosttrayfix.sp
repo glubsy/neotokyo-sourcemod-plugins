@@ -1,72 +1,83 @@
 #include <sourcemod>
 #include <sdkhooks>
-#define PLUGIN_VERSION "0.1"
-#pragma semicolon 1
 
-public Plugin:myinfo = 
+#pragma semicolon 1
+#pragma newdecls required
+
+#define DEBUG 0
+#define COLLISION_GROUP_WEAPON 11
+
+public Plugin myinfo =
 {
 	name = "NEOTOKYO: non solid ghost trays",
-	author = "glub",
+	author = "glub, soft as HELL",
 	description = "Removes collisions for players with ghost trays to avoid being stuck",
-	version = PLUGIN_VERSION,
+	version = "0.2",
 	url = "https://github.com/glubsy"
 }
 
-public OnPluginStart()
+char model_list[][] = {
+	"models/nt/props_tech/ghostcase.mdl",
+	"models/nt/props_tech/monitor_ghostcase.mdl",
+	"models/nt/props_tech/ghostcase_hackbar.mdl"
+};
+
+public void OnEntityCreated(int entity, const char[] classname)
 {
-	HookEvent("game_round_start", OnRoundStart);
+	if(!IsValidEdict(entity))
+		return;
+
+	if(StrContains(classname, "prop_physics", false) == -1)
+		return;
+
+	// Unable to get model name here so we will just have to hook all props
+	SDKHook(entity, SDKHook_SpawnPost, OnPropSpawn);
 }
 
-/*
-public void OnMapStart()
+// Called each round after the prop respawns
+public void OnPropSpawn(int entity)
 {
-	CreateTimer(16.0, timer_ChangeCollisionForGhostCase);
-}*/
+	if(!IsValidEdict(entity))
+		return;
 
+	char classname[32];
+	if(!GetEntityClassname(entity, classname, sizeof(classname)))
+		return; // Can't get class name
 
-public Action OnRoundStart(Handle event, const char[] eventname, bool dontbroadcast)
-{
-	//for some reason, the collision group is reset after freeze time...
-	CreateTimer(16.0, timer_ChangeCollisionForGhostCase);
-}
+	char modelname[64];
+	GetEntPropString(entity, Prop_Data, "m_ModelName", modelname, sizeof(modelname));
 
-public Action timer_ChangeCollisionForGhostCase(Handle timer)
-{
-	for(int prop = MaxClients + 1; prop <= 2048; prop++)
+	for(int i = 0; i < sizeof(model_list); i++)
 	{
-		if(!IsValidEntity(prop))
+		if(!StrEqual(modelname, model_list[i]))
 			continue;
-		
-		char classbuffer[30];
-		GetEntityClassname(prop, classbuffer, sizeof(classbuffer));
-		
-		if(!StrEqual(classbuffer, "prop_physics_multiplayer", false))
-			continue; 
-		
-		char modelname[45];
-		GetEntPropString(prop, Prop_Data, "m_ModelName", modelname, sizeof(modelname));
-		if(StrEqual(modelname, "models/nt/props_tech/ghostcase.mdl", false) || StrEqual(modelname, "models/nt/props_tech/monitor_ghostcase.mdl", false) || StrEqual(modelname, "models/nt/props_tech/ghostcase_hackbar.mdl", false))
-		{
-			SDKHook(prop, SDKHook_Touch, Touch_Hook);
-			SetEntProp(prop, Prop_Send, "m_CollisionGroup", 11); // 2 is fine, but not collisions with weapons, except ghost. :(
-			SetEntProp(prop, Prop_Data, "m_CollisionGroup", 11);
-			SetEntProp(prop, Prop_Data, "m_nSolidType", 6);
-			//SetEntProp(prop, Prop_Data, "m_usSolidFlags", 136); 
 
-			//LogError("[TEST] OnRoundStart changed: %s, collisiongroup prop_send %i, prop_data %i", modelname, GetEntProp(prop, Prop_Send, "m_CollisionGroup"),  GetEntProp(prop, Prop_Data, "m_CollisionGroup"));
-		}
-		
-		
+		#if DEBUG > 0
+		int m_CollisionGroup = GetEntProp(entity, Prop_Send, "m_CollisionGroup");
+
+		PrintToServer("[OnPropSpawn] %s (%d) %s | m_CollisionGroup: %d", classname, entity, modelname, m_CollisionGroup);
+		#endif
+
+		// Collision data isn't properly set yet so we will have to do it later
+		CreateTimer(5.0, ChangePropCollisionGroup, EntIndexToEntRef(entity));
+
+		return;
 	}
 }
 
-public Action Touch_Hook(int prop, int client)
+public Action ChangePropCollisionGroup(Handle timer, int entity)
 {
-	if(client <= MaxClients && prop > 0 && !IsFakeClient(client) && IsValidEntity(client) && IsClientInGame(client) && IsPlayerAlive(client) && IsValidEdict(prop))
-	{
-		SetEntProp(prop, Prop_Send, "m_CollisionGroup", 11);
-		SetEntProp(prop, Prop_Data, "m_CollisionGroup", 11);
-		SetEntProp(prop, Prop_Data, "m_nSolidType", 6);
-		//PrintToChatAll("%N touched %i", client, prop);
-	}
+	if(!IsValidEdict(entity))
+		return Plugin_Continue;
+
+	#if DEBUG > 0
+	int m_CollisionGroup = GetEntProp(entity, Prop_Send, "m_CollisionGroup");
+
+	PrintToServer("[ChangePropCollisionGroup] %d | m_CollisionGroup: %d", EntRefToEntIndex(entity), m_CollisionGroup);
+	#endif
+
+	// Attempt to change collision group
+	SetEntProp(entity, Prop_Data, "m_CollisionGroup", COLLISION_GROUP_WEAPON);
+
+	return Plugin_Continue;
 }
