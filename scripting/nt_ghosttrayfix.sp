@@ -77,6 +77,7 @@ public Action ChangePropCollisionGroup(Handle timer, int entity)
 	#endif
 
 	// Attempt to change collision group
+	SetEntProp(entity, Prop_Send, "m_CollisionGroup", COLLISION_GROUP_WEAPON);
 	SetEntProp(entity, Prop_Data, "m_CollisionGroup", COLLISION_GROUP_WEAPON);
 
 	return Plugin_Continue;
