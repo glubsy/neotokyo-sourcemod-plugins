@@ -286,6 +286,7 @@ public Action:CommandSetCreditsForClient(int client, int args)
 	{
 		PrintToChat(client, "Usage: !props_set_credit #id amount (use \"status\" in console).")
 		PrintToConsole(client, "Usage: sm_props_set_credit #id amount (use \"status\" in console).")
+		return Plugin_Stop;
 	}
 
 	if(!client || IsFakeClient(client))
