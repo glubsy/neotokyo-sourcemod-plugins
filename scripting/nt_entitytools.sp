@@ -1,9 +1,10 @@
 #include <sourcemod>
 #include <sdktools>
 #include <sdkhooks>
+#include <clientprefs>
 //#include <smlib>
+#pragma semicolon 1
 
-//new Float:goDist[MAXPLAYERS+1];
 new Handle:g_cvar_adminonly = INVALID_HANDLE;
 new Handle:g_cvar_enabled = INVALID_HANDLE;
 new Handle:g_cvar_props_enabled = INVALID_HANDLE;
@@ -11,70 +12,36 @@ new Handle:g_cvar_restrict_alive = INVALID_HANDLE;
 new Handle:g_cvar_give_initial_credits = INVALID_HANDLE;
 new Handle:g_cvar_credits_replenish = INVALID_HANDLE;
 new Handle:g_cvar_score_as_credits = INVALID_HANDLE;
-//new Handle:g_cvar_score_can_decrement   = INVALID_HANDLE;
-
-// WARNING: these require the sm_downloader plugin to force clients to download them
-// small, big, huge, gigantic, megahuge
-new const String:s_dongs[][] = { "models/d/d_s02.mdl", "models/d/d_b02.mdl", "models/d/d_h02.mdl", "models/d/d_g02.mdl", "models/d/d_mh02.mdl"};
-new const String:allowed_models[][] = { "models/nt/a_lil_tiger.mdl", "models/nt/props_office/rubber_duck.mdl" }
-
-// [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
-new g_RemainingCreds[MAXPLAYERS+1][3];
-#define virtcred 0
-#define scorecred 1
-#define maxcred 2
-new g_propindex_d[MAXPLAYERS+1]; // holds a temporary entity index for timer destruction
 new Handle:cvMaxPropsCreds = INVALID_HANDLE; // maximum credits given
 new Handle:cvPropMaxTTL = INVALID_HANDLE; // maximum time to live before prop gets auto removed
+new Handle:g_PropPrefCookie = INVALID_HANDLE; // maximum time to live before prop gets auto removed
 
+// WARNING: the custom files require the sm_downloader plugin to force clients to download them
+// otherwise, have to add all custom files to downloads table ourselves with AddFileToDownloadsTable()
+new const String:gs_dongs[][] = {
+	"models/d/d_s02.mdl", //small
+	"models/d/d_b02.mdl", //big
+	"models/d/d_h02.mdl", //huge
+	"models/d/d_g02.mdl", //gigantic
+	"models/d/d_mh02.mdl" }; //megahuge
 // Prices: scale 1= 1 creds, 2= 3 creds, 3= 6 creds, 4= 8 creds, 5= 10 creds
 new const g_DongPropPrice[] = { 0, 1, 3, 6, 8, 10 };
 
-//TODO: consider TempEnts to filter out model spawning for people who don't like them https://wiki.alliedmods.net/TempEnts_(SourceMod_SDKTools)
-// Rain's suggestion: https://pastebin.com/z7wNF5Lh
+new const String:gs_allowed_models[][] = {
+	"models/nt/a_lil_tiger.mdl",
+	"models/nt/props_office/rubber_duck.mdl",
+	"models/logo/jinrai_logo.mdl",
+	"models/logo/nsf_logo.mdl" };
 
-// /*	CTEPhysicsProp (type DT_TEPhysicsProp)
-// 		Table: baseclass (offset 0) (type DT_BaseTempEntity)
-// 			Member: m_vecOrigin (offset 12) (type vector) (bits 0) (Coord)
-// 			Member: m_angRotation[0] (offset 24) (type float) (bits 13) (VectorElem)
-// 			Member: m_angRotation[1] (offset 28) (type float) (bits 13) (VectorElem)
-// 			Member: m_angRotation[2] (offset 32) (type float) (bits 13) (VectorElem)
-// 			Member: m_vecVelocity (offset 36) (type vector) (bits 0) (Coord)
-// 			Member: m_nModelIndex (offset 48) (type integer) (bits 11) ()
-// 			Member: m_nSkin (offset 52) (type integer) (bits 10) ()
-// 			Member: m_nFlags (offset 56) (type integer) (bits 2) (Unsigned)
-// 			Member: m_nEffects (offset 60) (type integer) (bits 10) (Unsigned)
-//  */
+// [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
+new g_RemainingCreds[MAXPLAYERS+1][3];
+#define VIRT_CRED 0
+#define SCORE_CRED 1
+#define MAX_CRED 2
 
-// // Passes client array by ref, and returns num. of clients inserted in the array.
-// int GetDickClients(int &outClients, int arraySize)
-// {
-// 	int index = 0;
-
-// 	for (int thisClient = 1; thisClient <= MaxClients; thisClient++)
-// 	{
-// 		// Reached the max size of array
-// 		if (index == arraySize)
-// 			break;
-	
-// 		if (IsValidClient(thisClient) && WantsDicks(thisClient))
-// 		{
-// 			outClients[index++] = thisClient;
-// 		}
-// 	}
-	
-// 	return index;
-// }
-
-// int clients[MAXPLAYERS+1];
-// int numClients = GetDickClients(clients, sizeof(clients));
-
-// int dickMdl = PrecacheModel("dick.mdl", false);
-
-// TE_Start("TEPhysicsProp");
-// TE_WriteVector("m_vecOrigin", float[3]{0,0,0});
-// TE_WriteNum("m_nModelIndex", dickMdl);
-// TE_Send(clients, numClients, 0);
+new g_propindex_d[MAXPLAYERS+1]; // holds a temporary entity index for timer destruction
+new g_precachedModels[10];
+new g_prefs_noprops[MAXPLAYERS+1];
 
 
 public Plugin:myinfo =
@@ -100,9 +67,10 @@ public OnPluginStart()
 	RegAdminCmd("spawnvipentity", CommandSpawnVIPEntity, ADMFLAG_SLAY);
 
 	RegAdminCmd("movetype", ChangeEntityMoveType, ADMFLAG_SLAY);
-	RegConsoleCmd("strapon", CommandStrapon, "strapon self/all/target to stick a dick on people");
-	//RegAdminCmd("strapon", CommandStrapon, ADMFLAG_SLAY,  "strapon self/all/target to stick a dick on people");
-	RegAdminCmd("entity_remove", RemoveTargetEntity, ADMFLAG_SLAY, "test");
+	RegConsoleCmd("sm_strapon", Command_Strap_Dong, "Strap a dong onto yourself.");
+	RegAdminCmd("sm_strapon_target", Command_Strapon_Target, ADMFLAG_SLAY,  "DEBUG: Strapon self/all/target to stick a dick on people");
+	//RegAdminCmd("sm_unstrapon_target", Command_UnStrapon_Target, ADMFLAG_SLAY,  "unstrap self/all/target");
+	RegAdminCmd("entity_remove", RemoveTargetEntity, ADMFLAG_SLAY, "DEBUG: to remove edict (fixme)");
 	RegAdminCmd("setpropinfo", SetPropInfo, ADMFLAG_SLAY, "sets prop property");
 	RegAdminCmd("TestSpawnFlags", TestSpawnFlags, ADMFLAG_SLAY, "sets prop property to all by name");
 	RegAdminCmd("entity_rotate", Rotate_Entity, ADMFLAG_SLAY, "rotates an entity");
@@ -128,30 +96,233 @@ public OnPluginStart()
 	g_cvar_credits_replenish = CreateConVar( "sm_props_replenish_credits", "1", "0: credits are lost forever after use. 1: credits replenish after each end of round", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 );
 	g_cvar_score_as_credits = CreateConVar( "sm_props_score_as_credits", "1", "0: use virtual props credits only, 1: use score as props credits on top of virtual props credits", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 );
 
+	// player dosen't want to see custom props in their game, don't show TE
+	RegConsoleCmd("sm_props_nothx", Command_Hate_Props_Toggle, "Toggle your preference to not see custom props if possible.");
+	RegClientCookie("no-props-plz","player doesn't like custom props", CookieAccess_Public);
+
+	// when a player invokes this command, temporarily disable props until end of round
 
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("game_round_start", event_RoundStart);
 
 	RegAdminCmd("sm_props_givescore", CommandGiveScore, ADMFLAG_SLAY, "DEBUG: add 20 frags to score");
+	RegAdminCmd("sm_props_testdong", TestDong, ADMFLAG_SLAY, "DEBUG: test dong tempents");
 
-
+	AutoExecConfig(true, "sm_nt_props");
 }
 
-public Action:CommandGiveScore (int client, int args)
+
+/*=======================================================
+
+				Client preferences
+
+========================================================*/
+
+
+public OnClientCookiesCached(int client)
 {
+	ProcessCookies(client);
+}
+
+
+public OnClientPostAdminCheck(int client)
+{
+	if(!GetConVarBool(g_cvar_props_enabled))
+	{
+		g_prefs_noprops[client] = true;
+		return;
+	}
+
+	if (AreClientCookiesCached(client))
+	{
+		ProcessCookies(client);
+		CreateTimer(120.0, DisplayNotification, client);
+	}
+}
+
+
+public OnClientDisconnect(int client)
+{
+	if(GetConVarBool(g_cvar_props_enabled))
+		g_prefs_noprops[client] = false;
+}
+
+
+public ProcessCookies(int client)
+{
+	decl String:cookie[9];
+	GetClientCookie(client, g_PropPrefCookie, cookie, sizeof(cookie));
+
+	if (StrEqual(cookie, "enabled"))
+	{
+		g_prefs_noprops[client] = false;
+		return;
+	}
+	if (StrEqual(cookie, "disabled"))
+	{
+		g_prefs_noprops[client] = true;
+		return;
+	}
+	else
+	{
+		CreateTimer(120.0, DisplayNotification, client);
+	}
+	return;
+}
+
+
+public Action DisplayNotification(Handle timer, int client)
+{
+	if(client > 0 && IsClientConnected(client) && IsClientInGame(client))
+	{
+		if(!g_prefs_noprops[client])
+		{
+			PrintToChat(client, "[sm_props] You can toggle seeing dongs by typing !props_nothx");
+			PrintToChat(client, "[sm_props] You can prevent people from spawning props until the end of the round by typing !props_stop");
+			PrintToConsole(client, "\n[sm_props] You can toggle seeing dongs by typing sm_props_nothx\n");
+			PrintToConsole(client, "\n[sm_props] You can prevent people from spawning props until the end of the round by typing sm_props_stop\n");
+		}
+	}
+	return Plugin_Handled;
+}
+
+
+public Action Command_Hate_Props_Toggle(int client, int args)
+{
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+
+	if(!FindClientCookie("no-props-plz"))
+	{
+		ShowCookieMenu(client);
+	}
+
+	new String:cookie[9];
+	GetClientCookie(client, g_PropPrefCookie, cookie, sizeof(cookie));
+
+	if (StrEqual(cookie, "enabled"))
+	{
+		SetClientCookie(client, g_PropPrefCookie, "disabled");
+		g_prefs_noprops[client] = false;
+		ReplyToCommand(client, "You preference has been recorded. You no like props.");
+		return Plugin_Handled;
+	}
+	else if (StrEqual(cookie, "disabled"))
+	{
+		SetClientCookie(client, g_PropPrefCookie, "enabled");
+		g_prefs_noprops[client] = true;
+		ReplyToCommand(client, "You preference has been recorded. You do like props after all.");
+		return Plugin_Handled;
+	}
+	return Plugin_Handled;
+}
+
+
+
+/*=======================================================
+
+				Temp Ents testing
+
+========================================================*/
+
+/*	CTEPhysicsProp (type DT_TEPhysicsProp)
+		Table: baseclass (offset 0) (type DT_BaseTempEntity)
+			Member: m_vecOrigin (offset 12) (type vector) (bits 0) (Coord)
+			Member: m_angRotation[0] (offset 24) (type float) (bits 13) (VectorElem)
+			Member: m_angRotation[1] (offset 28) (type float) (bits 13) (VectorElem)
+			Member: m_angRotation[2] (offset 32) (type float) (bits 13) (VectorElem)
+			Member: m_vecVelocity (offset 36) (type vector) (bits 0) (Coord)
+			Member: m_nModelIndex (offset 48) (type integer) (bits 11) ()
+			Member: m_nSkin (offset 52) (type integer) (bits 10) ()
+			Member: m_nFlags (offset 56) (type integer) (bits 2) (Unsigned)
+			Member: m_nEffects (offset 60) (type integer) (bits 10) (Unsigned)
+ */
+
+// Passes client array by ref, and returns num. of clients inserted in the array.
+int GetDongClients(int outClients[MAXPLAYERS+1], int arraySize)
+{
+	int index = 0;
+
+	for (int thisClient = 1; thisClient <= MaxClients; thisClient++)
+	{
+		// Reached the max size of array
+		if (index == arraySize)
+			break;
+
+		if (IsValidClient(thisClient) && WantsDong(thisClient))
+		{
+			outClients[index++] = thisClient;
+		}
+	}
+
+	return index;
+}
+
+public Action TestDong(int client, int args)
+{
+	new String:s_tetype[150];
+	GetCmdArg(1, s_tetype, sizeof(s_tetype));
+
+	int dongclients[MAXPLAYERS+1];
+
+	int numClients = GetDongClients(dongclients, sizeof(dongclients));
+
+	int cached_mdl = PrecacheModel(gs_dongs[0], false);
+
+	float origin[3];
+	GetClientEyePosition(client, origin);
+	//TE_Start("physicsprop"); //breakmodel
+	TE_Start(s_tetype);
+	TE_WriteVector("m_vecOrigin", origin);
+
+	TE_WriteNum("m_nModelIndex", cached_mdl);
+	TE_Send(dongclients, numClients, 0.0);
+	PrintToConsole(client, "Spawned at: %f %f %f for model index: %d", origin[0], origin[1], origin[2], cached_mdl);
+	return Plugin_Handled;
+}
+
+bool WantsDong(int client)
+{
+	if (IsValidClient(client))
+	{
+		return true;
+	}
+	return false;
+}
+
+
+public Action CommandGiveScore (int client, int args)
+{
+	if (!client)
+	{
+		ReplyToCommand(client, "This command cannot be executed by the server.");
+		return Plugin_Stop;
+	}
+
 	SetEntProp(client, Prop_Data, "m_iFrags", 20);
-	g_RemainingCreds[client][scorecred] = 20;
-	g_RemainingCreds[client][maxcred] = 20;
+	g_RemainingCreds[client][SCORE_CRED] = 20;
+	g_RemainingCreds[client][MAX_CRED] = 20;
+	CommandSetCreditsForClient(client, 20);
 	PrintToConsole(client, "gave score to %d", client);
-	return Plugin_Handled
+	return Plugin_Handled;
 
 }
 
-public Action:CommandPropCreditStatus(int client, int args)
+
+
+
+/*=======================================================
+
+				Credits management
+
+========================================================*/
+
+
+public Action CommandPropCreditStatus(int client, int args)
 {
-	decl String:name[255];
-	PrintToConsole(client, "\n--------- Current props ppawning credits status ---------")
+	decl String:name[MAX_NAME_LENGTH] = '\0';
+	PrintToConsole(client, "\n--------- Current props ppawning credits status ---------");
 	for (int i=1; i < MaxClients; i++)
 	{
 		if (!IsValidClient(i))
@@ -159,11 +330,11 @@ public Action:CommandPropCreditStatus(int client, int args)
 
 		if (GetClientName(i, name, sizeof(name)))
 		{
-			PrintToConsole(client,"Virtual: %d, Score: %d, Maximum: %d for \"%s\"", g_RemainingCreds[i][virtcred], g_RemainingCreds[i][scorecred], g_RemainingCreds[i][maxcred], name)
+			PrintToConsole(client,"Virtual: %d, Score: %d, Maximum: %d for \"%s\"", g_RemainingCreds[i][VIRT_CRED], g_RemainingCreds[i][SCORE_CRED], g_RemainingCreds[i][MAX_CRED], name);
 		}
 	}
-	PrintToConsole(client, "----------------------------------------------------------\n")
-
+	PrintToConsole(client, "----------------------------------------------------------\n");
+	return Plugin_Handled;
 }
 
 /*
@@ -178,76 +349,76 @@ public OnClientPutInServer(int client){
 	{
 		// if we use score as credit, restore them
 		if ( GetConVarBool(g_cvar_score_as_credits) )
-			g_RemainingCreds[client][scorecred] = GetEntProp(client, Prop_Data, "m_iFrags"); //NEEDS TESTING!
+			g_RemainingCreds[client][SCORE_CRED] = GetClientFrags(client); //NEEDS TESTING!
 		if ( GetConVarBool(g_cvar_give_initial_credits) )
-			g_RemainingCreds[client][virtcred] = g_RemainingCreds[client][maxcred] = GetConVarInt(cvMaxPropsCreds);
+			g_RemainingCreds[client][VIRT_CRED] = g_RemainingCreds[client][MAX_CRED] = GetConVarInt(cvMaxPropsCreds);
 		else
-			g_RemainingCreds[client][maxcred] = g_RemainingCreds[client][virtcred] = 0;
+			g_RemainingCreds[client][MAX_CRED] = g_RemainingCreds[client][VIRT_CRED] = 0;
 	}
 }
 
 
-public Action:OnPlayerSpawn(Handle event, const String:name[], bool dontBroadcast)
+public Action OnPlayerSpawn(Handle event, const String:name[], bool dontBroadcast)
 {
 	// reinitialize the virtual credits to constant value
 	new client = GetClientOfUserId(GetEventInt(event, "userid"));
 	if ( GetConVarBool(g_cvar_credits_replenish) )
-		g_RemainingCreds[client][virtcred] = GetConVarInt(cvMaxPropsCreds);
+		g_RemainingCreds[client][VIRT_CRED] = GetConVarInt(cvMaxPropsCreds);
 	else
-		g_RemainingCreds[client][virtcred] = g_RemainingCreds[client][maxcred];
+		g_RemainingCreds[client][VIRT_CRED] = g_RemainingCreds[client][MAX_CRED];
 	//return Plugin_Continue;
 }
 
 
-public Action:event_RoundStart(Handle:event, const String:name[], bool:dontBroadcast)
+public Action event_RoundStart(Handle:event, const String:name[], bool:dontBroadcast)
 {
 	new client = GetClientOfUserId(GetEventInt(event, "userid"));
 	if ( GetConVarBool(g_cvar_credits_replenish) )
-		g_RemainingCreds[client][virtcred] = GetConVarInt(cvMaxPropsCreds);
+		g_RemainingCreds[client][VIRT_CRED] = GetConVarInt(cvMaxPropsCreds);
 	else
-		g_RemainingCreds[client][virtcred] = g_RemainingCreds[client][maxcred];
+		g_RemainingCreds[client][VIRT_CRED] = g_RemainingCreds[client][MAX_CRED];
 	//return Plugin_Continue;  //??? change if needed
 }
 
 
-public Action:OnPlayerDeath(Handle event, const String:name[], bool dontBroadcast)
+public Action OnPlayerDeath(Handle event, const String:name[], bool dontBroadcast)
 {
 	// keep track of the player score in our credits array
 	new attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
 
 	if (!GetConVarBool(g_cvar_credits_replenish))
-		g_RemainingCreds[attacker][virtcred] += 1;
+		g_RemainingCreds[attacker][VIRT_CRED] += 1;
 
-	g_RemainingCreds[attacker][scorecred] = GetEntProp(attacker, Prop_Data, "m_iFrags");
+	g_RemainingCreds[attacker][SCORE_CRED] = GetClientFrags(attacker);
 
-	if (g_RemainingCreds[attacker][scorecred] > g_RemainingCreds[attacker][maxcred])
-		g_RemainingCreds[attacker][maxcred] = g_RemainingCreds[attacker][scorecred];
+	if (g_RemainingCreds[attacker][SCORE_CRED] > g_RemainingCreds[attacker][MAX_CRED])
+		g_RemainingCreds[attacker][MAX_CRED] = g_RemainingCreds[attacker][SCORE_CRED];
 	//return Plugin_Continue;
 }
 
 
-bool:hasEnoughCredits(int client, int asked)
+bool hasEnoughCredits(int client, int asked)
 {
 	if ( GetConVarBool( g_cvar_score_as_credits ) )
 	{
-		if (g_RemainingCreds[client][scorecred] <= 0)
+		if (g_RemainingCreds[client][SCORE_CRED] <= 0)
 		{
 			PrintToChat(client, "[] Your current score doesn't allow you to spawn props.");
 			return false;
 		}
 	}
-	if (asked <= g_RemainingCreds[client][virtcred])
+	if (asked <= g_RemainingCreds[client][VIRT_CRED])
 		return true;
 	return false;
 }
 
 
-public DecCredits(int client, int amount, bool relaytoclient)
+DecCredits(int client, int amount, bool relaytoclient)
 {
 	if ( GetConVarInt( g_cvar_score_as_credits ) > 0 )
 	{
 		DecrementScore(client, 1);
-		g_RemainingCreds[client][scorecred] -= 1;
+		g_RemainingCreds[client][SCORE_CRED] -= 1;
 
 		if (relaytoclient)
 		{
@@ -255,45 +426,48 @@ public DecCredits(int client, int amount, bool relaytoclient)
 		}
 	}
 
-	g_RemainingCreds[client][virtcred] -= amount;
+	g_RemainingCreds[client][VIRT_CRED] -= amount;
 	if (relaytoclient)
 	{
-		PrintToChat(client, "[] Credits remaining: %d.", g_RemainingCreds[client][virtcred]);
-		PrintToConsole(client, "[] Credits remaining: %d.", g_RemainingCreds[client][virtcred]);
+		PrintToChat(client, "[] Credits remaining: %d.", g_RemainingCreds[client][VIRT_CRED]);
+		PrintToConsole(client, "[] Credits remaining: %d.", g_RemainingCreds[client][VIRT_CRED]);
 	}
 }
 
 
-public SetCredits(int client, int amount)
+SetCredits(int client, int amount)
 {
-	g_RemainingCreds[client][virtcred] = amount;
+	g_RemainingCreds[client][VIRT_CRED] = amount;
 
-	if (g_RemainingCreds[client][virtcred] > g_RemainingCreds[client][maxcred])
-		g_RemainingCreds[client][maxcred] = amount;
+	if (g_RemainingCreds[client][VIRT_CRED] > g_RemainingCreds[client][MAX_CRED])
+		g_RemainingCreds[client][MAX_CRED] = amount;
 }
 
 
-public DecrementScore(int client, int amount)
+DecrementScore(int client, int amount)
 {
-	SetEntProp(client, Prop_Data, "m_iFrags", GetEntProp(client, Prop_Data, "m_iFrags") - amount );
+	new new_xp = GetClientFrags(client) - amount;
+	SetEntProp(client, Prop_Data, "m_iFrags", new_xp);
+	UpdatePlayerRankXP(client, new_xp);
 }
 
 
 // increment (virtual) credits for target client
-public Action:CommandSetCreditsForClient(int client, int args)
+public Action CommandSetCreditsForClient(int client, int args)
 {
+	if(!client || IsFakeClient(client))
+		return Plugin_Stop;
+
 	if (GetCmdArgs() != 2)
 	{
-		PrintToChat(client, "Usage: !props_set_credit #id amount (use \"status\" in console).")
-		PrintToConsole(client, "Usage: sm_props_set_credit #id amount (use \"status\" in console).")
-	}
-
-	if(!client || IsFakeClient(client))
+		PrintToChat(client, "Usage: !props_set_credit #id amount (use \"status\" in console).");
+		PrintToConsole(client, "Usage: sm_props_set_credit #id amount (use \"status\" in console).");
 		return Plugin_Handled;
+	}
 
 	decl String:s_amount[5];
 	decl String:s_target[3];
-	decl String:s_targetname[255];
+	decl String:s_targetname[MAX_NAME_LENGTH] = '\0';
 	int i_target;
 	GetCmdArg(1, s_target, sizeof(s_target));
 	GetCmdArg(2, s_amount, sizeof(s_amount));
@@ -304,26 +478,46 @@ public Action:CommandSetCreditsForClient(int client, int args)
 
 	SetCredits(i_target, StringToInt(s_amount));
 
-	PrintToChat(i_target, "[] Your credits have been set to %d.", g_RemainingCreds[i_target][virtcred]);
-	PrintToConsole(i_target, "[] Your credits have been set to %d.", g_RemainingCreds[i_target][virtcred]);
+	PrintToChat(i_target, "[] Your credits have been set to %d.", g_RemainingCreds[i_target][VIRT_CRED]);
+	PrintToConsole(i_target, "[] Your credits have been set to %d.", g_RemainingCreds[i_target][VIRT_CRED]);
 
 	if (GetClientName(i_target, s_targetname, sizeof(s_targetname)) && client != i_target)
 	{
-		PrintToChat(client, "[] The credits for player %s are now set to %d.", s_targetname, g_RemainingCreds[i_target][virtcred]);
-		PrintToConsole(client, "[] The credits for player %s are now set to %d.", s_targetname, g_RemainingCreds[i_target][virtcred]);
+		ReplyToCommand(client, "[] The credits for player %s are now set to %d.", s_targetname, g_RemainingCreds[i_target][VIRT_CRED]);
 	}
 	return Plugin_Handled;
 }
 
 
-public Action:PropSpawnDispatch(int client, int model)
+
+
+
+/*=======================================================
+
+					PROP SPAWNING
+
+========================================================*/
+
+
+
+public Action PropSpawnDispatch(int client, int model)
 {
-	CreatePropPhysicsOverride(client, allowed_models[model], 50);
-	return Plugin_Handled
+	CreatePropPhysicsOverride(client, gs_allowed_models[model], 50);
+	return Plugin_Handled;
 }
 
 
-public Action:CommandPropSpawn(int client, int args)
+public Action PrintPluginCommandInfo(int client)
+{
+	PrintToChat(client, "[sm_props] Admin, check console for useful commands and convars...");
+	PrintToConsole(client, "[sm_props] Admins, some useful commands:");
+	PrintToConsole(client, "\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_props_max_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.\nsm_props_max_ttl: props get deleted after that time.\nsm_props_enabled: disable the command.");
+
+	return Plugin_Handled;
+}
+
+
+public Action CommandPropSpawn(int client, int args)
 {
 	if (GetConVarBool(g_cvar_restrict_alive) && GetClientTeam(client) <= 1)
 	{
@@ -335,7 +529,7 @@ public Action:CommandPropSpawn(int client, int args)
 			PrintToConsole(client, "Admins, some useful commands:\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_props_max_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.\nsm_props_max_ttl: props get deleted after that time.\nsm_props_enabled: disable the command.");
 			PrintToChat(client, "Admin, check console for useful commands and convars (more to come later).");
 		}
-		return Plugin_Handled
+		return Plugin_Handled;
 	}
 
  	if( GetCmdArgs() != 1 )
@@ -343,13 +537,12 @@ public Action:CommandPropSpawn(int client, int args)
 		PrintToConsole(client, "Usage: sm_props [model|model path]\nAvailable models currently: duck, tiger");
 		PrintToChat(client, "Usage: !props [model | model path]\nAvailable models currently: duck, tiger");
 
-		PrintToChat(client, "You currently have %d credits to spawn props.", g_RemainingCreds[client][virtcred]);
-		PrintToConsole(client, "You currently have %d credits to spawn props.", g_RemainingCreds[client][virtcred]);
+		PrintToChat(client, "You currently have %d credits to spawn props.", g_RemainingCreds[client][VIRT_CRED]);
+		PrintToConsole(client, "You currently have %d credits to spawn props.", g_RemainingCreds[client][VIRT_CRED]);
 
 		if (IsAdmin(client))
 		{
-			PrintToConsole(client, "Admins, some useful commands:\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_props_max_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.\nsm_props_max_ttl: props get deleted after that time.\nsm_props_enabled: disable the command.");
-			PrintToChat(client, "Admin, check console for useful commands and convars (more to come later)..");
+			PrintPluginCommandInfo(client);
 		}
 
 		return Plugin_Handled;
@@ -363,18 +556,18 @@ public Action:CommandPropSpawn(int client, int args)
 	}
 
 	decl String:model_name[80];
-	GetCmdArg(1, model_name, sizeof(model_name))
+	GetCmdArg(1, model_name, sizeof(model_name));
 
-	for (int i=0; i < sizeof(allowed_models); ++i)
+	for (int i=0; i < sizeof(gs_allowed_models); ++i)
 	{
 		//TODO: check the path
 		//TODO: make selection menu // Don't stop at first match
-		//if (strcmp(model_name, allowed_models[i]) == 0)
-		if (StrContains(allowed_models[i], model_name, false) != -1)
+		//if (strcmp(model_name, gs_allowed_models[i]) == 0)
+		if (StrContains(gs_allowed_models[i], model_name, false) != -1)
 		{
 			if (hasEnoughCredits(client, 5)) 								//FIXME: for now everything costs 5!
 			{
-				PrintToConsole(client, "Spawned: %s.", allowed_models[i]);
+				PrintToConsole(client, "Spawned: %s.", gs_allowed_models[i]);
 				PrintToChat(client, "Spawning your %s.", model_name);
 				PropSpawnDispatch(client, i);
 
@@ -386,9 +579,9 @@ public Action:CommandPropSpawn(int client, int args)
 			else
 			{
 				PrintToChat(client, "[] You don't have enough credits to spawn a prop: credits needed: %d, credits remaining: %d.",
-				5, g_RemainingCreds[client][virtcred]);
+				5, g_RemainingCreds[client][VIRT_CRED]);
 				PrintToConsole(client, "[] You don't have enough credits to spawn a prop: credits needed: %d, credits remaining: %d.",
-				5, g_RemainingCreds[client][virtcred]);
+				5, g_RemainingCreds[client][VIRT_CRED]);
 				return Plugin_Handled;
 			}
 		}
@@ -399,24 +592,31 @@ public Action:CommandPropSpawn(int client, int args)
 }
 
 
+
+/*=======================================================
+
+					DONG SPAWNING
+
+========================================================*/
+
 // calls the actual model creation
-public Action:DongDispatch(int client, int scale, int bstatic)
+public Action DongDispatch(int client, int scale, int bstatic)
 {
 	switch(scale)
 	{
 		case 1:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride(client, s_dongs[scale-1], 50);
+				g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 50);
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride(client, s_dongs[scale-1], 50);
+				g_propindex_d[client] = CreatePropDynamicOverride(client, gs_dongs[scale-1], 50);
 		}
 		case 2:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride(client, s_dongs[scale-1], 120);
+				g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 120);
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride(client, s_dongs[scale-1][0], 120);
+				g_propindex_d[client] = CreatePropDynamicOverride(client, gs_dongs[scale-1][0], 120);
 
 			// remove the prop after 40 seconds
 			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
@@ -424,9 +624,9 @@ public Action:DongDispatch(int client, int scale, int bstatic)
 		case 3:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride(client, s_dongs[scale-1], 180);
+				g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 180);
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride(client, s_dongs[scale-1], 180);
+				g_propindex_d[client] = CreatePropDynamicOverride(client, gs_dongs[scale-1], 180);
 
 			// remove the prop when it's touched by a player
 			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
@@ -435,9 +635,9 @@ public Action:DongDispatch(int client, int scale, int bstatic)
 		case 4:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride(client, s_dongs[scale-1], 200);
+				g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 200);
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride(client, s_dongs[scale-1], 200);
+				g_propindex_d[client] = CreatePropDynamicOverride(client, gs_dongs[scale-1], 200);
 
 			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
 			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
@@ -445,9 +645,9 @@ public Action:DongDispatch(int client, int scale, int bstatic)
 		case 5:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride(client, s_dongs[scale-1], 250);
+				g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 250);
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride(client, s_dongs[scale-1], 250);
+				g_propindex_d[client] = CreatePropDynamicOverride(client, gs_dongs[scale-1], 250);
 
 			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
 			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
@@ -460,7 +660,7 @@ public Action:DongDispatch(int client, int scale, int bstatic)
 }
 
 
-public Action:CommandDongSpawn(int client, int args)
+public Action CommandDongSpawn(int client, int args)
 {
 	if (!GetConVarBool(g_cvar_props_enabled))
 	{
@@ -471,14 +671,14 @@ public Action:CommandDongSpawn(int client, int args)
 
 	if (GetConVarInt( g_cvar_score_as_credits ) > 0)
 	{
-		if (g_RemainingCreds[client][scorecred] <= 0)
+		if (g_RemainingCreds[client][SCORE_CRED] <= 0)
 		{
 			PrintToChat(client, "[] Your current score doesn't allow you to spawn props.");
 			PrintToConsole(client, "[] Your current score doesn't allow you to spawn props.");
 			return Plugin_Handled;
 		}
 	}
-	if (g_RemainingCreds[client][virtcred] <= 0)
+	if (g_RemainingCreds[client][VIRT_CRED] <= 0)
 	{
 		PrintToChat(client, "[] You don't have any remaining credits to spawn a prop.");
 		PrintToConsole(client, "[] You don't have any remaining credits to spawn a prop.");
@@ -495,8 +695,8 @@ public Action:CommandDongSpawn(int client, int args)
 	}
 
 	new String:model_scale[2], String:model_property[2]; //FIXME maybe better way?
-	GetCmdArg(1, model_scale, sizeof(model_scale))
-	GetCmdArg(2, model_property, sizeof(model_property))
+	GetCmdArg(1, model_scale, sizeof(model_scale));
+	GetCmdArg(2, model_property, sizeof(model_property));
 
 	//new iModelScale = trim_quotes(model_scale);  returns 0 ?
 	new iModelScale = (strlen(model_scale) > 0) ? StringToInt(model_scale) : 1;
@@ -512,27 +712,45 @@ public Action:CommandDongSpawn(int client, int args)
 		PrintToChat(client, "[] You have just used %d credits.", g_DongPropPrice[iModelScale]);
 		PrintToConsole(client, "[] You have just used %d credits.", g_DongPropPrice[iModelScale]);
 		DecCredits(client, g_DongPropPrice[iModelScale], true);
+		DisplayActivity(client, gs_dongs[iModelScale]);
 		return Plugin_Handled;
 	}
 	else
 	{
 		PrintToChat(client, "[] You don't have enough credits to spawn a prop: credits needed: %d, credits remaining: %d.",
-		g_DongPropPrice[iModelScale], g_RemainingCreds[client][virtcred]);
+		g_DongPropPrice[iModelScale], g_RemainingCreds[client][VIRT_CRED]);
 		PrintToConsole(client, "[] You don't have enough credits to spawn a prop: credits needed: %d, credits remaining: %d.",
-		g_DongPropPrice[iModelScale], g_RemainingCreds[client][virtcred]);
+		g_DongPropPrice[iModelScale], g_RemainingCreds[client][VIRT_CRED]);
 		return Plugin_Handled;
 	}
 }
 
+DisplayActivity(int client, const char[] model)
+{
+	//ShowActivity2(client, "[sm_props] ", "%s spawned: %s.", client, model);
+	LogAction(client, -1, "[sm_props] \"%L\" spawned: %s", client, model);
 
-public Action:TimerKillEntity(Handle:timer, prop)
+}
+
+
+
+
+/*=======================================================
+
+					PROP AUTO-REMOVAL
+
+========================================================*/
+
+
+
+public Action TimerKillEntity(Handle:timer, prop)
 {
 	KillEntity(prop);
 	return Plugin_Handled;
 }
 
 
-public Action:KillEntity(prop)
+public Action KillEntity(prop)
 {
 	if(IsValidEdict(prop))
 	{
@@ -542,9 +760,9 @@ public Action:KillEntity(prop)
 }
 
 
-public Action:OnTouchEntityRemove(int propindex, int client)
+public Action OnTouchEntityRemove(int propindex, int client)
 {
-	if(client <= GetMaxClients() && propindex > 0 && !IsFakeClient(client) && IsValidEntity(client) && IsClientInGame(client) && IsPlayerAlive(client) && IsValidEdict(propindex))
+	if(client <= MaxClients && propindex > 0 && !IsFakeClient(client) && IsValidEntity(client) && IsClientInGame(client) && IsPlayerAlive(client) && IsValidEdict(propindex))
 	{
 		AcceptEntityInput(propindex, "kill");
 	}
@@ -572,8 +790,14 @@ public trim_quotes(String:text[])
 */
 
 
+/*=======================================================
 
-public Action:CommandPropCreatePhysicsOverride(int client, int args)
+					UTILITIES
+
+========================================================*/
+
+
+public Action CommandPropCreatePhysicsOverride(int client, int args)
 {
 	if(args < 1)
 	{
@@ -630,13 +854,13 @@ stock CreatePropPhysicsOverride(int client, const String:modelname[], int health
 		SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  //16 is suggested, ghost is 136!??     <- doesn't work, we need to try with prop_multiplayer
 
 		//int health=150
-		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1)  // Prop_Send didn't work but this works!
-		SetEntProp(EntIndex, Prop_Data, "m_iMaxHealth", health, 1)
+		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);  // Prop_Send didn't work but this works!
+		SetEntProp(EntIndex, Prop_Data, "m_iMaxHealth", health, 1);
 
-		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 1.0)  // doesn't seem to do anything?
-		SetEntityGravity(EntIndex, 0.5) 						// (default = 1.0, half = 0.5, double = 2.0)
+		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 1.0);  // doesn't seem to do anything?
+		SetEntityGravity(EntIndex, 0.5); 						// (default = 1.0, half = 0.5, double = 2.0)
 
-		SetEntPropFloat(EntIndex, Prop_Data, "m_massScale", 1.0)  //FIXME!
+		SetEntPropFloat(EntIndex, Prop_Data, "m_massScale", 1.0);  //FIXME!
 		DispatchKeyValue(EntIndex, "massScale", "1.0");
 		DispatchKeyValue(EntIndex, "physdamagescale", "1.0");  // FIXME! not sure if it works
 
@@ -681,7 +905,7 @@ stock CreatePropPhysicsOverride(int client, const String:modelname[], int health
 		GetClientAbsOrigin(client, ClientOrigin);
 		GetClientAbsAngles(client, clientabsangle);
 		GetClientEyePosition(client, clienteyeposition);
-		GetClientEyeAngles(client, ClientEyeAngles)
+		GetClientEyeAngles(client, ClientEyeAngles);
 
 
 		propangles[1] = clientabsangle[1];
@@ -749,7 +973,7 @@ stock CreatePropPhysicsOverride(int client, const String:modelname[], int health
 
 
 
-public Action:CommandPropCreatePhysicsOverrideVector(int client, int args)
+public Action CommandPropCreatePhysicsOverrideVector(int client, int args)
 {
 	if(args < 1)
 	{
@@ -774,11 +998,11 @@ public Action:CommandPropCreatePhysicsOverrideVector(int client, int args)
 		SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);   // Do I need to change this to 9218?????  <- doesn't work, we need to try with prop_multiplayer
 		SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  //16 is suggested, ghost is 136!??     <- doesn't work, we need to try with prop_multiplayer
 
-		int health=150
-		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1)  // Prop_Send didn't work but this works!
+		int health=150;
+		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);  // Prop_Send didn't work but this works!
 
 
-		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 0.2)  // doesn't seem to do anything?
+		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 0.2);  // doesn't seem to do anything?
 
 //		DispatchKeyValue(EntIndex, "health", "100");    //not working
 //		DispatchKeyValue(EntIndex, "rendercolor", "20,50,80,255");  //not working
@@ -788,8 +1012,8 @@ public Action:CommandPropCreatePhysicsOverrideVector(int client, int args)
 		g_offsCollisionGroup = FindSendPropOffs("CBaseEntity", "m_CollisionGroup");
 		SetEntData(EntIndex, g_offsCollisionGroup, 2, 4, true);  //new!
 */
-//		AcceptEntityInput(EntIndex, "DisableCollision", 0, 0)  // causes absolutely no collision at all?
-//		AcceptEntityInput(EntIndex, "kill", 0, 0)
+//		AcceptEntityInput(EntIndex, "DisableCollision", 0, 0);  // causes absolutely no collision at all?
+//		AcceptEntityInput(EntIndex, "kill", 0, 0);
 
 		DispatchKeyValue(EntIndex, "targetname", "test");
 		DispatchKeyValue(EntIndex, "model", arg1);     //does the same as SetEntityModel but works better! can teleport!?
@@ -819,7 +1043,7 @@ public Action:CommandPropCreatePhysicsOverrideVector(int client, int args)
 		GetClientAbsOrigin(client, ClientOrigin);
 		GetClientAbsAngles(client, clientabsangle);
 		GetClientEyePosition(client, clienteyeposition);
-		GetClientEyeAngles(client, ClientEyeAngles)
+		GetClientEyeAngles(client, ClientEyeAngles);
 
 
 		propangles[1] = clientabsangle[1];
@@ -881,7 +1105,7 @@ public Action:CommandPropCreatePhysicsOverrideVector(int client, int args)
 
 
 
-public Action:CommandCreatePropDynamicOverride(int client, int args)
+public Action CommandCreatePropDynamicOverride(int client, int args)
 {
 	if(args < 1)
 	{
@@ -968,7 +1192,7 @@ stock CreatePropDynamicOverride(int client, const String:modelname[], int health
 
 
 
-public Action:CommandSpawnGhostCapZone(int client, int args)
+public Action CommandSpawnGhostCapZone(int client, int args)
 {
 	new aimed  = GetClientAimTarget(client, false);
 	if(aimed != -1)
@@ -1009,7 +1233,7 @@ public Action:CommandSpawnGhostCapZone(int client, int args)
 
 
 			SetEntPropEnt(EntIndex, Prop_Data, "m_hEffectEntity", aimed);
-			CreateTimer(1.0, TimerSetParent, EntIndex, TIMER_REPEAT)
+			CreateTimer(1.0, TimerSetParent, EntIndex, TIMER_REPEAT);
 		}
 	}
 	return Plugin_Handled;
@@ -1027,7 +1251,7 @@ public Action CommandSpawnVIPEntity(int client, int args)
 	if(newentity != -1)
 	{
 		char classname[20];
-		GetEdictClassname(newentity, classname, sizeof(classname))
+		GetEdictClassname(newentity, classname, sizeof(classname));
 		PrintToChatAll("[ENTITY] create %s, %i", classname, newentity);
 		float VecOrigin[3], VecAngles[3], normal[3];
 
@@ -1072,6 +1296,15 @@ public Action:TimerSetParent(Handle:timer, entity)
 	DispatchSpawn(entity);
 }
 
+
+
+
+
+/*=======================================================
+
+					MAKE LADDER
+
+========================================================*/
 
 public Action:CommandMakeLadder(int client, int args)
 {
@@ -1147,6 +1380,14 @@ public Action:ChangeEntityMoveType(int client, int args)   // doesn't seem to do
 }
 
 
+
+/*=======================================================
+
+					CLIENT UTILS
+
+========================================================*/
+
+
 bool:IsValidClient(client){
 
 	if (client == 0)
@@ -1178,6 +1419,26 @@ bool IsAdmin(int client) // thanks rain
 	}
 	return GetAdminFlag(adminId, Admin_Generic);
 }
+
+
+// from neotokyo.inc thanks Soft as Hell
+UpdatePlayerRankXP(int client, int xp)
+{
+	new rank = 0; // Rankless dog
+
+	if(xp >= 0 && xp <= 3)
+		rank = 1; // Private
+	else if(xp >= 4 && xp <= 9)
+		rank = 2; // Corporal
+	else if(xp >= 10 && xp <= 19)
+		rank = 3; // Sergeant
+	else if(xp >= 20)
+		rank = 4; // Lieutenant
+
+	SetEntProp(client, Prop_Send, "m_iRank", rank);
+}
+
+
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -1317,11 +1578,11 @@ public Action:CommandPropCreateDynamicOverride(int client, int args)  // not use
 		SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);   // Do I need to change this to 9218?????  <- doesn't work, we need to try with prop_multiplayer
 		SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  //16 is suggested, ghost is 136!??     <- doesn't work, we need to try with prop_multiplayer
 
-		int health=150
-		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1)  // Prop_Send didn't work but this works!
+		int health=150;
+		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);  // Prop_Send didn't work but this works!
 
 
-		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 0.5)  // doesn't seem to do anything?
+		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 0.5);  // doesn't seem to do anything?
 
 //		DispatchKeyValue(EntIndex, "health", "100");    //not working
 //		DispatchKeyValue(EntIndex, "rendercolor", "20,50,80,255");  //not working
@@ -1360,7 +1621,7 @@ public Action:CommandPropCreateDynamicOverride(int client, int args)  // not use
 		GetClientAbsOrigin(client, ClientOrigin);
 		GetClientAbsAngles(client, clientabsangle);
 		GetClientEyePosition(client, clienteyeposition);
-		GetClientEyeAngles(client, ClientEyeAngles)
+		GetClientEyeAngles(client, ClientEyeAngles);
 
 
 		propangles[1] = clientabsangle[1];
@@ -1430,12 +1691,9 @@ public Action:CommandPropCreateDynamicOverride(int client, int args)  // not use
 }
 
 
-
 public bool:TraceEntityFilterPlayer(entity, contentsMask){
-	return entity > (GetMaxClients()) || entity == 0;
+	return ((entity > MaxClients) || entity == 0);
 }
-
-
 
 
 public Action:GetPropInfo(client, args)
@@ -1443,7 +1701,7 @@ public Action:GetPropInfo(client, args)
 	new aimed = GetClientAimTarget(client, false);
 	if (aimed != 1 && !IsValidEntity(aimed))
 	{
-		PrintToConsole(client, "not a valid entity you're aiming at")
+		PrintToConsole(client, "not a valid entity you're aiming at");
 	}
 	if (aimed != -1 && IsValidEntity(aimed))
 	{
@@ -1469,7 +1727,6 @@ public Action:GetPropInfo(client, args)
 		PrintToConsole(client, "m_CollisionGroup: %d, m_spawnflags: %d, m_nSolidType: %d, m_iMaxHealth: %d, m_flGravity: %f", m_CollisionGroup, m_spawnflags, m_nSolidType, m_iMaxHealth, m_flGravity);
 
 /*
-
 		m_iszBasePropData
 		m_iInteractions
 		m_bIsWalkableSetByPropData
@@ -1558,8 +1815,6 @@ public Action:GetPropInfo(client, args)
 
 
 
-
-
 public Action:TestSpawnFlags(client, args)
 {
 	new aimed = CreateEntityByName("weapon_mx");
@@ -1584,7 +1839,7 @@ public Action:SetPropInfo(client, args)
 	new aimed = GetClientAimTarget(client, false);
 	if (aimed != 1 && !IsValidEntity(aimed))
 	{
-		PrintToConsole(client, "not a valid entity you're aiming at")
+		PrintToConsole(client, "not a valid entity you're aiming at");
 	}
 	if (aimed != -1 && IsValidEntity(aimed))
 	{
@@ -1614,89 +1869,128 @@ public Action:SetPropInfo(client, args)
 }
 
 
+// Hopefully someday this will be a hat or something, not a stupi d***
+public Action Command_Strap_Dong(int client, int args)
+{
+	new created = CreatePropDynamicOverride(client, gs_dongs[0], 20);
+	decl String:Buffer[64];
+	Format(Buffer, sizeof(Buffer), "Client%d", client);
+	DispatchKeyValue(client, "targetname", Buffer);
+
+	SetVariantString("!activator");
+	AcceptEntityInput(created, "SetParent", client);
+
+	SetVariantString("grenade2");
+	AcceptEntityInput(created, "SetParentAttachment");
+	SetVariantString("grenade2");
+	AcceptEntityInput(created, "SetParentAttachmentMaintainOffset");
+
+	new Float:origin[3];
+	new Float:angle[3];
+	GetEntPropVector(created, Prop_Send, "m_vecOrigin", origin);
+	GetEntPropVector(created, Prop_Send, "m_angRotation", angle);
+
+	origin[0] += 0.0;
+	origin[1] += 0.0;
+	origin[2] += 0.0;
+
+	angle[0] += 0.0;
+	angle[1] += 3.0;
+	angle[2] += 0.3;
+	//DispatchKeyValueVector(created, "Origin", origin);    //FIX testing offset coordinates, remove! -glub
+	//DispatchKeyValueVector(created, "Angles", angle);
+	//DispatchSpawn(created);
+	ReplyToCommand(client, "origin: %f %f %f; angles: %f %f %f", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2]);
+
+	return Plugin_Handled;
+}
 
 
-public Action:CommandStrapon(client, args)
+
+public Action Command_Strapon_Target(int client, int args)
 {
 	if (args < 1)
 	{
 		new aimed = GetClientAimTarget(client, false);
 		if (aimed != -1 && IsValidEntity(aimed))
 		{
-		new String:classname[32];
-		new String:m_ModelName[130];
-		new String:m_nSolidType[130];
-		int m_CollisionGroup, m_spawnflags;
+			new String:classname[32];
+			new String:m_ModelName[130];
+			new String:m_nSolidType[130];
+			int m_CollisionGroup, m_spawnflags;
 
-		GetEdictClassname(aimed, classname, 32);
-		if(StrContains(classname, "player"))
-		{
-			PrintToChat(client, "Can't strapon");
+			GetEdictClassname(aimed, classname, 32);
+			if(StrContains(classname, "player"))
+			{
+				PrintToChat(client, "Can't strapon \"player\" classname");
+				return Plugin_Handled;
+			}
+			GetEntPropString(aimed, Prop_Data, "m_ModelName", m_ModelName, 130);
+			GetEntPropString(aimed, Prop_Data, "m_nSolidType", m_nSolidType, 130);
+			GetEntProp(aimed, Prop_Data, "m_CollisionGroup", m_CollisionGroup);
+			GetEntProp(aimed, Prop_Data, "m_spawnflags", m_spawnflags);
+
+			decl String:Buffer[64];
+			Format(Buffer, sizeof(Buffer), "Client%d", client);
+			DispatchKeyValue(client, "targetname", Buffer);
+
+			SetVariantString("!activator");
+			AcceptEntityInput(aimed, "SetParent", client);
+			//SetVariantString(Buffer);
+			//AcceptEntityInput(aimed, "SetParent");
+
+			SetVariantString("grenade2");
+			AcceptEntityInput(aimed, "SetParentAttachment");
+			SetVariantString("grenade2");
+			AcceptEntityInput(aimed, "SetParentAttachmentMaintainOffset");
+			/*new Float:angle[3];
+			coords[0] -= 60.0;
+			coords[1] -= 60.0;
+			coords[2] += 100.0;
+			DispatchKeyValueVector(aimed, "Origin", coords);*/    // Testing offsetting stuffs
+
 			return Plugin_Handled;
 		}
-		GetEntPropString(aimed, Prop_Data, "m_ModelName", m_ModelName, 130);
-		GetEntPropString(aimed, Prop_Data, "m_nSolidType", m_nSolidType, 130);
-		GetEntProp(aimed, Prop_Data, "m_CollisionGroup", m_CollisionGroup);
-		GetEntProp(aimed, Prop_Data, "m_spawnflags", m_spawnflags);
-
-		decl String:Buffer[64];
-		Format(Buffer, sizeof(Buffer), "Client%d", client);
-		DispatchKeyValue(client, "targetname", Buffer);
-
-		SetVariantString("!activator");
-		AcceptEntityInput(aimed, "SetParent", client);
-        //SetVariantString(Buffer);
-        //AcceptEntityInput(aimed, "SetParent");
-
-		SetVariantString("grenade2");
-		AcceptEntityInput(aimed, "SetParentAttachment");
-		SetVariantString("grenade2");
-		AcceptEntityInput(aimed, "SetParentAttachmentMaintainOffset");
-		/*new Float:angle[3];
-		coords[0] -= 60.0;
-		coords[1] -= 60.0;
-		coords[2] += 100.0;
-		DispatchKeyValueVector(aimed, "Origin", coords);*/    // Testing offsetting stuffs
-
-		return Plugin_Handled;
-		}
 	}
-	if  (args >= 1)
+	if  (args == 1) // spawns a prop and attach to us
 	{
 		new String:args1[130];
 		GetCmdArg(1, args1, sizeof(args1));
 
-		new created = CreatePropDynamicOverride(client, s_dongs[0], 20);
-		decl String:Buffer[64];
-		Format(Buffer, sizeof(Buffer), "Client%d", client);
-		DispatchKeyValue(client, "targetname", Buffer);
+		if (strcmp(args1, "dong") == 0)
+		{
+			new created = CreatePropDynamicOverride(client, gs_dongs[0], 20);
+			decl String:Buffer[64];
+			Format(Buffer, sizeof(Buffer), "Client%d", client);
+			DispatchKeyValue(client, "targetname", Buffer);
 
-		SetVariantString("!activator");
-		AcceptEntityInput(created, "SetParent", client);
+			SetVariantString("!activator");
+			AcceptEntityInput(created, "SetParent", client);
 
-		SetVariantString("grenade2");
-		AcceptEntityInput(created, "SetParentAttachment");
-		SetVariantString("grenade2");
-		AcceptEntityInput(created, "SetParentAttachmentMaintainOffset");
+			SetVariantString("grenade2");
+			AcceptEntityInput(created, "SetParentAttachment");
+			SetVariantString("grenade2");
+			AcceptEntityInput(created, "SetParentAttachmentMaintainOffset");
 
-		new Float:origin[3];
-		new Float:angle[3];
-		GetEntPropVector(created, Prop_Send, "m_vecOrigin", origin);
-		GetEntPropVector(created, Prop_Send, "m_angRotation", angle);
+			new Float:origin[3];
+			new Float:angle[3];
+			GetEntPropVector(created, Prop_Send, "m_vecOrigin", origin);
+			GetEntPropVector(created, Prop_Send, "m_angRotation", angle);
 
-		origin[0] += 0.0;
-		origin[1] += 0.0;
-		origin[2] += 0.0;
+			origin[0] += 0.0;
+			origin[1] += 0.0;
+			origin[2] += 0.0;
 
-		angle[0] += 0.0;
-		angle[1] += 3.0;
-		angle[2] += 0.3;
-		//DispatchKeyValueVector(created, "Origin", origin);    //FIX testing offset coordinates, remove! -glub
-		//DispatchKeyValueVector(created, "Angles", angle);
-		//DispatchSpawn(created);
-		PrintToChat(client, "origin: %f %f %f; angles: %f %f %f", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2]);
+			angle[0] += 0.0;
+			angle[1] += 3.0;
+			angle[2] += 0.3;
+			//DispatchKeyValueVector(created, "Origin", origin);    //FIX testing offset coordinates, remove! -glub
+			//DispatchKeyValueVector(created, "Angles", angle);
+			//DispatchSpawn(created);
+			PrintToChat(client, "origin: %f %f %f; angles: %f %f %f", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2]);
 
-		return Plugin_Handled;
+			return Plugin_Handled;
+		}
 	}
 	return Plugin_Handled;
 }
@@ -1724,10 +2018,7 @@ public Action:CommandStrapon(client, args)
 
 
 
-
-
-
-public Action:CommandPropCreateMultiplayer(client, args)
+public Action CommandPropCreateMultiplayer(int client, int args)
 {
 	if(args < 1)
 	{
@@ -1753,12 +2044,12 @@ public Action:CommandPropCreateMultiplayer(client, args)
 		SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  //16 is suggested, ghost is 136!??     <- doesn't work, we need to try with prop_multiplayer
 //		SetEntityMoveType(EntIndex, MOVETYPE_VPHYSICS);   //MOVETYPE_VPHYSICS seems oK, doesn't seem to change anything
 
-		int health=300
+		int health=300;
 //		health = 300
-		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1)  // Prop_Send didn't work but this works!
+		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);  // Prop_Send didn't work but this works!
 
 
-		SetEntPropFloat(EntIndex, Prop_Send, "m_flGravity", 0.5)  // doesn't do anything. FIXME: Changed from Prop_Data
+		SetEntPropFloat(EntIndex, Prop_Send, "m_flGravity", 0.5); // doesn't do anything. FIXME: Changed from Prop_Data
 
 //		DispatchKeyValue(EntIndex, "health", "100");    //not working
 //		DispatchKeyValue(EntIndex, "rendercolor", "255,255,80,80");  //no working
@@ -1789,8 +2080,8 @@ public Action:CommandPropCreateMultiplayer(client, args)
 //		ChangeEdictState(EntIndex, 0);
 
 
-		new Float:origin[3]
-		origin[2] += 150.0
+		new Float:origin[3];
+		origin[2] += 150.0;
 //		GetClientAbsOrigin(client, origin);
 		GetClientEyePosition(client, origin);
 		//GetClientEyeAngles(client, angle);
@@ -1810,7 +2101,7 @@ public Action:CommandPropCreateMultiplayer(client, args)
 
 
 
-public Action:CommandPropNoCollide(client, args)
+public Action CommandPropNoCollide(int client, int args)
 {
 	new EntIndex = GetClientAimTarget(client, false);
 	if (EntIndex != -1 && IsValidEntity(EntIndex))
@@ -1826,13 +2117,13 @@ public Action:CommandPropNoCollide(client, args)
 		GetEntProp(EntIndex, Prop_Data, "m_spawnflags", spawnflags);
 		GetEntPropString(EntIndex, Prop_Data, "m_nSolidType", solid, 130);
 
-		int health=150
-		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1)  // Prop_Send didn't work but this works!
+		int health=150;
+		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);  // Prop_Send didn't work but this works!
 
 		SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 4);    //if 4, props go through each others.
 		SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 2);
 
-		AcceptEntityInput(EntIndex, "DisableCollision", 0, 0)
+		AcceptEntityInput(EntIndex, "DisableCollision", 0, 0);
 //		AcceptEntityInput(EntIndex, "kill", 0, 0)
 
 		DispatchKeyValue(EntIndex, "targetname", "test");
@@ -1864,7 +2155,9 @@ public Action:CommandPropNoCollide(client, args)
 	return Plugin_Handled;
 }
 
-public Action:CommandPropCollide(client, args)
+
+
+public Action CommandPropCollide(int client, int args)
 {
 	new Ent = GetClientAimTarget(client, false);
 	if (Ent != -1 && IsValidEntity(Ent))
@@ -1887,8 +2180,8 @@ public Action:CommandPropCollide(client, args)
 //		SetEntProp(Ent, Prop_Send, "m_nSolidType", 9218);   //new
 
 
-		AcceptEntityInput(Ent, "DisableCollision", 0, 0)
-//		AcceptEntityInput(Ent, "kill", 0, 0)
+		AcceptEntityInput(Ent, "DisableCollision", 0, 0);
+//		AcceptEntityInput(Ent, "kill", 0, 0);
 
 		DispatchKeyValue(Ent, "targetname", "test");
 //		DispatchKeyValue(Ent, "model", "models/d/d_s01.mdl");
@@ -1921,9 +2214,7 @@ public Action:CommandPropCollide(client, args)
 
 
 
-
-
-bool:IsAccessGranted( int client )
+bool IsAccessGranted( int client )
 {
     new bool:granted = true;
 
@@ -1951,7 +2242,7 @@ bool:IsAccessGranted( int client )
 
 
 
-public Action:RemoveTargetEntity( client, args )
+public Action RemoveTargetEntity( int client, int args )
 {
     if ( !IsAccessGranted( client ) )
     {
@@ -2011,7 +2302,7 @@ public Action:RemoveTargetEntity( client, args )
 
 
 
-public Action:Rotate_Entity( client, args )
+public Action Rotate_Entity( int client, int args )
 {
     if ( !IsAccessGranted( client ) )
     {
@@ -2053,7 +2344,9 @@ public Action:Rotate_Entity( client, args )
     return Plugin_Handled;
 }
 
-public Action:Rotate_EntityRoll( client, args )
+
+
+public Action Rotate_EntityRoll( int client, int args )
 {
     if ( !IsAccessGranted( client ) )
     {
@@ -2095,7 +2388,9 @@ public Action:Rotate_EntityRoll( client, args )
     return Plugin_Handled;
 }
 
-public Action:Rotate_EntityPitch( client, args )
+
+
+public Action Rotate_EntityPitch( int client, int args )
 {
     if ( !IsAccessGranted( client ) )
     {
@@ -2209,7 +2504,7 @@ GetClientAimedLocationData( client, Float:position[3], Float:angles[3], Float:no
 //---------------------------------------------------------
 // return 0 if it is a server
 //---------------------------------------------------------
-GetPlayerIndex( client )
+GetPlayerIndex( int client )
 {
     if ( client == 0 && !IsDedicatedServer() )
     {
@@ -2237,7 +2532,7 @@ Float:GetAngleBetweenVectors( const Float:vector1[3], const Float:vector2[3], co
 }
 
 
-public bool:TraceEntityFilterPlayers( entity, contentsMask, any:data )
+public bool:TraceEntityFilterPlayers(entity, contentsMask, any:data)
 {
     return entity > MaxClients && entity != data;
 }
