@@ -158,7 +158,7 @@ public Action:CommandGiveScore (int client, int args)
 
 public Action:CommandPropCreditStatus(int client, int args)
 {
-	decl String:name[255];
+	decl String:name[MAX_NAME_LENGTH];
 	PrintToConsole(client, "\n--------- Current props ppawning credits status ---------");
 	for (int i=1; i < MaxClients; i++)
 	{
