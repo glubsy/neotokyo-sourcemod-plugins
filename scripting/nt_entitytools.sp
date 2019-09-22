@@ -140,6 +140,12 @@ public OnPluginStart()
 
 public Action:CommandGiveScore (int client, int args)
 {
+	if (!client)
+	{
+		ReplyToCommand(client, "This command cannot be executed by the server.");
+		return Plugin_Stop;
+	}
+
 	SetEntProp(client, Prop_Data, "m_iFrags", 20);
 	g_RemainingCreds[client][scorecred] = 20;
 	g_RemainingCreds[client][maxcred] = 20;
