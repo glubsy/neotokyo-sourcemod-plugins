@@ -293,7 +293,7 @@ public Action:CommandSetCreditsForClient(int client, int args)
 
 	decl String:s_amount[5];
 	decl String:s_target[3];
-	decl String:s_targetname[255];
+	decl String:s_targetname[MAX_NAME_LENGTH];
 	int i_target;
 	GetCmdArg(1, s_target, sizeof(s_target));
 	GetCmdArg(2, s_amount, sizeof(s_amount));
