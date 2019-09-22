@@ -3,6 +3,8 @@
 #include <sdkhooks>
 //#include <smlib>
 
+#pragma semicolon 1
+
 //new Float:goDist[MAXPLAYERS+1];
 new Handle:g_cvar_adminonly = INVALID_HANDLE;
 new Handle:g_cvar_enabled = INVALID_HANDLE;
@@ -16,7 +18,7 @@ new Handle:g_cvar_score_as_credits = INVALID_HANDLE;
 // WARNING: these require the sm_downloader plugin to force clients to download them
 // small, big, huge, gigantic, megahuge
 new const String:s_dongs[][] = { "models/d/d_s02.mdl", "models/d/d_b02.mdl", "models/d/d_h02.mdl", "models/d/d_g02.mdl", "models/d/d_mh02.mdl"};
-new const String:allowed_models[][] = { "models/nt/a_lil_tiger.mdl", "models/nt/props_office/rubber_duck.mdl" }
+new const String:allowed_models[][] = { "models/nt/a_lil_tiger.mdl", "models/nt/props_office/rubber_duck.mdl" };
 
 // [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
 new g_RemainingCreds[MAXPLAYERS+1][3];
@@ -150,14 +152,14 @@ public Action:CommandGiveScore (int client, int args)
 	g_RemainingCreds[client][scorecred] = 20;
 	g_RemainingCreds[client][maxcred] = 20;
 	PrintToConsole(client, "gave score to %d", client);
-	return Plugin_Handled
+	return Plugin_Handled;
 
 }
 
 public Action:CommandPropCreditStatus(int client, int args)
 {
 	decl String:name[255];
-	PrintToConsole(client, "\n--------- Current props ppawning credits status ---------")
+	PrintToConsole(client, "\n--------- Current props ppawning credits status ---------");
 	for (int i=1; i < MaxClients; i++)
 	{
 		if (!IsValidClient(i))
@@ -165,10 +167,10 @@ public Action:CommandPropCreditStatus(int client, int args)
 
 		if (GetClientName(i, name, sizeof(name)))
 		{
-			PrintToConsole(client,"Virtual: %d, Score: %d, Maximum: %d for \"%s\"", g_RemainingCreds[i][virtcred], g_RemainingCreds[i][scorecred], g_RemainingCreds[i][maxcred], name)
+			PrintToConsole(client,"Virtual: %d, Score: %d, Maximum: %d for \"%s\"", g_RemainingCreds[i][virtcred], g_RemainingCreds[i][scorecred], g_RemainingCreds[i][maxcred], name);
 		}
 	}
-	PrintToConsole(client, "----------------------------------------------------------\n")
+	PrintToConsole(client, "----------------------------------------------------------\n");
 
 }
 
@@ -290,8 +292,8 @@ public Action:CommandSetCreditsForClient(int client, int args)
 {
 	if (GetCmdArgs() != 2)
 	{
-		PrintToChat(client, "Usage: !props_set_credit #id amount (use \"status\" in console).")
-		PrintToConsole(client, "Usage: sm_props_set_credit #id amount (use \"status\" in console).")
+		PrintToChat(client, "Usage: !props_set_credit #id amount (use \"status\" in console).");
+		PrintToConsole(client, "Usage: sm_props_set_credit #id amount (use \"status\" in console).");
 		return Plugin_Stop;
 	}
 
@@ -326,7 +328,7 @@ public Action:CommandSetCreditsForClient(int client, int args)
 public Action:PropSpawnDispatch(int client, int model)
 {
 	CreatePropPhysicsOverride(client, allowed_models[model], 50);
-	return Plugin_Handled
+	return Plugin_Handled;
 }
 
 
@@ -342,7 +344,7 @@ public Action:CommandPropSpawn(int client, int args)
 			PrintToConsole(client, "Admins, some useful commands:\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_props_max_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.\nsm_props_max_ttl: props get deleted after that time.\nsm_props_enabled: disable the command.");
 			PrintToChat(client, "Admin, check console for useful commands and convars (more to come later).");
 		}
-		return Plugin_Handled
+		return Plugin_Handled;
 	}
 
  	if( GetCmdArgs() != 1 )
@@ -370,7 +372,7 @@ public Action:CommandPropSpawn(int client, int args)
 	}
 
 	decl String:model_name[80];
-	GetCmdArg(1, model_name, sizeof(model_name))
+	GetCmdArg(1, model_name, sizeof(model_name));
 
 	for (int i=0; i < sizeof(allowed_models); ++i)
 	{
@@ -502,8 +504,8 @@ public Action:CommandDongSpawn(int client, int args)
 	}
 
 	new String:model_scale[2], String:model_property[2]; //FIXME maybe better way?
-	GetCmdArg(1, model_scale, sizeof(model_scale))
-	GetCmdArg(2, model_property, sizeof(model_property))
+	GetCmdArg(1, model_scale, sizeof(model_scale));
+	GetCmdArg(2, model_property, sizeof(model_property));
 
 	//new iModelScale = trim_quotes(model_scale);  returns 0 ?
 	new iModelScale = (strlen(model_scale) > 0) ? StringToInt(model_scale) : 1;
@@ -637,13 +639,13 @@ stock CreatePropPhysicsOverride(int client, const String:modelname[], int health
 		SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  //16 is suggested, ghost is 136!??     <- doesn't work, we need to try with prop_multiplayer
 
 		//int health=150
-		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1)  // Prop_Send didn't work but this works!
-		SetEntProp(EntIndex, Prop_Data, "m_iMaxHealth", health, 1)
+		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);  // Prop_Send didn't work but this works!
+		SetEntProp(EntIndex, Prop_Data, "m_iMaxHealth", health, 1);
 
-		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 1.0)  // doesn't seem to do anything?
-		SetEntityGravity(EntIndex, 0.5) 						// (default = 1.0, half = 0.5, double = 2.0)
+		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 1.0);  // doesn't seem to do anything?
+		SetEntityGravity(EntIndex, 0.5); 						// (default = 1.0, half = 0.5, double = 2.0)
 
-		SetEntPropFloat(EntIndex, Prop_Data, "m_massScale", 1.0)  //FIXME!
+		SetEntPropFloat(EntIndex, Prop_Data, "m_massScale", 1.0);  //FIXME!
 		DispatchKeyValue(EntIndex, "massScale", "1.0");
 		DispatchKeyValue(EntIndex, "physdamagescale", "1.0");  // FIXME! not sure if it works
 
@@ -688,7 +690,7 @@ stock CreatePropPhysicsOverride(int client, const String:modelname[], int health
 		GetClientAbsOrigin(client, ClientOrigin);
 		GetClientAbsAngles(client, clientabsangle);
 		GetClientEyePosition(client, clienteyeposition);
-		GetClientEyeAngles(client, ClientEyeAngles)
+		GetClientEyeAngles(client, ClientEyeAngles);
 
 
 		propangles[1] = clientabsangle[1];
@@ -781,11 +783,11 @@ public Action:CommandPropCreatePhysicsOverrideVector(int client, int args)
 		SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);   // Do I need to change this to 9218?????  <- doesn't work, we need to try with prop_multiplayer
 		SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  //16 is suggested, ghost is 136!??     <- doesn't work, we need to try with prop_multiplayer
 
-		int health=150
-		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1)  // Prop_Send didn't work but this works!
+		int health = 150;
+		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);  // Prop_Send didn't work but this works!
 
 
-		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 0.2)  // doesn't seem to do anything?
+		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 0.2);  // doesn't seem to do anything?
 
 //		DispatchKeyValue(EntIndex, "health", "100");    //not working
 //		DispatchKeyValue(EntIndex, "rendercolor", "20,50,80,255");  //not working
@@ -826,7 +828,7 @@ public Action:CommandPropCreatePhysicsOverrideVector(int client, int args)
 		GetClientAbsOrigin(client, ClientOrigin);
 		GetClientAbsAngles(client, clientabsangle);
 		GetClientEyePosition(client, clienteyeposition);
-		GetClientEyeAngles(client, ClientEyeAngles)
+		GetClientEyeAngles(client, ClientEyeAngles);
 
 
 		propangles[1] = clientabsangle[1];
@@ -1016,7 +1018,7 @@ public Action:CommandSpawnGhostCapZone(int client, int args)
 
 
 			SetEntPropEnt(EntIndex, Prop_Data, "m_hEffectEntity", aimed);
-			CreateTimer(1.0, TimerSetParent, EntIndex, TIMER_REPEAT)
+			CreateTimer(1.0, TimerSetParent, EntIndex, TIMER_REPEAT);
 		}
 	}
 	return Plugin_Handled;
@@ -1034,7 +1036,7 @@ public Action CommandSpawnVIPEntity(int client, int args)
 	if(newentity != -1)
 	{
 		char classname[20];
-		GetEdictClassname(newentity, classname, sizeof(classname))
+		GetEdictClassname(newentity, classname, sizeof(classname));
 		PrintToChatAll("[ENTITY] create %s, %i", classname, newentity);
 		float VecOrigin[3], VecAngles[3], normal[3];
 
@@ -1324,11 +1326,11 @@ public Action:CommandPropCreateDynamicOverride(int client, int args)  // not use
 		SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);   // Do I need to change this to 9218?????  <- doesn't work, we need to try with prop_multiplayer
 		SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  //16 is suggested, ghost is 136!??     <- doesn't work, we need to try with prop_multiplayer
 
-		int health=150
-		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1)  // Prop_Send didn't work but this works!
+		int health = 150;
+		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);  // Prop_Send didn't work but this works!
 
 
-		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 0.5)  // doesn't seem to do anything?
+		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 0.5);  // doesn't seem to do anything?
 
 //		DispatchKeyValue(EntIndex, "health", "100");    //not working
 //		DispatchKeyValue(EntIndex, "rendercolor", "20,50,80,255");  //not working
@@ -1367,7 +1369,7 @@ public Action:CommandPropCreateDynamicOverride(int client, int args)  // not use
 		GetClientAbsOrigin(client, ClientOrigin);
 		GetClientAbsAngles(client, clientabsangle);
 		GetClientEyePosition(client, clienteyeposition);
-		GetClientEyeAngles(client, ClientEyeAngles)
+		GetClientEyeAngles(client, ClientEyeAngles);
 
 
 		propangles[1] = clientabsangle[1];
@@ -1450,7 +1452,7 @@ public Action:GetPropInfo(client, args)
 	new aimed = GetClientAimTarget(client, false);
 	if (aimed != 1 && !IsValidEntity(aimed))
 	{
-		PrintToConsole(client, "not a valid entity you're aiming at")
+		PrintToConsole(client, "not a valid entity you're aiming at");
 	}
 	if (aimed != -1 && IsValidEntity(aimed))
 	{
@@ -1591,7 +1593,7 @@ public Action:SetPropInfo(client, args)
 	new aimed = GetClientAimTarget(client, false);
 	if (aimed != 1 && !IsValidEntity(aimed))
 	{
-		PrintToConsole(client, "not a valid entity you're aiming at")
+		PrintToConsole(client, "not a valid entity you're aiming at");
 	}
 	if (aimed != -1 && IsValidEntity(aimed))
 	{
@@ -1760,12 +1762,12 @@ public Action:CommandPropCreateMultiplayer(client, args)
 		SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  //16 is suggested, ghost is 136!??     <- doesn't work, we need to try with prop_multiplayer
 //		SetEntityMoveType(EntIndex, MOVETYPE_VPHYSICS);   //MOVETYPE_VPHYSICS seems oK, doesn't seem to change anything
 
-		int health=300
+		int health = 300;
 //		health = 300
-		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1)  // Prop_Send didn't work but this works!
+		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);  // Prop_Send didn't work but this works!
 
 
-		SetEntPropFloat(EntIndex, Prop_Send, "m_flGravity", 0.5)  // doesn't do anything. FIXME: Changed from Prop_Data
+		SetEntPropFloat(EntIndex, Prop_Send, "m_flGravity", 0.5);  // doesn't do anything. FIXME: Changed from Prop_Data
 
 //		DispatchKeyValue(EntIndex, "health", "100");    //not working
 //		DispatchKeyValue(EntIndex, "rendercolor", "255,255,80,80");  //no working
@@ -1796,8 +1798,8 @@ public Action:CommandPropCreateMultiplayer(client, args)
 //		ChangeEdictState(EntIndex, 0);
 
 
-		new Float:origin[3]
-		origin[2] += 150.0
+		new Float:origin[3];
+		origin[2] += 150.0;
 //		GetClientAbsOrigin(client, origin);
 		GetClientEyePosition(client, origin);
 		//GetClientEyeAngles(client, angle);
@@ -1833,14 +1835,14 @@ public Action:CommandPropNoCollide(client, args)
 		GetEntProp(EntIndex, Prop_Data, "m_spawnflags", spawnflags);
 		GetEntPropString(EntIndex, Prop_Data, "m_nSolidType", solid, 130);
 
-		int health=150
-		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1)  // Prop_Send didn't work but this works!
+		int health=150;
+		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);  // Prop_Send didn't work but this works!
 
 		SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 4);    //if 4, props go through each others.
 		SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 2);
 
-		AcceptEntityInput(EntIndex, "DisableCollision", 0, 0)
-//		AcceptEntityInput(EntIndex, "kill", 0, 0)
+		AcceptEntityInput(EntIndex, "DisableCollision", 0, 0);
+//		AcceptEntityInput(EntIndex, "kill", 0, 0);
 
 		DispatchKeyValue(EntIndex, "targetname", "test");
 //		DispatchKeyValue(EntIndex, "model", "models/d/d_s01.mdl");  // ok it works, no need anymore, just use in another command as changing models for fun :)
@@ -1894,8 +1896,8 @@ public Action:CommandPropCollide(client, args)
 //		SetEntProp(Ent, Prop_Send, "m_nSolidType", 9218);   //new
 
 
-		AcceptEntityInput(Ent, "DisableCollision", 0, 0)
-//		AcceptEntityInput(Ent, "kill", 0, 0)
+		AcceptEntityInput(Ent, "DisableCollision", 0, 0);
+//		AcceptEntityInput(Ent, "kill", 0, 0);
 
 		DispatchKeyValue(Ent, "targetname", "test");
 //		DispatchKeyValue(Ent, "model", "models/d/d_s01.mdl");
