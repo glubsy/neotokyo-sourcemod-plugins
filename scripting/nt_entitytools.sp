@@ -1632,42 +1632,42 @@ public Action:CommandStrapon(client, args)
 		new aimed = GetClientAimTarget(client, false);
 		if (aimed != -1 && IsValidEntity(aimed))
 		{
-		new String:classname[32];
-		new String:m_ModelName[130];
-		new String:m_nSolidType[130];
-		int m_CollisionGroup, m_spawnflags;
+			new String:classname[32];
+			new String:m_ModelName[130];
+			new String:m_nSolidType[130];
+			int m_CollisionGroup, m_spawnflags;
 
-		GetEdictClassname(aimed, classname, 32);
-		if(StrContains(classname, "player"))
-		{
-			PrintToChat(client, "Can't strapon");
+			GetEdictClassname(aimed, classname, 32);
+			if(StrContains(classname, "player"))
+			{
+				PrintToChat(client, "Can't strapon");
+				return Plugin_Handled;
+			}
+			GetEntPropString(aimed, Prop_Data, "m_ModelName", m_ModelName, 130);
+			GetEntPropString(aimed, Prop_Data, "m_nSolidType", m_nSolidType, 130);
+			GetEntProp(aimed, Prop_Data, "m_CollisionGroup", m_CollisionGroup);
+			GetEntProp(aimed, Prop_Data, "m_spawnflags", m_spawnflags);
+
+			decl String:Buffer[64];
+			Format(Buffer, sizeof(Buffer), "Client%d", client);
+			DispatchKeyValue(client, "targetname", Buffer);
+
+			SetVariantString("!activator");
+			AcceptEntityInput(aimed, "SetParent", client);
+			//SetVariantString(Buffer);
+			//AcceptEntityInput(aimed, "SetParent");
+
+			SetVariantString("grenade2");
+			AcceptEntityInput(aimed, "SetParentAttachment");
+			SetVariantString("grenade2");
+			AcceptEntityInput(aimed, "SetParentAttachmentMaintainOffset");
+			/*new Float:angle[3];
+			coords[0] -= 60.0;
+			coords[1] -= 60.0;
+			coords[2] += 100.0;
+			DispatchKeyValueVector(aimed, "Origin", coords);*/    // Testing offsetting stuffs
+
 			return Plugin_Handled;
-		}
-		GetEntPropString(aimed, Prop_Data, "m_ModelName", m_ModelName, 130);
-		GetEntPropString(aimed, Prop_Data, "m_nSolidType", m_nSolidType, 130);
-		GetEntProp(aimed, Prop_Data, "m_CollisionGroup", m_CollisionGroup);
-		GetEntProp(aimed, Prop_Data, "m_spawnflags", m_spawnflags);
-
-		decl String:Buffer[64];
-		Format(Buffer, sizeof(Buffer), "Client%d", client);
-		DispatchKeyValue(client, "targetname", Buffer);
-
-		SetVariantString("!activator");
-		AcceptEntityInput(aimed, "SetParent", client);
-        //SetVariantString(Buffer);
-        //AcceptEntityInput(aimed, "SetParent");
-
-		SetVariantString("grenade2");
-		AcceptEntityInput(aimed, "SetParentAttachment");
-		SetVariantString("grenade2");
-		AcceptEntityInput(aimed, "SetParentAttachmentMaintainOffset");
-		/*new Float:angle[3];
-		coords[0] -= 60.0;
-		coords[1] -= 60.0;
-		coords[2] += 100.0;
-		DispatchKeyValueVector(aimed, "Origin", coords);*/    // Testing offsetting stuffs
-
-		return Plugin_Handled;
 		}
 	}
 	if  (args >= 1)
