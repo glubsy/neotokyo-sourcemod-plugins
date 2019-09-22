@@ -24,12 +24,56 @@ new g_RemainingCreds[MAXPLAYERS+1][3];
 #define maxcred 2
 new g_propindex_d[MAXPLAYERS+1]; // holds a temporary entity index for timer destruction
 new Handle:cvMaxPropsCreds = INVALID_HANDLE; // maximum credits given
+new Handle:cvPropMaxTTL = INVALID_HANDLE; // maximum time to live before prop gets auto removed
 
 // Prices: scale 1= 1 creds, 2= 3 creds, 3= 6 creds, 4= 8 creds, 5= 10 creds
 new const g_DongPropPrice[] = { 0, 1, 3, 6, 8, 10 };
 
 //TODO: consider TempEnts to filter out model spawning for people who don't like them https://wiki.alliedmods.net/TempEnts_(SourceMod_SDKTools)
+// Rain's suggestion: https://pastebin.com/z7wNF5Lh
 
+// /*	CTEPhysicsProp (type DT_TEPhysicsProp)
+// 		Table: baseclass (offset 0) (type DT_BaseTempEntity)
+// 			Member: m_vecOrigin (offset 12) (type vector) (bits 0) (Coord)
+// 			Member: m_angRotation[0] (offset 24) (type float) (bits 13) (VectorElem)
+// 			Member: m_angRotation[1] (offset 28) (type float) (bits 13) (VectorElem)
+// 			Member: m_angRotation[2] (offset 32) (type float) (bits 13) (VectorElem)
+// 			Member: m_vecVelocity (offset 36) (type vector) (bits 0) (Coord)
+// 			Member: m_nModelIndex (offset 48) (type integer) (bits 11) ()
+// 			Member: m_nSkin (offset 52) (type integer) (bits 10) ()
+// 			Member: m_nFlags (offset 56) (type integer) (bits 2) (Unsigned)
+// 			Member: m_nEffects (offset 60) (type integer) (bits 10) (Unsigned)
+//  */
+
+// // Passes client array by ref, and returns num. of clients inserted in the array.
+// int GetDickClients(int &outClients, int arraySize)
+// {
+// 	int index = 0;
+
+// 	for (int thisClient = 1; thisClient <= MaxClients; thisClient++)
+// 	{
+// 		// Reached the max size of array
+// 		if (index == arraySize)
+// 			break;
+	
+// 		if (IsValidClient(thisClient) && WantsDicks(thisClient))
+// 		{
+// 			outClients[index++] = thisClient;
+// 		}
+// 	}
+	
+// 	return index;
+// }
+
+// int clients[MAXPLAYERS+1];
+// int numClients = GetDickClients(clients, sizeof(clients));
+
+// int dickMdl = PrecacheModel("dick.mdl", false);
+
+// TE_Start("TEPhysicsProp");
+// TE_WriteVector("m_vecOrigin", float[3]{0,0,0});
+// TE_WriteNum("m_nModelIndex", dickMdl);
+// TE_Send(clients, numClients, 0);
 
 
 public Plugin:myinfo =
@@ -75,7 +119,8 @@ public OnPluginStart()
 	g_cvar_adminonly = CreateConVar( "entitycreate_adminonly", "0", "0: every client can build, 1: only admin can build", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 );
 
 	g_cvar_give_initial_credits = CreateConVar( "sm_props_initial_credits", "0", "0: players starts with zero credits 1: assign sm_max_props_credits to all players as soon as they connect", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 );
-	cvMaxPropsCreds = CreateConVar("sm_max_props_credits", "10", "Max number of virtual credits allowed per round/life for spawning props");
+	cvMaxPropsCreds = CreateConVar("sm_props_max_credits", "10", "Max number of virtual credits allowed per round/life for spawning props");
+	cvPropMaxTTL = CreateConVar("sm_props_max_ttl", "60", "Maximum time to live for spawned props in seconds.");
 
 	g_cvar_credits_replenish = CreateConVar( "sm_props_replenish_credits", "1", "0: credits are lost forever after use. 1: credits replenish after each end of round", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 );
 	g_cvar_score_as_credits = CreateConVar( "sm_props_score_as_credits", "1", "0: use virtual props credits only, 1: use score as props credits on top of virtual props credits", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 );
@@ -284,7 +329,7 @@ public Action:CommandPropSpawn(int client, int args)
 
 		if (IsAdmin(client))
 		{
-			PrintToConsole(client, "Admins, some useful commands:\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_max_props_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.");
+			PrintToConsole(client, "Admins, some useful commands:\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_props_max_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.\nsm_props_max_ttl: props get deleted after that time.");
 			PrintToChat(client, "Admin, check console for useful commands and convars (more to come later).");
 		}
 		return Plugin_Handled
@@ -300,7 +345,7 @@ public Action:CommandPropSpawn(int client, int args)
 
 		if (IsAdmin(client))
 		{
-			PrintToConsole(client, "Admins, some useful commands:\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_max_props_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.");
+			PrintToConsole(client, "Admins, some useful commands:\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_props_max_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.\nsm_props_max_ttl: props get deleted after that time.");
 			PrintToChat(client, "Admin, check console for useful commands and convars (more to come later)..");
 		}
 
@@ -364,7 +409,7 @@ public Action:DongDispatch(int client, int scale, int bstatic)
 				g_propindex_d[client] = CreatePropDynamicOverride(client, s_dongs[scale-1][0], 120);
 
 			// remove the prop after 40 seconds
-			CreateTimer(40.0, TimerKillEntity, g_propindex_d[client]);
+			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
 		}
 		case 3:
 		{
@@ -375,7 +420,7 @@ public Action:DongDispatch(int client, int scale, int bstatic)
 
 			// remove the prop when it's touched by a player
 			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
-			CreateTimer(40.0, TimerKillEntity, g_propindex_d[client]);
+			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
 		}
 		case 4:
 		{
@@ -385,7 +430,7 @@ public Action:DongDispatch(int client, int scale, int bstatic)
 				g_propindex_d[client] = CreatePropDynamicOverride(client, s_dongs[scale-1], 200);
 
 			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
-			CreateTimer(40.0, TimerKillEntity, g_propindex_d[client]);
+			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
 		}
 		case 5:
 		{
@@ -395,7 +440,7 @@ public Action:DongDispatch(int client, int scale, int bstatic)
 				g_propindex_d[client] = CreatePropDynamicOverride(client, s_dongs[scale-1], 250);
 
 			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
-			CreateTimer(40.0, TimerKillEntity, g_propindex_d[client]);
+			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
 		}
 		default:
 		{
