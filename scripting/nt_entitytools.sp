@@ -171,7 +171,7 @@ public Action:CommandPropCreditStatus(int client, int args)
 		}
 	}
 	PrintToConsole(client, "----------------------------------------------------------\n");
-
+	return Plugin_Handled;
 }
 
 /*
