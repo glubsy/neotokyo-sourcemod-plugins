@@ -290,15 +290,15 @@ public DecrementScore(int client, int amount)
 // increment (virtual) credits for target client
 public Action:CommandSetCreditsForClient(int client, int args)
 {
+	if(!client || IsFakeClient(client))
+		return Plugin_Stop;
+
 	if (GetCmdArgs() != 2)
 	{
 		PrintToChat(client, "Usage: !props_set_credit #id amount (use \"status\" in console).");
 		PrintToConsole(client, "Usage: sm_props_set_credit #id amount (use \"status\" in console).");
 		return Plugin_Stop;
 	}
-
-	if(!client || IsFakeClient(client))
-		return Plugin_Handled;
 
 	decl String:s_amount[5];
 	decl String:s_target[3];
