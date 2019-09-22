@@ -4,12 +4,13 @@
 //#include <smlib>
 
 //new Float:goDist[MAXPLAYERS+1];
-new Handle:g_cvar_adminonly     = INVALID_HANDLE;
-new Handle:g_cvar_enabled        = INVALID_HANDLE;
-new Handle:g_cvar_restrict_alive   = INVALID_HANDLE;
-new Handle:g_cvar_give_initial_credits   = INVALID_HANDLE;
-new Handle:g_cvar_credits_replenish   = INVALID_HANDLE;
-new Handle:g_cvar_score_as_credits   = INVALID_HANDLE;
+new Handle:g_cvar_adminonly = INVALID_HANDLE;
+new Handle:g_cvar_enabled = INVALID_HANDLE;
+new Handle:g_cvar_props_enabled = INVALID_HANDLE;
+new Handle:g_cvar_restrict_alive = INVALID_HANDLE;
+new Handle:g_cvar_give_initial_credits = INVALID_HANDLE;
+new Handle:g_cvar_credits_replenish = INVALID_HANDLE;
+new Handle:g_cvar_score_as_credits = INVALID_HANDLE;
 //new Handle:g_cvar_score_can_decrement   = INVALID_HANDLE;
 
 // WARNING: these require the sm_downloader plugin to force clients to download them
@@ -115,6 +116,8 @@ public OnPluginStart()
 	RegConsoleCmd("sm_props", CommandPropSpawn, "spawns a prop");
 
 	g_cvar_enabled = CreateConVar( "entitycreate_enabled", "1", "0: disable custom props spawning, 1: enable custom props spawning", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 ); //from LeftFortDead plugin
+	g_cvar_props_enabled = CreateConVar( "sm_props_enabled", "1", "0: disable custom props spawning, 1: enable custom props spawning", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 ); //from LeftFortDead plugin
+
 	g_cvar_restrict_alive = CreateConVar( "sm_props_restrict_alive", "0", "0: spectators can spawn props too. 1: only living players can spawn props", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 );
 	g_cvar_adminonly = CreateConVar( "entitycreate_adminonly", "0", "0: every client can build, 1: only admin can build", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 );
 
@@ -329,7 +332,7 @@ public Action:CommandPropSpawn(int client, int args)
 
 		if (IsAdmin(client))
 		{
-			PrintToConsole(client, "Admins, some useful commands:\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_props_max_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.\nsm_props_max_ttl: props get deleted after that time.");
+			PrintToConsole(client, "Admins, some useful commands:\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_props_max_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.\nsm_props_max_ttl: props get deleted after that time.\nsm_props_enabled: disable the command.");
 			PrintToChat(client, "Admin, check console for useful commands and convars (more to come later).");
 		}
 		return Plugin_Handled
@@ -345,10 +348,17 @@ public Action:CommandPropSpawn(int client, int args)
 
 		if (IsAdmin(client))
 		{
-			PrintToConsole(client, "Admins, some useful commands:\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_props_max_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.\nsm_props_max_ttl: props get deleted after that time.");
+			PrintToConsole(client, "Admins, some useful commands:\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_props_max_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.\nsm_props_max_ttl: props get deleted after that time.\nsm_props_enabled: disable the command.");
 			PrintToChat(client, "Admin, check console for useful commands and convars (more to come later)..");
 		}
 
+		return Plugin_Handled;
+	}
+
+	if (!GetConVarBool(g_cvar_props_enabled))
+	{
+		PrintToConsole(client, "This command is currently disabled. Ask an admin to enable with sm_props_enabled");
+		PrintToChat(client, "This command is currently disabled. Ask an admin to enable with sm_props_enabled");
 		return Plugin_Handled;
 	}
 
@@ -452,6 +462,13 @@ public Action:DongDispatch(int client, int scale, int bstatic)
 
 public Action:CommandDongSpawn(int client, int args)
 {
+	if (!GetConVarBool(g_cvar_props_enabled))
+	{
+		PrintToConsole(client, "This command is currently disabled. Ask an admin to enable with sm_props_enabled");
+		PrintToChat(client, "This command is currently disabled. Ask an admin to enable with sm_props_enabled");
+		return Plugin_Handled;
+	}
+
 	if (GetConVarInt( g_cvar_score_as_credits ) > 0)
 	{
 		if (g_RemainingCreds[client][scorecred] <= 0)
