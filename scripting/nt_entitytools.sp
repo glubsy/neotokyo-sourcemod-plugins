@@ -70,9 +70,10 @@ public OnPluginStart()
 	RegAdminCmd("spawnvipentity", CommandSpawnVIPEntity, ADMFLAG_SLAY);
 
 	RegAdminCmd("movetype", ChangeEntityMoveType, ADMFLAG_SLAY);
-	RegConsoleCmd("sm_strapon", Command_Strap_Dong, "Strap a dong onto yourself.");
-	RegAdminCmd("sm_strapon_target", Command_Strapon_Target, ADMFLAG_SLAY,  "DEBUG: Strapon self/all/target to stick a dick on people");
+
+	RegAdminCmd("sm_strapon_target", Command_Strapon_Target, ADMFLAG_SLAY,  "DEBUG: Strap target to yourself (dangerous)");
 	//RegAdminCmd("sm_unstrapon_target", Command_UnStrapon_Target, ADMFLAG_SLAY,  "unstrap self/all/target");
+
 	RegAdminCmd("entity_remove", RemoveTargetEntity, ADMFLAG_SLAY, "DEBUG: to remove edict (fixme)");
 	RegAdminCmd("setpropinfo", SetPropInfo, ADMFLAG_SLAY, "sets prop property");
 	RegAdminCmd("TestSpawnFlags", TestSpawnFlags, ADMFLAG_SLAY, "sets prop property to all by name");
@@ -83,8 +84,10 @@ public OnPluginStart()
 	RegAdminCmd("sm_props_set_credits", CommandSetCreditsForClient, ADMFLAG_SLAY, "Gives target player virtual credits in order to spawn props.");
 	RegConsoleCmd("sm_props_credit_status", CommandPropCreditStatus, "List all player credits to spawn props.");
 
-	RegConsoleCmd("sm_dick", CommandDongSpawn, "spawns a dick");
-	RegConsoleCmd("sm_props", CommandPropSpawn, "spawns a prop");
+	RegConsoleCmd("sm_dick", CommandDongSpawn, "Spawns a dick [scale 1-5] [1 for static prop]");
+	RegConsoleCmd("sm_props", CommandPropSpawn, "Spawns a prop.");
+	RegConsoleCmd("sm_strapon", Command_Strap_Dong_To_Self, "Strap a dong onto yourself.");
+	RegConsoleCmd("sm_strapon_all", Command_Strap_Dong_To_All, "Strap a dong onto everyone.");
 
 	g_cvar_enabled = CreateConVar( "entitycreate_enabled", "1",
 									"0: disable custom props spawning, 1: enable custom props spawning",
@@ -290,7 +293,7 @@ public Action Command_Pause_Props_Spawning(int client, int args)
 			Member: m_nEffects (offset 60) (type integer) (bits 10) (Unsigned)
  */
 
-// Passes client array by ref, and returns num. of clients inserted in the array.
+// Passes client array by ref, and returns num. of clients inserted in the array.- Rainyan
 int GetDongClients(int outClients[MAXPLAYERS+1], int arraySize)
 {
 	int index = 0;
@@ -322,17 +325,15 @@ public Action Command_TE_dong(int client, int args)
 	}
 
 	decl String:s_tetype[100];
-	//GetCmdArg(1, s_tetype, sizeof(s_tetype));
 	s_tetype = gs_TE_types[0]; // or physicsprop or breakmodel
 
 	int dongclients[MAXPLAYERS+1];
-
 	int numClients = GetDongClients(dongclients, sizeof(dongclients));
-
 	int cached_mdl = PrecacheModel(gs_dongs[0], false);
 
 	float origin[3];
 	GetClientEyePosition(client, origin);
+
 	TE_Start(s_tetype);
 	TE_WriteVector("m_vecOrigin", origin);
 	TE_WriteNum("m_nModelIndex", cached_mdl);
@@ -349,6 +350,11 @@ bool WantsDong(int client)
 }
 
 
+
+//==================================
+//		Credits management
+//==================================
+
 public Action CommandGiveScore (int client, int args)
 {
 	if (!client)
@@ -359,17 +365,13 @@ public Action CommandGiveScore (int client, int args)
 
 	SetEntProp(client, Prop_Data, "m_iFrags", 20);
 	g_RemainingCreds[client][SCORE_CRED] = 20;
+	g_RemainingCreds[client][VIRT_CRED] = 20;
 	g_RemainingCreds[client][MAX_CRED] = 20;
 	CommandSetCreditsForClient(client, 20);
 	PrintToConsole(client, "gave score to %d", client);
 	return Plugin_Handled;
 
 }
-
-
-//==================================
-//		Credits management
-//==================================
 
 
 public Action CommandPropCreditStatus(int client, int args)
@@ -802,6 +804,94 @@ DisplayActivity(int client, const char[] model)
 	LogAction(client, -1, "[sm_props] \"%L\" spawned: %s", client, model);
 
 }
+
+
+// sets the client as the entity's new parent and attach the entity to client
+public MakeParent(int client, int entity)
+{
+	decl String:Buffer[64];
+	Format(Buffer, sizeof(Buffer), "Client%d", client);
+
+	DispatchKeyValue(client, "targetname", Buffer);
+
+	SetVariantString("!activator");
+	AcceptEntityInput(entity, "SetParent", client);
+
+	SetVariantString("grenade2");
+	AcceptEntityInput(entity, "SetParentAttachment");
+	SetVariantString("grenade2");
+	AcceptEntityInput(entity, "SetParentAttachmentMaintainOffset");
+
+	new Float:origin[3];
+	new Float:angle[3];
+	GetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin);
+	GetEntPropVector(entity, Prop_Send, "m_angRotation", angle);
+
+	origin[0] += 0.0;
+	origin[1] += 0.0;
+	origin[2] += 0.0;
+
+	angle[0] += 0.0;
+	angle[1] += 3.0;
+	angle[2] += 0.3;
+	//DispatchKeyValueVector(entity, "Origin", origin);    //FIX testing offset coordinates, remove! -glub
+	//DispatchKeyValueVector(entity, "Angles", angle);
+	//DispatchSpawn(entity);
+	PrintToChat(client, "origin: %f %f %f; angles: %f %f %f", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2]);
+
+}
+
+
+
+// create arg1 and strap to ourself
+public Action Command_Strap_Dong_To_Self(int client, int args)
+{
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+
+	if (gb_PausePropSpawning)
+	{
+		ReplyToCommand(client, "Prop spawning is currently paused.");
+		return Plugin_Handled;
+	}
+
+	SpawnAndStrapDongToSelf(client);
+
+	return Plugin_Handled;
+}
+
+
+// strap a dong to everybody
+public Action Command_Strap_Dong_To_All(int client, int args)
+{
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+
+	if (gb_PausePropSpawning)
+	{
+		ReplyToCommand(client, "Prop spawning is currently paused.");
+		return Plugin_Handled;
+	}
+
+	for (client = 1; client <= MaxClients; client++)
+	{
+		if (!IsValidClient(client))
+			continue;
+		SpawnAndStrapDongToSelf(client);
+	}
+
+	return Plugin_Handled;
+}
+
+
+public void SpawnAndStrapDongToSelf(int client)
+{
+	new created = CreatePropDynamicOverride(client, gs_dongs[0], 5);
+	MakeParent(client, created);
+}
+
+
+
 
 
 //==================================
@@ -1918,137 +2008,46 @@ public Action:SetPropInfo(client, args)
 }
 
 
-// Hopefully someday this will be a hat or something, not a stupi d***
-public Action Command_Strap_Dong(int client, int args)
-{
-	if (!IsValidClient(client))
-		return Plugin_Handled;
-
-	if (gb_PausePropSpawning)
-	{
-		ReplyToCommand(client, "Prop spawning is currently paused.");
-		return Plugin_Handled;
-	}
-
-	new created = CreatePropDynamicOverride(client, gs_dongs[0], 20);
-	decl String:Buffer[64];
-	Format(Buffer, sizeof(Buffer), "Client%d", client);
-	DispatchKeyValue(client, "targetname", Buffer);
-
-	SetVariantString("!activator");
-	AcceptEntityInput(created, "SetParent", client);
-
-	SetVariantString("grenade2");
-	AcceptEntityInput(created, "SetParentAttachment");
-	SetVariantString("grenade2");
-	AcceptEntityInput(created, "SetParentAttachmentMaintainOffset");
-
-	new Float:origin[3];
-	new Float:angle[3];
-	GetEntPropVector(created, Prop_Send, "m_vecOrigin", origin);
-	GetEntPropVector(created, Prop_Send, "m_angRotation", angle);
-
-	origin[0] += 0.0;
-	origin[1] += 0.0;
-	origin[2] += 0.0;
-
-	angle[0] += 0.0;
-	angle[1] += 3.0;
-	angle[2] += 0.3;
-	//DispatchKeyValueVector(created, "Origin", origin);    //FIX testing offset coordinates, remove! -glub
-	//DispatchKeyValueVector(created, "Angles", angle);
-	//DispatchSpawn(created);
-	ReplyToCommand(client, "origin: %f %f %f; angles: %f %f %f", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2]);
-
-	return Plugin_Handled;
-}
-
-
-
+// strap onto ourselves whatever is under our crosshair (dangerous!)
 public Action Command_Strapon_Target(int client, int args)
 {
-	if (args < 1)
+	new aimed = GetClientAimTarget(client, false);
+	if (aimed != -1 && IsValidEntity(aimed))
 	{
-		new aimed = GetClientAimTarget(client, false);
-		if (aimed != -1 && IsValidEntity(aimed))
+		new String:classname[32];
+		new String:m_ModelName[130];
+		new String:m_nSolidType[130];
+		int m_CollisionGroup, m_spawnflags;
+
+		GetEdictClassname(aimed, classname, 32);
+		if(StrContains(classname, "player"))
 		{
-			new String:classname[32];
-			new String:m_ModelName[130];
-			new String:m_nSolidType[130];
-			int m_CollisionGroup, m_spawnflags;
-
-			GetEdictClassname(aimed, classname, 32);
-			if(StrContains(classname, "player"))
-			{
-				PrintToChat(client, "Can't strapon \"player\" classname");
-				return Plugin_Handled;
-			}
-			GetEntPropString(aimed, Prop_Data, "m_ModelName", m_ModelName, 130);
-			GetEntPropString(aimed, Prop_Data, "m_nSolidType", m_nSolidType, 130);
-			GetEntProp(aimed, Prop_Data, "m_CollisionGroup", m_CollisionGroup);
-			GetEntProp(aimed, Prop_Data, "m_spawnflags", m_spawnflags);
-
-			decl String:Buffer[64];
-			Format(Buffer, sizeof(Buffer), "Client%d", client);
-			DispatchKeyValue(client, "targetname", Buffer);
-
-			SetVariantString("!activator");
-			AcceptEntityInput(aimed, "SetParent", client);
-			//SetVariantString(Buffer);
-			//AcceptEntityInput(aimed, "SetParent");
-
-			SetVariantString("grenade2");
-			AcceptEntityInput(aimed, "SetParentAttachment");
-			SetVariantString("grenade2");
-			AcceptEntityInput(aimed, "SetParentAttachmentMaintainOffset");
-			/*new Float:angle[3];
-			coords[0] -= 60.0;
-			coords[1] -= 60.0;
-			coords[2] += 100.0;
-			DispatchKeyValueVector(aimed, "Origin", coords);*/    // Testing offsetting stuffs
-
+			PrintToChat(client, "Can't strapon \"player\" classname");
 			return Plugin_Handled;
 		}
-	}
-	if  (args == 1) // spawns a prop and attach to us
-	{
-		new String:args1[130];
-		GetCmdArg(1, args1, sizeof(args1));
+		GetEntPropString(aimed, Prop_Data, "m_ModelName", m_ModelName, 130);
+		GetEntPropString(aimed, Prop_Data, "m_nSolidType", m_nSolidType, 130);
+		GetEntProp(aimed, Prop_Data, "m_CollisionGroup", m_CollisionGroup);
+		GetEntProp(aimed, Prop_Data, "m_spawnflags", m_spawnflags);
 
-		if (strcmp(args1, "dong") == 0)
-		{
-			new created = CreatePropDynamicOverride(client, gs_dongs[0], 20);
-			decl String:Buffer[64];
-			Format(Buffer, sizeof(Buffer), "Client%d", client);
-			DispatchKeyValue(client, "targetname", Buffer);
+		decl String:Buffer[64];
+		Format(Buffer, sizeof(Buffer), "Client%d", client);
+		DispatchKeyValue(client, "targetname", Buffer);
 
-			SetVariantString("!activator");
-			AcceptEntityInput(created, "SetParent", client);
+		SetVariantString("!activator");
+		AcceptEntityInput(aimed, "SetParent", client);
+		//SetVariantString(Buffer);
+		//AcceptEntityInput(aimed, "SetParent");
 
-			SetVariantString("grenade2");
-			AcceptEntityInput(created, "SetParentAttachment");
-			SetVariantString("grenade2");
-			AcceptEntityInput(created, "SetParentAttachmentMaintainOffset");
-
-			new Float:origin[3];
-			new Float:angle[3];
-			GetEntPropVector(created, Prop_Send, "m_vecOrigin", origin);
-			GetEntPropVector(created, Prop_Send, "m_angRotation", angle);
-
-			origin[0] += 0.0;
-			origin[1] += 0.0;
-			origin[2] += 0.0;
-
-			angle[0] += 0.0;
-			angle[1] += 3.0;
-			angle[2] += 0.3;
-			//DispatchKeyValueVector(created, "Origin", origin);    //FIX testing offset coordinates, remove! -glub
-			//DispatchKeyValueVector(created, "Angles", angle);
-			//DispatchSpawn(created);
-			PrintToChat(client, "origin: %f %f %f; angles: %f %f %f", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2]);
-
-			return Plugin_Handled;
-		}
+		SetVariantString("grenade2");
+		AcceptEntityInput(aimed, "SetParentAttachment");
+		SetVariantString("grenade2");
+		AcceptEntityInput(aimed, "SetParentAttachmentMaintainOffset");
+		/*new Float:angle[3];
+		coords[0] -= 60.0;
+		coords[1] -= 60.0;
+		coords[2] += 100.0;
+		DispatchKeyValueVector(aimed, "Origin", coords);*/    // Testing offsetting stuffs
 	}
 	return Plugin_Handled;
 }
