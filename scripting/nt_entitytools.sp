@@ -52,9 +52,22 @@ public Plugin:myinfo =
 	name = "nt_entitytools",
 	author = "glub",
 	description = "Various prop manipulation tools.",
-	version = "0.4",
+	version = "0.5",
 	url = "https://github.com/glubsy"
 };
+
+// → look into splitting code into sm_props
+// → rework logic for credits
+// → fix keeping precached model indices in list
+// → fix auto remove timers not working(?)
+// → command to spawn props with random coords around a target (player) and velocity, towards their origin, maybe on ghost spawn automatically
+// → dick on ghost carrier's team members?
+// → make menu to spawn props
+// → add spark to prop spawned https://wiki.alliedmods.net/SDKTools_(SourceMod_Scripting)#TempEnt_Functions and maybe a squishy sound for in range with TE_SendToAllInRange
+// KNOWN ISSUES:
+// -> AFAIK the TE cannot be destroyed by timer, so client preference is very limited, ie. if someone asks for a big scale model that is supposed to be auto-removed
+//    we can't use a TE because they don't get affected by timers, so regular physics_prop take precedence. Same for dynamic props, cannot have them as TempEnts.
+
 
 public OnPluginStart()
 {
@@ -84,7 +97,7 @@ public OnPluginStart()
 	RegAdminCmd("sm_props_set_credits", CommandSetCreditsForClient, ADMFLAG_SLAY, "Gives target player virtual credits in order to spawn props.");
 	RegConsoleCmd("sm_props_credit_status", CommandPropCreditStatus, "List all player credits to spawn props.");
 
-	RegConsoleCmd("sm_dick", CommandDongSpawn, "Spawns a dick [scale 1-5] [1 for static prop]");
+	RegConsoleCmd("sm_dick", Command_Dong_Spawn, "Spawns a dick [scale 1-5] [1 for static prop]");
 	RegConsoleCmd("sm_props", CommandPropSpawn, "Spawns a prop.");
 	RegConsoleCmd("sm_strapon", Command_Strap_Dong_To_Self, "Strap a dong onto yourself.");
 	RegConsoleCmd("sm_strapon_all", Command_Strap_Dong_To_All, "Strap a dong onto everyone.");
@@ -111,8 +124,10 @@ public OnPluginStart()
 												"0: players starts with zero credits 1: assign sm_max_props_credits to all players as soon as they connect",
 												FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
 												true, 0.0, true, 1.0 );
-	cvMaxPropsCreds = CreateConVar("sm_props_max_credits", "10", "Max number of virtual credits allowed per round/life for spawning props");
-	cvPropMaxTTL = CreateConVar("sm_props_max_ttl", "60", "Maximum time to live for spawned props in seconds.");
+	cvMaxPropsCreds = CreateConVar("sm_props_max_credits", "10", 
+									"Max number of virtual credits allowed per round/life for spawning props");
+	cvPropMaxTTL = CreateConVar("sm_props_max_ttl", "60", 
+								"Maximum time to live for spawned props in seconds.");
 
 	g_cvar_credits_replenish = CreateConVar( "sm_props_replenish_credits", "1",
 											"0: credits are lost forever after use. 1: credits replenish after each end of round",
@@ -133,7 +148,7 @@ public OnPluginStart()
 	HookEvent("game_round_start", event_RoundStart);
 
 	RegAdminCmd("sm_props_givescore", CommandGiveScore, ADMFLAG_SLAY, "DEBUG: add 20 frags to score");
-	RegAdminCmd("sm_props_tedong", Command_TE_dong, ADMFLAG_SLAY, "DEBUG: Spawn TE dong");
+	RegAdminCmd("sm_props_te", Spawn_TE_Prop, ADMFLAG_SLAY, "DEBUG: Spawn TE dong");
 
 	AutoExecConfig(true, "sm_nt_props");
 }
@@ -274,81 +289,6 @@ public Action Command_Pause_Props_Spawning(int client, int args)
 	}
 	return Plugin_Handled;
 }
-
-
-//==================================
-//		Temp Ents testing
-//==================================
-
-/*	CTEPhysicsProp (type DT_TEPhysicsProp)
-		Table: baseclass (offset 0) (type DT_BaseTempEntity)
-			Member: m_vecOrigin (offset 12) (type vector) (bits 0) (Coord)
-			Member: m_angRotation[0] (offset 24) (type float) (bits 13) (VectorElem)
-			Member: m_angRotation[1] (offset 28) (type float) (bits 13) (VectorElem)
-			Member: m_angRotation[2] (offset 32) (type float) (bits 13) (VectorElem)
-			Member: m_vecVelocity (offset 36) (type vector) (bits 0) (Coord)
-			Member: m_nModelIndex (offset 48) (type integer) (bits 11) ()
-			Member: m_nSkin (offset 52) (type integer) (bits 10) ()
-			Member: m_nFlags (offset 56) (type integer) (bits 2) (Unsigned)
-			Member: m_nEffects (offset 60) (type integer) (bits 10) (Unsigned)
- */
-
-// Passes client array by ref, and returns num. of clients inserted in the array.- Rainyan
-int GetDongClients(int outClients[MAXPLAYERS+1], int arraySize)
-{
-	int index = 0;
-
-	for (int thisClient = 1; thisClient <= MaxClients; thisClient++)
-	{
-		// Reached the max size of array
-		if (index == arraySize)
-			break;
-
-		if (IsValidClient(thisClient) && WantsDong(thisClient))
-		{
-			outClients[index++] = thisClient;
-		}
-	}
-
-	return index;
-}
-
-public Action Command_TE_dong(int client, int args)
-{
-	if (!IsValidClient(client))
-		return Plugin_Handled;
-
-	if (gb_PausePropSpawning)
-	{
-		ReplyToCommand(client, "Prop spawning is currently paused.");
-		return Plugin_Handled;
-	}
-
-	decl String:s_tetype[100];
-	s_tetype = gs_TE_types[0]; // or physicsprop or breakmodel
-
-	int dongclients[MAXPLAYERS+1];
-	int numClients = GetDongClients(dongclients, sizeof(dongclients));
-	int cached_mdl = PrecacheModel(gs_dongs[0], false);
-
-	float origin[3];
-	GetClientEyePosition(client, origin);
-
-	TE_Start(s_tetype);
-	TE_WriteVector("m_vecOrigin", origin);
-	TE_WriteNum("m_nModelIndex", cached_mdl);
-	TE_Send(dongclients, numClients, 0.0);
-	//PrintToConsole(client, "Spawned at: %f %f %f for model index: %d", origin[0], origin[1], origin[2], cached_mdl);
-	return Plugin_Handled;
-}
-
-bool WantsDong(int client)
-{
-	if (IsValidClient(client) && !g_prefs_nowantprops[client])
-		return true;
-	return false;
-}
-
 
 
 //==================================
@@ -555,9 +495,9 @@ public Action CommandSetCreditsForClient(int client, int args)
 //==================================
 
 
-public Action PropSpawnDispatch(int client, int model)
+public Action PropSpawnDispatch(int client, int model_index)
 {
-	CreatePropPhysicsOverride(client, gs_allowed_models[model], 50);
+	CreatePropPhysicsOverride(client, gs_allowed_models[model_index], 50);
 	return Plugin_Handled;
 }
 
@@ -619,21 +559,21 @@ public Action CommandPropSpawn(int client, int args)
 		return Plugin_Handled;
 	}
 
-	decl String:model_name[80];
+	decl String:model_name[PLATFORM_MAX_PATH];
 	GetCmdArg(1, model_name, sizeof(model_name));
 
-	for (int i=0; i < sizeof(gs_allowed_models); ++i)
+	for (int index=0; index < sizeof(gs_allowed_models); ++index)
 	{
 		//TODO: check the path
 		//TODO: make selection menu // Don't stop at first match
 		//if (strcmp(model_name, gs_allowed_models[i]) == 0)
-		if (StrContains(gs_allowed_models[i], model_name, false) != -1)
+		if (StrContains(gs_allowed_models[index], model_name, false) != -1)
 		{
 			if (hasEnoughCredits(client, 5)) 								//FIXME: for now everything costs 5!
 			{
-				PrintToConsole(client, "Spawned: %s.", gs_allowed_models[i]);
+				PrintToConsole(client, "Spawned: %s.", gs_allowed_models[index]);
 				PrintToChat(client, "Spawning your %s.", model_name);
-				PropSpawnDispatch(client, i);
+				PropSpawnDispatch(client, index);
 
 				PrintToChat(client, "[] You have just used %d credits.", 5);
 				PrintToConsole(client, "[] You have just used %d credits.", 5);
@@ -657,33 +597,44 @@ public Action CommandPropSpawn(int client, int args)
 
 
 
-/*=======================================================
-
-					DONG SPAWNING
-
-========================================================*/
+//==================================
+//		Dong Spawning
+//==================================
 
 // calls the actual model creation
-public Action DongDispatch(int client, int scale, int bstatic)
+public DongDispatch(int client, int scale, int bstatic)
 {
 	switch(scale)
 	{
 		case 1:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 50);
+			{
+				if (Should_Use_TE)
+					Spawn_TE_Dong(client, gs_dongs[scale-1]);
+				else
+					g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 50);
+			}
 			else
 				g_propindex_d[client] = CreatePropDynamicOverride(client, gs_dongs[scale-1], 50);
 		}
 		case 2:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 120);
+			{
+				if (Should_Use_TE)
+					Spawn_TE_Dong(client, gs_dongs[scale-1]);
+				else
+				{
+					g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 120);
+					CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
+				}
+			}
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride(client, gs_dongs[scale-1][0], 120);
-
-			// remove the prop after 40 seconds
-			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
+			{
+				g_propindex_d[client] = CreatePropDynamicOverride(client, gs_dongs[scale-1], 120);
+				CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
+			}
 		}
 		case 3:
 		{
@@ -724,7 +675,7 @@ public Action DongDispatch(int client, int scale, int bstatic)
 }
 
 
-public Action CommandDongSpawn(int client, int args)
+public Action Command_Dong_Spawn(int client, int args)
 {
 	if (!IsValidClient(client))
 		return Plugin_Handled;
@@ -772,10 +723,10 @@ public Action CommandDongSpawn(int client, int args)
 	GetCmdArg(2, model_property, sizeof(model_property));
 
 	//new iModelScale = trim_quotes(model_scale);  returns 0 ?
-	new iModelScale = (strlen(model_scale) > 0) ? StringToInt(model_scale) : 1;
+	int iModelScale = (strlen(model_scale) > 0) ? StringToInt(model_scale) : 1;
 	if (iModelScale > 5)
 		iModelScale = 5;
-	new iModelProperty = (strlen(model_property) > 0) ? StringToInt(model_property) : 0;
+	int iModelProperty = (strlen(model_property) > 0) ? StringToInt(model_property) : 0;
 
 	//PrintToConsole(client, "model_scale %s model_property %d iModelScale %d", model_scale, model_propertynum, num);
 
@@ -797,6 +748,18 @@ public Action CommandDongSpawn(int client, int args)
 		return Plugin_Handled;
 	}
 }
+
+bool Should_Use_TE()
+{
+	for (int client=1; client <= MaxClients; client++)
+	{
+		if (g_prefs_nowantprops[client]) // at least one person doesn't want to see them
+			return true;
+	}
+	return false;
+
+}
+
 
 DisplayActivity(int client, const char[] model)
 {
@@ -940,14 +903,123 @@ public trim_quotes(String:text[])
 			text[len-1] = '\0'
 		}
 	}
-
 	return startidx
 }
 */
 
+
+//==================================
+//		Temp Ents testing
+//==================================
+
+/*	CTEPhysicsProp (type DT_TEPhysicsProp)
+		Table: baseclass (offset 0) (type DT_BaseTempEntity)
+			Member: m_vecOrigin (offset 12) (type vector) (bits 0) (Coord)
+			Member: m_angRotation[0] (offset 24) (type float) (bits 13) (VectorElem)
+			Member: m_angRotation[1] (offset 28) (type float) (bits 13) (VectorElem)
+			Member: m_angRotation[2] (offset 32) (type float) (bits 13) (VectorElem)
+			Member: m_vecVelocity (offset 36) (type vector) (bits 0) (Coord)
+			Member: m_nModelIndex (offset 48) (type integer) (bits 11) ()
+			Member: m_nSkin (offset 52) (type integer) (bits 10) ()
+			Member: m_nFlags (offset 56) (type integer) (bits 2) (Unsigned)
+			Member: m_nEffects (offset 60) (type integer) (bits 10) (Unsigned)
+ */
+
+// Passes client array by ref, and returns num. of clients inserted in the array.- Rainyan
+int GetDongClients(int outClients[MAXPLAYERS+1], int arraySize)
+{
+	int index = 0;
+
+	for (int thisClient = 1; thisClient <= MaxClients; thisClient++)
+	{
+		// Reached the max size of array
+		if (index == arraySize)
+			break;
+
+		if (IsValidClient(thisClient) && WantsDong(thisClient))
+		{
+			outClients[index++] = thisClient;
+		}
+	}
+
+	return index;
+}
+
+
+public Action Spawn_TE_Prop(int client, int args)
+{
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+
+	if (gb_PausePropSpawning)
+	{
+		ReplyToCommand(client, "Prop spawning is currently paused.");
+		return Plugin_Handled;
+	}
+
+	new String:s_tetype[PLATFORM_MAX_PATH], String:s_modelname[PLATFORM_MAX_PATH];
+	s_tetype = gs_TE_types[0]; // or physicsprop or breakmodel
+	GetCmdArg(1, s_modelname, sizeof(s_modelname));
+
+	int dongclients[MAXPLAYERS+1];
+	int numClients = GetDongClients(dongclients, sizeof(dongclients));
+	int cached_mdl = PrecacheModel(s_modelname, false);
+
+	float origin[3];
+	GetClientEyePosition(client, origin);
+
+	TE_Start(s_tetype);
+	TE_WriteVector("m_vecOrigin", origin);
+	TE_WriteNum("m_nModelIndex", cached_mdl);
+	TE_Send(dongclients, numClients, 0.0);
+	//PrintToConsole(client, "Spawned at: %f %f %f for model index: %d", origin[0], origin[1], origin[2], cached_mdl);
+	return Plugin_Handled;
+}
+
+
+public Action Spawn_TE_Dong(int client, const char[] modelname)
+{
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+
+	if (gb_PausePropSpawning)
+	{
+		ReplyToCommand(client, "Prop spawning is currently paused.");
+		return Plugin_Handled;
+	}
+
+	decl String:s_tetype[PLATFORM_MAX_PATH];
+	s_tetype = gs_TE_types[0]; // or physicsprop or breakmodel  //FIXME: move this into a separate dong te method
+
+	int dongclients[MAXPLAYERS+1];
+	int numClients = GetDongClients(dongclients, sizeof(dongclients));
+	int cached_mdl = PrecacheModel(modelname, false);
+
+	float origin[3];
+	GetClientEyePosition(client, origin);
+
+	TE_Start(s_tetype);
+	TE_WriteVector("m_vecOrigin", origin);
+	TE_WriteNum("m_nModelIndex", cached_mdl);
+	TE_Send(dongclients, numClients, 0.0);
+	//PrintToConsole(client, "Spawned at: %f %f %f for model index: %d", origin[0], origin[1], origin[2], cached_mdl);
+	return Plugin_Handled;
+}
+
+bool WantsDong(int client)
+{
+	if (IsValidClient(client) && !g_prefs_nowantprops[client])
+		return true;
+	return false;
+}
+
+
+
+
 //==================================
 //			Spawning UTILS
 //==================================
+
 
 public Action CommandPropCreatePhysicsOverride(int client, int args)
 {
@@ -980,6 +1052,8 @@ public Action CommandPropCreatePhysicsOverride(int client, int args)
 	}
 	return Plugin_Handled;
 }
+
+
 
 stock CreatePropPhysicsOverride(int client, const String:modelname[], int health)
 {
@@ -1289,6 +1363,8 @@ public Action CommandCreatePropDynamicOverride(int client, int args)
 	return Plugin_Handled;
 }
 
+
+
 stock CreatePropDynamicOverride(int client, const String:modelname[], int health)
 {
 	new String:arg1[130];
@@ -1531,7 +1607,7 @@ public Action:ChangeEntityMoveType(int client, int args)   // doesn't seem to do
 //			Client UTILS
 //==================================
 
-bool:IsValidClient(client){
+bool IsValidClient(int client){
 
 	if (client == 0)
 		return false;
