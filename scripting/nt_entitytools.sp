@@ -14,7 +14,8 @@ new Handle:g_cvar_credits_replenish = INVALID_HANDLE;
 new Handle:g_cvar_score_as_credits = INVALID_HANDLE;
 new Handle:cvMaxPropsCreds = INVALID_HANDLE; // maximum credits given
 new Handle:cvPropMaxTTL = INVALID_HANDLE; // maximum time to live before prop gets auto removed
-new Handle:g_PropPrefCookie = INVALID_HANDLE; // maximum time to live before prop gets auto removed
+new Handle:g_PropPrefCookie = INVALID_HANDLE; // handle to client preferences
+bool gb_PausePropSpawning;
 
 // WARNING: the custom files require the sm_downloader plugin to force clients to download them
 // otherwise, have to add all custom files to downloads table ourselves with AddFileToDownloadsTable()
@@ -33,6 +34,8 @@ new const String:gs_allowed_models[][] = {
 	"models/logo/jinrai_logo.mdl",
 	"models/logo/nsf_logo.mdl" };
 
+new const String:gs_TE_types[][] = { "physicsprop", "breakmodel" };
+
 // [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
 new g_RemainingCreds[MAXPLAYERS+1][3];
 #define VIRT_CRED 0
@@ -41,7 +44,7 @@ new g_RemainingCreds[MAXPLAYERS+1][3];
 
 new g_propindex_d[MAXPLAYERS+1]; // holds a temporary entity index for timer destruction
 new g_precachedModels[10];
-new g_prefs_noprops[MAXPLAYERS+1];
+new g_prefs_nowantprops[MAXPLAYERS+1];
 
 
 public Plugin:myinfo =
@@ -83,41 +86,58 @@ public OnPluginStart()
 	RegConsoleCmd("sm_dick", CommandDongSpawn, "spawns a dick");
 	RegConsoleCmd("sm_props", CommandPropSpawn, "spawns a prop");
 
-	g_cvar_enabled = CreateConVar( "entitycreate_enabled", "1", "0: disable custom props spawning, 1: enable custom props spawning", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 ); //from LeftFortDead plugin
-	g_cvar_props_enabled = CreateConVar( "sm_props_enabled", "1", "0: disable custom props spawning, 1: enable custom props spawning", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 ); //from LeftFortDead plugin
+	g_cvar_enabled = CreateConVar( "entitycreate_enabled", "1",
+									"0: disable custom props spawning, 1: enable custom props spawning",
+									FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
+									true, 0.0, true, 1.0 ); //from LeftFortDead plugin
+	g_cvar_props_enabled = CreateConVar( "sm_props_enabled", "1",
+										"0: disable custom props spawning, 1: enable custom props spawning",
+										FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
+										true, 0.0, true, 1.0 );
 
-	g_cvar_restrict_alive = CreateConVar( "sm_props_restrict_alive", "0", "0: spectators can spawn props too. 1: only living players can spawn props", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 );
-	g_cvar_adminonly = CreateConVar( "entitycreate_adminonly", "0", "0: every client can build, 1: only admin can build", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 );
+	g_cvar_restrict_alive = CreateConVar( "sm_props_restrict_alive", "0",
+										"0: spectators can spawn props too. 1: only living players can spawn props",
+										FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
+										true, 0.0, true, 1.0 );
+	g_cvar_adminonly = CreateConVar( "entitycreate_adminonly", "0",
+									"0: every client can build, 1: only admin can build",
+									FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
+									true, 0.0, true, 1.0 );
 
-	g_cvar_give_initial_credits = CreateConVar( "sm_props_initial_credits", "0", "0: players starts with zero credits 1: assign sm_max_props_credits to all players as soon as they connect", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 );
+	g_cvar_give_initial_credits = CreateConVar( "sm_props_initial_credits", "0",
+												"0: players starts with zero credits 1: assign sm_max_props_credits to all players as soon as they connect",
+												FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
+												true, 0.0, true, 1.0 );
 	cvMaxPropsCreds = CreateConVar("sm_props_max_credits", "10", "Max number of virtual credits allowed per round/life for spawning props");
 	cvPropMaxTTL = CreateConVar("sm_props_max_ttl", "60", "Maximum time to live for spawned props in seconds.");
 
-	g_cvar_credits_replenish = CreateConVar( "sm_props_replenish_credits", "1", "0: credits are lost forever after use. 1: credits replenish after each end of round", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 );
-	g_cvar_score_as_credits = CreateConVar( "sm_props_score_as_credits", "1", "0: use virtual props credits only, 1: use score as props credits on top of virtual props credits", FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO, true, 0.0, true, 1.0 );
+	g_cvar_credits_replenish = CreateConVar( "sm_props_replenish_credits", "1",
+											"0: credits are lost forever after use. 1: credits replenish after each end of round",
+											FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
+											true, 0.0, true, 1.0 );
+	g_cvar_score_as_credits = CreateConVar( "sm_props_score_as_credits", "1",
+											"0: use virtual props credits only, 1: use score as props credits on top of virtual props credits",
+											FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
+											true, 0.0, true, 1.0 );
 
-	// player dosen't want to see custom props in their game, don't show TE
-	RegConsoleCmd("sm_props_nothx", Command_Hate_Props_Toggle, "Toggle your preference to not see custom props if possible.");
-	RegClientCookie("no-props-plz","player doesn't like custom props", CookieAccess_Public);
+	RegConsoleCmd("sm_props_nothx", Command_Hate_Props_Toggle, "Toggle your preference to not see custom props wherever possible.");
+	g_PropPrefCookie = RegClientCookie("no-props-plz", "player doesn't like custom props", CookieAccess_Public);
 
-	// when a player invokes this command, temporarily disable props until end of round
+	RegConsoleCmd("sm_props_pause", Command_Pause_Props_Spawning, "Prevent any further custom prop spawning until end of round.");
 
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("game_round_start", event_RoundStart);
 
 	RegAdminCmd("sm_props_givescore", CommandGiveScore, ADMFLAG_SLAY, "DEBUG: add 20 frags to score");
-	RegAdminCmd("sm_props_testdong", TestDong, ADMFLAG_SLAY, "DEBUG: test dong tempents");
+	RegAdminCmd("sm_props_tedong", Command_TE_dong, ADMFLAG_SLAY, "DEBUG: Spawn TE dong");
 
 	AutoExecConfig(true, "sm_nt_props");
 }
 
-
-/*=======================================================
-
-				Client preferences
-
-========================================================*/
+//==================================
+//		Client preferences
+//==================================
 
 
 public OnClientCookiesCached(int client)
@@ -130,14 +150,15 @@ public OnClientPostAdminCheck(int client)
 {
 	if(!GetConVarBool(g_cvar_props_enabled))
 	{
-		g_prefs_noprops[client] = true;
+		//g_prefs_nowantprops[client] = false;
 		return;
 	}
 
 	if (AreClientCookiesCached(client))
 	{
 		ProcessCookies(client);
-		CreateTimer(120.0, DisplayNotification, client);
+		//CreateTimer(120.0, DisplayNotification, client);
+		return;
 	}
 }
 
@@ -145,28 +166,34 @@ public OnClientPostAdminCheck(int client)
 public OnClientDisconnect(int client)
 {
 	if(GetConVarBool(g_cvar_props_enabled))
-		g_prefs_noprops[client] = false;
+		g_prefs_nowantprops[client] = false;
 }
 
 
 public ProcessCookies(int client)
 {
-	decl String:cookie[9];
+	if (!IsValidClient(client))
+		return;
+
+	if(!FindClientCookie("no-props-plz"))
+	{
+		g_prefs_nowantprops[client] = false;
+		CreateTimer(10.0, DisplayNotification, client);
+		return;
+	}
+
+	new String:cookie[10] = '\0';
 	GetClientCookie(client, g_PropPrefCookie, cookie, sizeof(cookie));
 
-	if (StrEqual(cookie, "enabled"))
+	if (StrEqual(cookie, "penabled"))
 	{
-		g_prefs_noprops[client] = false;
+		g_prefs_nowantprops[client] = false;
 		return;
 	}
-	if (StrEqual(cookie, "disabled"))
+	else if (StrEqual(cookie, "pdisabled"))
 	{
-		g_prefs_noprops[client] = true;
+		g_prefs_nowantprops[client] = true;
 		return;
-	}
-	else
-	{
-		CreateTimer(120.0, DisplayNotification, client);
 	}
 	return;
 }
@@ -176,12 +203,12 @@ public Action DisplayNotification(Handle timer, int client)
 {
 	if(client > 0 && IsClientConnected(client) && IsClientInGame(client))
 	{
-		if(!g_prefs_noprops[client])
+		if(!g_prefs_nowantprops[client])
 		{
-			PrintToChat(client, "[sm_props] You can toggle seeing dongs by typing !props_nothx");
-			PrintToChat(client, "[sm_props] You can prevent people from spawning props until the end of the round by typing !props_stop");
-			PrintToConsole(client, "\n[sm_props] You can toggle seeing dongs by typing sm_props_nothx\n");
-			PrintToConsole(client, "\n[sm_props] You can prevent people from spawning props until the end of the round by typing sm_props_stop\n");
+			PrintToChat(client, 	"[sm_props] You can toggle seeing custom props completely by typing !props_nothx");
+			PrintToConsole(client, 	"\n[sm_props] You can toggle seeing custom props completely by typing sm_props_nothx\n");
+			PrintToChat(client, 	"[sm_props] You can prevent people from spawning props until the end of the round by typing !props_pause");
+			PrintToConsole(client, 	"\n[sm_props] You can prevent people from spawning props until the end of the round by typing sm_props_pause\n");
 		}
 	}
 	return Plugin_Handled;
@@ -193,38 +220,62 @@ public Action Command_Hate_Props_Toggle(int client, int args)
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
-	if(!FindClientCookie("no-props-plz"))
+	if(!FindClientCookie("no-props-plz")) // this might not be working, REMOVE
 	{
-		ShowCookieMenu(client);
+		g_prefs_nowantprops[client] = true;
+		SetClientCookie(client, g_PropPrefCookie, "pdisabled");
+		ReplyToCommand(client, "You preference has been recorded. You do like props after all.");
+		PrintToConsole(client, "no found cookiz?");
+		return Plugin_Handled;
 	}
 
-	new String:cookie[9];
+	new String:cookie[10];
 	GetClientCookie(client, g_PropPrefCookie, cookie, sizeof(cookie));
 
-	if (StrEqual(cookie, "enabled"))
+	if (StrEqual(cookie, "pdisabled"))
 	{
-		SetClientCookie(client, g_PropPrefCookie, "disabled");
-		g_prefs_noprops[client] = false;
-		ReplyToCommand(client, "You preference has been recorded. You no like props.");
-		return Plugin_Handled;
-	}
-	else if (StrEqual(cookie, "disabled"))
-	{
-		SetClientCookie(client, g_PropPrefCookie, "enabled");
-		g_prefs_noprops[client] = true;
+		SetClientCookie(client, g_PropPrefCookie, "penabled");
+		g_prefs_nowantprops[client] = false;
 		ReplyToCommand(client, "You preference has been recorded. You do like props after all.");
 		return Plugin_Handled;
+	}
+	else // was enabled, or not yet set
+	{
+		SetClientCookie(client, g_PropPrefCookie, "pdisabled");
+		g_prefs_nowantprops[client] = true;
+		ReplyToCommand(client, "You preference has been recorded. You no like props.");
+		ShowActivity2(client, "[sm_props] ", "%s opted out of sm_props models.", client);
+		LogAction(client, -1, "[sm_props] \"%L\" opted out of sm_props models.", client);
+		return Plugin_Handled;
+	}
+}
+
+
+public Action Command_Pause_Props_Spawning(int client, int args)
+{
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+
+	new String:clientname[MAX_NAME_LENGTH];
+	GetClientName(client, clientname, sizeof(clientname));
+
+	if (!gb_PausePropSpawning)
+	{
+		gb_PausePropSpawning = true;
+		PrintToChatAll("[sm_props] Prop spawning has been disabled until the end of the round.");
+		for (int i=1; i <= MaxClients; i++)
+		{
+			if (IsValidClient(i))
+				PrintToConsole(i, "[sm_props] Prop spawning has been disabled by \"%s\" until the end of the round.", clientname);
+		}
 	}
 	return Plugin_Handled;
 }
 
 
-
-/*=======================================================
-
-				Temp Ents testing
-
-========================================================*/
+//==================================
+//		Temp Ents testing
+//==================================
 
 /*	CTEPhysicsProp (type DT_TEPhysicsProp)
 		Table: baseclass (offset 0) (type DT_BaseTempEntity)
@@ -259,10 +310,20 @@ int GetDongClients(int outClients[MAXPLAYERS+1], int arraySize)
 	return index;
 }
 
-public Action TestDong(int client, int args)
+public Action Command_TE_dong(int client, int args)
 {
-	new String:s_tetype[150];
-	GetCmdArg(1, s_tetype, sizeof(s_tetype));
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+
+	if (gb_PausePropSpawning)
+	{
+		ReplyToCommand(client, "Prop spawning is currently paused.");
+		return Plugin_Handled;
+	}
+
+	decl String:s_tetype[100];
+	//GetCmdArg(1, s_tetype, sizeof(s_tetype));
+	s_tetype = gs_TE_types[0]; // or physicsprop or breakmodel
 
 	int dongclients[MAXPLAYERS+1];
 
@@ -272,22 +333,18 @@ public Action TestDong(int client, int args)
 
 	float origin[3];
 	GetClientEyePosition(client, origin);
-	//TE_Start("physicsprop"); //breakmodel
 	TE_Start(s_tetype);
 	TE_WriteVector("m_vecOrigin", origin);
-
 	TE_WriteNum("m_nModelIndex", cached_mdl);
 	TE_Send(dongclients, numClients, 0.0);
-	PrintToConsole(client, "Spawned at: %f %f %f for model index: %d", origin[0], origin[1], origin[2], cached_mdl);
+	//PrintToConsole(client, "Spawned at: %f %f %f for model index: %d", origin[0], origin[1], origin[2], cached_mdl);
 	return Plugin_Handled;
 }
 
 bool WantsDong(int client)
 {
-	if (IsValidClient(client))
-	{
+	if (IsValidClient(client) && !g_prefs_nowantprops[client])
 		return true;
-	}
 	return false;
 }
 
@@ -310,13 +367,9 @@ public Action CommandGiveScore (int client, int args)
 }
 
 
-
-
-/*=======================================================
-
-				Credits management
-
-========================================================*/
+//==================================
+//		Credits management
+//==================================
 
 
 public Action CommandPropCreditStatus(int client, int args)
@@ -370,14 +423,20 @@ public Action OnPlayerSpawn(Handle event, const String:name[], bool dontBroadcas
 }
 
 
-public Action event_RoundStart(Handle:event, const String:name[], bool:dontBroadcast)
+public void event_RoundStart(Handle event, const String:name[], bool dontBroadcast)
 {
-	new client = GetClientOfUserId(GetEventInt(event, "userid"));
-	if ( GetConVarBool(g_cvar_credits_replenish) )
-		g_RemainingCreds[client][VIRT_CRED] = GetConVarInt(cvMaxPropsCreds);
-	else
-		g_RemainingCreds[client][VIRT_CRED] = g_RemainingCreds[client][MAX_CRED];
-	//return Plugin_Continue;  //??? change if needed
+	for(int client = 1; client <= MaxClients; client++)
+	{
+		if(!IsClientConnected(client) || !IsClientInGame(client) || IsFakeClient(client))
+			continue;
+
+		if ( GetConVarBool(g_cvar_credits_replenish) )
+			g_RemainingCreds[client][VIRT_CRED] = GetConVarInt(cvMaxPropsCreds);
+		else
+			g_RemainingCreds[client][VIRT_CRED] = g_RemainingCreds[client][MAX_CRED];
+	}
+	gb_PausePropSpawning = false;
+	//return Plugin_Continue;  //?
 }
 
 
@@ -489,15 +548,9 @@ public Action CommandSetCreditsForClient(int client, int args)
 }
 
 
-
-
-
-/*=======================================================
-
-					PROP SPAWNING
-
-========================================================*/
-
+//==================================
+//		Prop Spawning
+//==================================
 
 
 public Action PropSpawnDispatch(int client, int model)
@@ -519,6 +572,15 @@ public Action PrintPluginCommandInfo(int client)
 
 public Action CommandPropSpawn(int client, int args)
 {
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+
+	if (gb_PausePropSpawning)
+	{
+		ReplyToCommand(client, "Prop spawning is currently paused.");
+		return Plugin_Handled;
+	}
+
 	if (GetConVarBool(g_cvar_restrict_alive) && GetClientTeam(client) <= 1)
 	{
 		PrintToChat(client, "Spawning props is currently disabled for spectators.");
@@ -662,6 +724,15 @@ public Action DongDispatch(int client, int scale, int bstatic)
 
 public Action CommandDongSpawn(int client, int args)
 {
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+
+	if (gb_PausePropSpawning)
+	{
+		ReplyToCommand(client, "Prop spawning is currently paused.");
+		return Plugin_Handled;
+	}
+
 	if (!GetConVarBool(g_cvar_props_enabled))
 	{
 		PrintToConsole(client, "This command is currently disabled. Ask an admin to enable with sm_props_enabled");
@@ -733,14 +804,9 @@ DisplayActivity(int client, const char[] model)
 }
 
 
-
-
-/*=======================================================
-
-					PROP AUTO-REMOVAL
-
-========================================================*/
-
+//==================================
+//		Prop auto-removal
+//==================================
 
 
 public Action TimerKillEntity(Handle:timer, prop)
@@ -789,13 +855,9 @@ public trim_quotes(String:text[])
 }
 */
 
-
-/*=======================================================
-
-					UTILITIES
-
-========================================================*/
-
+//==================================
+//			Spawning UTILS
+//==================================
 
 public Action CommandPropCreatePhysicsOverride(int client, int args)
 {
@@ -1297,14 +1359,9 @@ public Action:TimerSetParent(Handle:timer, entity)
 }
 
 
-
-
-
-/*=======================================================
-
-					MAKE LADDER
-
-========================================================*/
+//==================================
+//			Make Ladder tests
+//==================================
 
 public Action:CommandMakeLadder(int client, int args)
 {
@@ -1380,13 +1437,9 @@ public Action:ChangeEntityMoveType(int client, int args)   // doesn't seem to do
 }
 
 
-
-/*=======================================================
-
-					CLIENT UTILS
-
-========================================================*/
-
+//==================================
+//			Client UTILS
+//==================================
 
 bool:IsValidClient(client){
 
@@ -1439,7 +1492,6 @@ UpdatePlayerRankXP(int client, int xp)
 }
 
 
-
 ////////////////////////////////////////////////////////////////////////////////
 //
 // interior functions
@@ -1481,9 +1533,6 @@ CreateEntity( client, const String:entity_name[], const String:item_name[], cons
     return index;
 }
 */
-
-
-
 
 
 
@@ -1872,6 +1921,15 @@ public Action:SetPropInfo(client, args)
 // Hopefully someday this will be a hat or something, not a stupi d***
 public Action Command_Strap_Dong(int client, int args)
 {
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+
+	if (gb_PausePropSpawning)
+	{
+		ReplyToCommand(client, "Prop spawning is currently paused.");
+		return Plugin_Handled;
+	}
+
 	new created = CreatePropDynamicOverride(client, gs_dongs[0], 20);
 	decl String:Buffer[64];
 	Format(Buffer, sizeof(Buffer), "Client%d", client);
