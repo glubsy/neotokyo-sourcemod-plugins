@@ -89,13 +89,12 @@ public void OnPluginStart()
 	
 	if(convar_nt_ghostcap_version == INVALID_HANDLE)
 		ThrowError("[nt_ghostcapsfx] Couldn't find nt_ghostcap plugin. Wrong version? Aborting.");
-	
-	if(GetConVarFloat(convar_nt_ghostcap_version) < 1.6)
+	if(GetConVarFloat(convar_nt_ghostcap_version) < 1.70000000)
 		ThrowError("[nt_ghostcapsfx] nt_ghostcap plugin is outdated (version is %f and should be at least 1.6)! Aborting.", GetConVarFloat(convar_nt_ghostcap_version));
 	
 	if(convar_nt_doublecap_version == INVALID_HANDLE)
 		ThrowError("[nt_ghostcapsfx] Couldn't find nt_doublecap plugin. Wrong version? Aborting.");
-	
+	// We need the version of nt_doublecap where the ghost is removed with RemoveEdict(), not AcceptEntityInput() otherwise they will crash the server!
 	if(GetConVarFloat(convar_nt_doublecap_version) < 0.43)
 		ThrowError("[nt_ghostcapsfx] nt_doublecap plugin is outdated (version is %f and should be at least 0.43)! Aborting.", GetConVarFloat(convar_nt_doublecap_version));
 }
@@ -316,7 +315,7 @@ public void OnGhostCapture(int client)
 	CreateTimer(11.0, timer_DoSparks, client);
 }
 
-public void OnGhostPickedUp(int client)
+public void OnGhostPickUp(int client)
 {
 	g_bGhostIsHeld = true;
 	
@@ -334,7 +333,7 @@ public void OnGhostPickedUp(int client)
 		TriggerTimer(TimerStarter[1]);
 }
 
-public void OnGhostDropped(int client)
+public void OnGhostDrop(int client)
 {
 	g_bGhostIsHeld = false; 
 	ghostCarrier = -1;

@@ -6,9 +6,9 @@ public Plugin:myinfo =
 {
 	name = "Unstuck Me!",
 	author = "glub",
-	description = "Give a player a nudge on demand, in a given direction",
+	description = "Nudges a player in a given direction.",
 	version = "1.0",
-	url = "https://github.com/glubsy?tab=repositories"
+	url = "https://github.com/glubsy"
 }
 
 new Handle:unstuck_cvar_amount = INVALID_HANDLE;
@@ -17,7 +17,8 @@ new g_cvar_amount[MAXPLAYERS+1];
 public OnPluginStart()
 {
 	RegConsoleCmd("sm_stuck", Command_UnStuckMe, "Nudges a player in the direction [n-s-e-w]")
-	unstuck_cvar_amount = CreateConVar("nt_unstuck_amount", "40", "Amount of unstuck commands allowed per round/life", FCVAR_PLUGIN | FCVAR_REPLICATED | FCVAR_DEMO )
+	RegConsoleCmd("sm_unstuck", Command_UnStuckMe, "Nudges a player in the direction [n-s-e-w]")
+	unstuck_cvar_amount = CreateConVar("nt_unstuck_amount", "40", "Amount of unstuck commands allowed per round/life", FCVAR_REPLICATED | FCVAR_DEMO )
 
 	HookConVarChange(unstuck_cvar_amount, Command_OnChangedCvar);
 	
@@ -159,7 +160,7 @@ public Action:Command_UnStuckMe(client, args)
 	}
 	else
 	{
-		PrintToChat(client, "You have used this command to often this round. Sorry.");
+		PrintToChat(client, "You have used this command too often this round. Sorry.");
 	}
 	return Plugin_Handled;
 }

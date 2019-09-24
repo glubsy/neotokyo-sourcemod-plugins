@@ -4,18 +4,17 @@
 #include <clientprefs>
 //#include <smlib>
 #pragma semicolon 1
+#define PLUGIN_VERSION "20190924"
 
-new Handle:g_cvar_adminonly = INVALID_HANDLE;
-new Handle:g_cvar_enabled = INVALID_HANDLE;
-new Handle:g_cvar_props_enabled = INVALID_HANDLE;
-new Handle:g_cvar_restrict_alive = INVALID_HANDLE;
-new Handle:g_cvar_give_initial_credits = INVALID_HANDLE;
-new Handle:g_cvar_credits_replenish = INVALID_HANDLE;
-new Handle:g_cvar_score_as_credits = INVALID_HANDLE;
-new Handle:cvMaxPropsCreds = INVALID_HANDLE; // maximum credits given
+Handle g_cvar_adminonly, g_cvar_enabled = INVALID_HANDLE;
+Handle g_cvar_props_enabled, g_cvar_restrict_alive, g_cvar_give_initial_credits, g_cvar_credits_replenish, g_cvar_score_as_credits= INVALID_HANDLE;
+Handle cvMaxPropsCreds = INVALID_HANDLE; // maximum credits given
 new Handle:cvPropMaxTTL = INVALID_HANDLE; // maximum time to live before prop gets auto removed
 new Handle:g_PropPrefCookie = INVALID_HANDLE; // handle to client preferences
+Handle g_cvar_props_oncapture, g_cvar_props_onghostpickup = INVALID_HANDLE;
+Handle convar_nt_entitytools = INVALID_HANDLE;
 bool gb_PausePropSpawning;
+bool gb_hashadhisd[MAXPLAYERS+1];
 
 // WARNING: the custom files require the sm_downloader plugin to force clients to download them
 // otherwise, have to add all custom files to downloads table ourselves with AddFileToDownloadsTable()
@@ -34,7 +33,7 @@ new const String:gs_allowed_models[][] = {
 	"models/logo/jinrai_logo.mdl",
 	"models/logo/nsf_logo.mdl" };
 
-new const String:gs_TE_types[][] = { "physicsprop", "breakmodel" };
+new const String:gs_TE_type[][] = { "physicsprop", "breakmodel" };
 
 // [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
 new g_RemainingCreds[MAXPLAYERS+1][3];
@@ -52,18 +51,18 @@ public Plugin:myinfo =
 	name = "nt_entitytools",
 	author = "glub",
 	description = "Various prop manipulation tools.",
-	version = "0.5",
+	version = PLUGIN_VERSION,
 	url = "https://github.com/glubsy"
 };
 
-// → look into splitting code into sm_props
-// → rework logic for credits
-// → fix keeping precached model indices in list
-// → fix auto remove timers not working(?)
-// → command to spawn props with random coords around a target (player) and velocity, towards their origin, maybe on ghost spawn automatically
-// → dick on ghost carrier's team members?
+// TODO:
+// → split code into sm_props
+// → rework logic for credits, might be broken
+// → recheck keeping precached model indices in list
+// → command to spawn props with random coords around a target (player) and velocity, towards their origin
 // → make menu to spawn props
-// → add spark to prop spawned https://wiki.alliedmods.net/SDKTools_(SourceMod_Scripting)#TempEnt_Functions and maybe a squishy sound for in range with TE_SendToAllInRange
+// → add sparks to props spawned and maybe a squishy sound for in range with TE_SendToAllInRange
+//
 // KNOWN ISSUES:
 // -> AFAIK the TE cannot be destroyed by timer, so client preference is very limited, ie. if someone asks for a big scale model that is supposed to be auto-removed
 //    we can't use a TE because they don't get affected by timers, so regular physics_prop take precedence. Same for dynamic props, cannot have them as TempEnts.
@@ -71,6 +70,7 @@ public Plugin:myinfo =
 
 public OnPluginStart()
 {
+	CreateConVar("sm_nt_entitytools", PLUGIN_VERSION, "NEOTOKYO entitytools version", FCVAR_HIDDEN);
 	RegAdminCmd("create_physics_multiplayer", CommandPropCreateMultiplayer, ADMFLAG_SLAY, "create_physics_multiplayer()");
 	RegAdminCmd("create_physics_override", CommandPropCreatePhysicsOverride, ADMFLAG_SLAY, "creates physics prop with specified model");
 	//RegAdminCmd("create_physics_override_vector", CommandPropCreatePhysicsOverrideVector, ADMFLAG_SLAY, "test");
@@ -99,44 +99,39 @@ public OnPluginStart()
 
 	RegConsoleCmd("sm_dick", Command_Dong_Spawn, "Spawns a dick [scale 1-5] [1 for static prop]");
 	RegConsoleCmd("sm_props", CommandPropSpawn, "Spawns a prop.");
-	RegConsoleCmd("sm_strapon", Command_Strap_Dong_To_Self, "Strap a dong onto yourself.");
-	RegConsoleCmd("sm_strapon_all", Command_Strap_Dong_To_All, "Strap a dong onto everyone.");
+	RegConsoleCmd("sm_strapon", Command_Strap_Dong, "Strap a dong onto [me|team|all].");
+
+	g_cvar_props_onghostpickup = CreateConVar("sm_props_onghostpickup", "1", "Picking up the ghost is exciting,", FCVAR_NONE, true, 0.0, true, 1.0 );
+	g_cvar_props_oncapture = CreateConVar("sm_props_oncapture", "0", "Fireworks on ghost capture.", FCVAR_NONE, true, 0.0, true, 1.0 );
 
 	g_cvar_enabled = CreateConVar( "entitycreate_enabled", "1",
 									"0: disable custom props spawning, 1: enable custom props spawning",
-									FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
-									true, 0.0, true, 1.0 ); //from LeftFortDead plugin
+									FCVAR_NONE, true, 0.0, true, 1.0 ); //from LeftFortDead plugin
 	g_cvar_props_enabled = CreateConVar( "sm_props_enabled", "1",
 										"0: disable custom props spawning, 1: enable custom props spawning",
-										FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
-										true, 0.0, true, 1.0 );
+										FCVAR_NONE, true, 0.0, true, 1.0 );
 
 	g_cvar_restrict_alive = CreateConVar( "sm_props_restrict_alive", "0",
 										"0: spectators can spawn props too. 1: only living players can spawn props",
-										FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
-										true, 0.0, true, 1.0 );
+										FCVAR_NONE, true, 0.0, true, 1.0 );
 	g_cvar_adminonly = CreateConVar( "entitycreate_adminonly", "0",
 									"0: every client can build, 1: only admin can build",
-									FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
-									true, 0.0, true, 1.0 );
+									FCVAR_NONE, true, 0.0, true, 1.0 );
 
 	g_cvar_give_initial_credits = CreateConVar( "sm_props_initial_credits", "0",
 												"0: players starts with zero credits 1: assign sm_max_props_credits to all players as soon as they connect",
-												FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
-												true, 0.0, true, 1.0 );
-	cvMaxPropsCreds = CreateConVar("sm_props_max_credits", "10", 
+												FCVAR_NOTIFY, true, 0.0, true, 1.0 );
+	cvMaxPropsCreds = CreateConVar("sm_props_max_credits", "10",
 									"Max number of virtual credits allowed per round/life for spawning props");
-	cvPropMaxTTL = CreateConVar("sm_props_max_ttl", "60", 
+	cvPropMaxTTL = CreateConVar("sm_props_max_ttl", "60",
 								"Maximum time to live for spawned props in seconds.");
 
 	g_cvar_credits_replenish = CreateConVar( "sm_props_replenish_credits", "1",
 											"0: credits are lost forever after use. 1: credits replenish after each end of round",
-											FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
-											true, 0.0, true, 1.0 );
+											FCVAR_NOTIFY, true, 0.0, true, 1.0 );
 	g_cvar_score_as_credits = CreateConVar( "sm_props_score_as_credits", "1",
 											"0: use virtual props credits only, 1: use score as props credits on top of virtual props credits",
-											FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DEMO,
-											true, 0.0, true, 1.0 );
+											FCVAR_NOTIFY, true, 0.0, true, 1.0 );
 
 	RegConsoleCmd("sm_props_nothx", Command_Hate_Props_Toggle, "Toggle your preference to not see custom props wherever possible.");
 	g_PropPrefCookie = RegClientCookie("no-props-plz", "player doesn't like custom props", CookieAccess_Public);
@@ -151,6 +146,12 @@ public OnPluginStart()
 	RegAdminCmd("sm_props_te", Spawn_TE_Prop, ADMFLAG_SLAY, "DEBUG: Spawn TE dong");
 
 	AutoExecConfig(true, "sm_nt_props");
+
+	convar_nt_entitytools = FindConVar("sm_nt_entitytools");
+
+	// Needed for ghost-related events
+	// if(convar_nt_entitytools == INVALID_HANDLE)
+	// 	ThrowError("[sm_props] Couldn't find nt_entitytools plugin. Wrong version? Aborting.");
 }
 
 //==================================
@@ -369,6 +370,8 @@ public void event_RoundStart(Handle event, const String:name[], bool dontBroadca
 {
 	for(int client = 1; client <= MaxClients; client++)
 	{
+		gb_hashadhisd[client] = false;
+
 		if(!IsClientConnected(client) || !IsClientInGame(client) || IsFakeClient(client))
 			continue;
 
@@ -377,8 +380,8 @@ public void event_RoundStart(Handle event, const String:name[], bool dontBroadca
 		else
 			g_RemainingCreds[client][VIRT_CRED] = g_RemainingCreds[client][MAX_CRED];
 	}
+
 	gb_PausePropSpawning = false;
-	//return Plugin_Continue;  //?
 }
 
 
@@ -386,6 +389,8 @@ public Action OnPlayerDeath(Handle event, const String:name[], bool dontBroadcas
 {
 	// keep track of the player score in our credits array
 	new attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
+	if (!IsValidClient(attacker))
+		return;
 
 	if (!GetConVarBool(g_cvar_credits_replenish))
 		g_RemainingCreds[attacker][VIRT_CRED] += 1;
@@ -611,7 +616,7 @@ public DongDispatch(int client, int scale, int bstatic)
 			if (!bstatic)
 			{
 				if (Should_Use_TE)
-					Spawn_TE_Dong(client, gs_dongs[scale-1]);
+					Spawn_TE_Dong(client, gs_dongs[scale-1], gs_TE_type[0]);
 				else
 					g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 50);
 			}
@@ -623,7 +628,7 @@ public DongDispatch(int client, int scale, int bstatic)
 			if (!bstatic)
 			{
 				if (Should_Use_TE)
-					Spawn_TE_Dong(client, gs_dongs[scale-1]);
+					Spawn_TE_Dong(client, gs_dongs[scale-1], gs_TE_type[0]);
 				else
 				{
 					g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 120);
@@ -799,15 +804,120 @@ public MakeParent(int client, int entity)
 	angle[2] += 0.3;
 	//DispatchKeyValueVector(entity, "Origin", origin);    //FIX testing offset coordinates, remove! -glub
 	//DispatchKeyValueVector(entity, "Angles", angle);
-	//DispatchSpawn(entity);
-	PrintToChat(client, "origin: %f %f %f; angles: %f %f %f", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2]);
+	DispatchSpawn(entity); // might not be needed?
+	//PrintToChat(client, "origin: %f %f %f; angles: %f %f %f", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2]);
+
+}
+
+
+public void OnGhostPickUp(int client)
+{
+	if (GetConVarBool(g_cvar_props_onghostpickup))
+	{
+		if (!IsValidClient(client))
+			return;
+
+		if (!gb_hashadhisd[client])
+		{
+			gb_hashadhisd[client] = true;
+			SpawnAndStrapDongToSelf(client);
+		}
+	}
+}
+
+
+public void OnGhostCapture(int client)
+{
+	if (GetConVarBool(g_cvar_props_oncapture))
+	{
+		FireWorksOnPlayer(client, GetRandomInt(0,0));
+	}
+}
+
+
+FireWorksOnPlayer(int client, int type)
+{
+	if (!IsValidClient(client))
+		return;
+
+	switch(type)
+	{
+		case 0: //dongs
+		{
+			PropFireworks(client, gs_dongs[0], gs_TE_type[1], true);
+		}
+		case 1: //ducks
+		{
+			PropFireworks(client, gs_allowed_models[0], gs_TE_type[1], false);
+		}
+		case 2: //tigers
+		{
+			PropFireworks(client, gs_allowed_models[1], gs_TE_type[1], false);
+		}
+		case 3: //team logo
+		{
+			if (GetClientTeam(client) == 2)
+				PropFireworks(client, gs_allowed_models[3], gs_TE_type[1], false);
+			else // probably NSF
+				PropFireworks(client, gs_allowed_models[2], gs_TE_type[1], false);
+		}
+	}
+}
+
+
+
+PropFireworks (int client, const char[] modelname, const char[] TE_type, bool shocking)
+{
+	if (!IsValidClient(client))
+		return;
+
+	int dongclients[MAXPLAYERS+1];
+	int numClients;
+	if (shocking)
+		numClients = GetDongClients(dongclients, sizeof(dongclients));
+
+	int cached_mdl = PrecacheModel(modelname, false);
+
+	float origin[3];
+	GetClientEyePosition(client, origin);
+	// origin[0] += 1500.0;
+	// origin[1] += 1500.0;
+	// origin[2] += 1500.0;
+
+	new String:TE_type[255] = "physicsprop";
+	TE_Start(TE_type); //TE_type
+	TE_WriteVector("m_vecOrigin", origin);
+	TE_WriteNum("m_nModelIndex", cached_mdl);
+
+	Set_TE_Props_By_Type(TE_type);
+
+	if (shocking)
+		TE_Send(dongclients, numClients, 0.0);
+	else
+		TE_SendToAll(0.0);
+	PrintToConsole(client, "Spawned fireworks of %s at: %f %f %f for model %s index %d", TE_type, origin[0], origin[1], origin[2], modelname, cached_mdl);
+}
+
+
+void Set_TE_Props_By_Type(const char[] type)
+{
+	if (strcmp(type, gs_TE_type[0]) == 0) //physicsprops
+	{
+
+	}
+	else if (strcmp(type, gs_TE_type[1]) == 0) //breakmodel
+	{
+		TE_WriteNum("m_nCount", 30);
+		TE_WriteNum("m_nRandomization", 30);
+		TE_WriteFloat("m_fTime", 10.0);
+	}
 
 }
 
 
 
 // create arg1 and strap to ourself
-public Action Command_Strap_Dong_To_Self(int client, int args)
+public Action Command_Strap_Dong(int client, int args)
 {
 	if (!IsValidClient(client))
 		return Plugin_Handled;
@@ -818,31 +928,33 @@ public Action Command_Strap_Dong_To_Self(int client, int args)
 		return Plugin_Handled;
 	}
 
-	SpawnAndStrapDongToSelf(client);
-
-	return Plugin_Handled;
-}
-
-
-// strap a dong to everybody
-public Action Command_Strap_Dong_To_All(int client, int args)
-{
-	if (!IsValidClient(client))
-		return Plugin_Handled;
-
-	if (gb_PausePropSpawning)
+	new String:arg[10];
+	GetCmdArg(1, arg, sizeof(arg));
+	if (strcmp(arg, "me"))
 	{
-		ReplyToCommand(client, "Prop spawning is currently paused.");
-		return Plugin_Handled;
-	}
-
-	for (client = 1; client <= MaxClients; client++)
-	{
-		if (!IsValidClient(client))
-			continue;
 		SpawnAndStrapDongToSelf(client);
 	}
-
+	else if (strcmp(arg, "team"))
+	{
+		int team = GetClientTeam(client);
+		for (client = 1; client <= MaxClients; client++)
+		{
+			if (!IsValidClient(client))
+				continue;
+			if (GetClientTeam(client) != team)
+				continue;
+			SpawnAndStrapDongToSelf(client);
+		}
+	}
+	else if (strcmp(arg, "all"))
+	{
+		for (client = 1; client <= MaxClients; client++)
+		{
+			if (!IsValidClient(client))
+				continue;
+			SpawnAndStrapDongToSelf(client);
+		}
+	}
 	return Plugin_Handled;
 }
 
@@ -958,7 +1070,7 @@ public Action Spawn_TE_Prop(int client, int args)
 	}
 
 	new String:s_tetype[PLATFORM_MAX_PATH], String:s_modelname[PLATFORM_MAX_PATH];
-	s_tetype = gs_TE_types[0]; // or physicsprop or breakmodel
+	s_tetype = gs_TE_type[0]; // or physicsprop or breakmodel
 	GetCmdArg(1, s_modelname, sizeof(s_modelname));
 
 	int dongclients[MAXPLAYERS+1];
@@ -977,7 +1089,7 @@ public Action Spawn_TE_Prop(int client, int args)
 }
 
 
-public Action Spawn_TE_Dong(int client, const char[] modelname)
+public Action Spawn_TE_Dong(int client, const char[] modelname, const char[] TE_type)
 {
 	if (!IsValidClient(client))
 		return Plugin_Handled;
@@ -988,9 +1100,6 @@ public Action Spawn_TE_Dong(int client, const char[] modelname)
 		return Plugin_Handled;
 	}
 
-	decl String:s_tetype[PLATFORM_MAX_PATH];
-	s_tetype = gs_TE_types[0]; // or physicsprop or breakmodel  //FIXME: move this into a separate dong te method
-
 	int dongclients[MAXPLAYERS+1];
 	int numClients = GetDongClients(dongclients, sizeof(dongclients));
 	int cached_mdl = PrecacheModel(modelname, false);
@@ -998,7 +1107,7 @@ public Action Spawn_TE_Dong(int client, const char[] modelname)
 	float origin[3];
 	GetClientEyePosition(client, origin);
 
-	TE_Start(s_tetype);
+	TE_Start(TE_type);
 	TE_WriteVector("m_vecOrigin", origin);
 	TE_WriteNum("m_nModelIndex", cached_mdl);
 	TE_Send(dongclients, numClients, 0.0);
@@ -1365,16 +1474,13 @@ public Action CommandCreatePropDynamicOverride(int client, int args)
 
 
 
-stock CreatePropDynamicOverride(int client, const String:modelname[], int health)
+stock int CreatePropDynamicOverride(int client, const String:modelname[], int health)
 {
-	new String:arg1[130];
-	GetCmdArg(1, arg1, sizeof(arg1));
-
 	new EntIndex = CreateEntityByName("prop_dynamic_override");
 
-	if(!IsModelPrecached(arg1))
+	if(!IsModelPrecached(modelname))
 	{
-		PrecacheModel(arg1);
+		PrecacheModel(modelname);
 	}
 
 	new String:name[130];
