@@ -9,10 +9,9 @@
 
 Handle g_cvar_props_enabled, g_cvar_restrict_alive, g_cvar_give_initial_credits, g_cvar_credits_replenish, g_cvar_score_as_credits= INVALID_HANDLE;
 Handle cvMaxPropsCreds = INVALID_HANDLE; // maximum credits given
-new Handle:cvPropMaxTTL = INVALID_HANDLE; // maximum time to live before prop gets auto removed
-new Handle:g_PropPrefCookie = INVALID_HANDLE; // handle to client preferences
+Handle cvPropMaxTTL = INVALID_HANDLE; // maximum time to live before prop gets auto removed
+Handle g_PropPrefCookie = INVALID_HANDLE; // handle to client preferences
 Handle g_cvar_props_oncapture, g_cvar_props_onghostpickup = INVALID_HANDLE;
-Handle convar_nt_entitytools = INVALID_HANDLE;
 bool gb_PausePropSpawning;
 bool gb_hashadhisd[MAXPLAYERS+1];
 
@@ -27,13 +26,30 @@ new const String:gs_dongs[][] = {
 // Prices: scale 1= 1 creds, 2= 3 creds, 3= 6 creds, 4= 8 creds, 5= 10 creds
 new const g_DongPropPrice[] = { 0, 1, 3, 6, 8, 10 };
 
-new const String:gs_allowed_models[][] = {
+new const String:gs_allowed_physics_models[][] = {
+	"models/nt/a_lil_tiger.mdl",
+	"models/nt/props_office/rubber_duck.mdl",
+	"models/logo/jinrai_logo.mdl",
+	"models/logo/nsf_logo.mdl" }; //physics version
+
+new const String:gs_allowed_dynamic_models[][] = {
 	"models/nt/a_lil_tiger.mdl",
 	"models/nt/props_office/rubber_duck.mdl",
 	"models/logo/jinrai_logo.mdl",
 	"models/logo/nsf_logo.mdl" };
 
-new const String:gs_TE_type[][] = { "physicsprop", "breakmodel" };
+new const String:gs_PropType[][] = {  // should be an enum?
+		"physicsprop", // TempEnt
+		"breakmodel",  //TempEnt
+		"prop_physics_override",
+		"prop_dynamic_override" };
+
+enum PropMdlType {
+	TE_PHYSICS = 0,
+	TE_BREAKMODEL,
+	PHYSICS,
+	DYNAMIC
+};
 
 // [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
 new g_RemainingCreds[MAXPLAYERS+1][3];
@@ -45,6 +61,7 @@ new g_propindex_d[MAXPLAYERS+1]; // holds a temporary entity index for timer des
 new g_precachedModels[10];
 new g_prefs_nowantprops[MAXPLAYERS+1];
 
+#define DEBUG 1
 
 public Plugin:myinfo =
 {
@@ -56,10 +73,10 @@ public Plugin:myinfo =
 };
 
 // TODO:
-// → split code into sm_props
 // → rework logic for credits, might be broken
 // → recheck keeping precached model indices in list
 // → command to spawn props with random coords around a target (player) and velocity, towards their origin
+// -> use rotators and parenting
 // → make menu to spawn props
 // → add sparks to props spawned and maybe a squishy sound for in range with TE_SendToAllInRange
 // → save credits in sqlite db for longer term?
@@ -71,8 +88,8 @@ public Plugin:myinfo =
 
 public OnPluginStart()
 {
-	RegAdminCmd("sm_props_set_credits", CommandSetCreditsForClient, ADMFLAG_SLAY, "Gives target player virtual credits in order to spawn props.");
-	RegConsoleCmd("sm_props_credit_status", CommandPropCreditStatus, "List all player credits to spawn props.");
+	RegAdminCmd("sm_props_set_credits", Command_Set_Credits_For_Client, ADMFLAG_SLAY, "Gives target player virtual credits in order to spawn props.");
+	RegConsoleCmd("sm_props_credit_status", Command_Credit_Status, "List all player credits to spawn props.");
 
 	RegConsoleCmd("sm_dick", Command_Dong_Spawn, "Spawns a dick [scale 1-5] [1 for static prop]");
 	RegConsoleCmd("sm_props", CommandPropSpawn, "Spawns a prop.");
@@ -114,16 +131,11 @@ public OnPluginStart()
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("game_round_start", event_RoundStart);
 
-	RegAdminCmd("sm_props_givescore", CommandGiveScore, ADMFLAG_SLAY, "DEBUG: add 20 frags to score");
-	RegAdminCmd("sm_props_te", Spawn_TE_Prop, ADMFLAG_SLAY, "DEBUG: Spawn TE dong");
+	RegAdminCmd("sm_props_givescore", Command_Give_Score, ADMFLAG_SLAY, "DEBUG: add 20 frags to score");
+	RegAdminCmd("sm_props_te", Command_Spawn_TE_Prop, ADMFLAG_SLAY, "DEBUG: Spawn TE dong");
+	RegAdminCmd("sm_props_fireworks", Command_Spawn_TEST_fireworks, ADMFLAG_SLAY, "DEBUG: test fireworks");
 
 	AutoExecConfig(true, "sm_nt_props");
-
-	convar_nt_entitytools = FindConVar("sm_nt_entitytools");
-
-	// Needed for ghost-related events
-	// if(convar_nt_entitytools == INVALID_HANDLE)
-	// 	ThrowError("[sm_props] Couldn't find nt_entitytools plugin. Wrong version? Aborting.");
 }
 
 //==================================
@@ -161,7 +173,7 @@ public OnClientDisconnect(int client)
 }
 
 
-public ProcessCookies(int client)
+ProcessCookies(int client)
 {
 	if (!IsValidClient(client))
 		return;
@@ -268,7 +280,7 @@ public Action Command_Pause_Props_Spawning(int client, int args)
 //		Credits management
 //==================================
 
-public Action CommandGiveScore (int client, int args)
+public Action Command_Give_Score (int client, int args)
 {
 	if (!client)
 	{
@@ -276,18 +288,18 @@ public Action CommandGiveScore (int client, int args)
 		return Plugin_Stop;
 	}
 
-	SetEntProp(client, Prop_Data, "m_iFrags", 20);
-	g_RemainingCreds[client][SCORE_CRED] = 20;
-	g_RemainingCreds[client][VIRT_CRED] = 20;
-	g_RemainingCreds[client][MAX_CRED] = 20;
-	CommandSetCreditsForClient(client, 20);
+	SetEntProp(client, Prop_Data, "m_iFrags", 60);
+	g_RemainingCreds[client][SCORE_CRED] = 60;
+	g_RemainingCreds[client][VIRT_CRED] = 60;
+	g_RemainingCreds[client][MAX_CRED] = 60;
+	Command_Set_Credits_For_Client(client, 60);
 	PrintToConsole(client, "gave score to %d", client);
 	return Plugin_Handled;
 
 }
 
 
-public Action CommandPropCreditStatus(int client, int args)
+public Action Command_Credit_Status(int client, int args)
 {
 	decl String:name[MAX_NAME_LENGTH] = '\0';
 	PrintToConsole(client, "\n--------- Current props ppawning credits status ---------");
@@ -431,7 +443,7 @@ DecrementScore(int client, int amount)
 
 
 // increment (virtual) credits for target client
-public Action CommandSetCreditsForClient(int client, int args)
+public Action Command_Set_Credits_For_Client(int client, int args)
 {
 	if(!client || IsFakeClient(client))
 		return Plugin_Stop;
@@ -472,20 +484,92 @@ public Action CommandSetCreditsForClient(int client, int args)
 //==================================
 
 
-public Action PropSpawnDispatch(int client, int model_index)
+PropSpawnDispatch(int client, int model_index)
 {
-	CreatePropPhysicsOverride(client, gs_allowed_models[model_index], 50);
-	return Plugin_Handled;
+	g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_allowed_physics_models[model_index], 50);
 }
 
 
-public Action PrintPluginCommandInfo(int client)
+Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
+{
+	// process args
+	char buffers[10][255];
+	ExplodeString(argstring, " ", buffers, 4, 255);
+	char model_path[PLATFORM_MAX_PATH];
+	char renderfx[30];
+	char movetype[30];
+	char ignite[7];
+	strcopy(model_path, sizeof(model_path), buffers[0]);
+	strcopy(renderfx, sizeof(renderfx), buffers[1]);
+	strcopy(movetype, sizeof(movetype), buffers[2]);
+	strcopy(ignite, sizeof(ignite), buffers[3]);
+	ReplyToCommand(client, "args: modelpath: %s, rest: %s %s %s", model_path, renderfx, movetype, ignite);
+	//FIXME: unfinished business, check strings, use enums accordingly
+
+
+	g_propindex_d[client] = CreatePropPhysicsOverride(client, model_path, 50);
+
+	//disable shadow
+	if (!strcmp(model_path, gs_allowed_physics_models[2]) || !strcmp(model_path, gs_allowed_physics_models[3]))
+	{
+		SetEntityRenderFx(g_propindex_d[client], RENDERFX_DISTORT); // works, only good for team logos
+		AcceptEntityInput(g_propindex_d[client], "DisableShadow"); // works
+
+		DispatchSpawn(g_propindex_d[client]); 		// without this lines, prop will stay in place and not move, but will block bullets
+		ActivateEntity(g_propindex_d[client]);
+	}
+	else
+	{
+		#if DEBUG
+		char clsname[255];
+		int r,g,b,a, rendm, rendfx;
+		float gravity;
+
+		GetEntityClassname(g_propindex_d[client], clsname, sizeof(clsname));
+		GetEntityRenderColor(g_propindex_d[client], r, g, b, a);
+		rendfx = view_as<int>(GetEntityRenderFx(g_propindex_d[client]));
+		rendm = view_as<int>(GetEntityRenderMode(g_propindex_d[client]));
+		gravity = GetEntityGravity(g_propindex_d[client]);
+
+		PrintToConsole(client, "Rendered before: %s with colors: %d,%d,%d,%d rendermode %d fx %d gravity %f", clsname, r,g,b,a, rendm, rendfx, gravity );
+		#endif
+
+		// SetEntityRenderMode(g_propindex_d[client], RENDER_NORMAL);
+		// SetEntityRenderColor(g_propindex_d[client], 255, 0, 0, 123); // works only on models supporting that, good for making ghosts (alpha)
+		SetEntityRenderFx(g_propindex_d[client], RENDERFX_DISTORT); // works, only good for team logos
+
+		// SetEntityMoveType(g_propindex_d[client], MOVETYPE_OBSERVER);
+		// SetEntityMoveType(g_propindex_d[client], MOVETYPE_NOCLIP);
+		// SetEntityMoveType(g_propindex_d[client], MOVETYPE_PUSH);
+
+		// SetEntityGravity(g_propindex_d[client], 0.1); // doesn't seem to work
+		// DispatchKeyValue(g_propindex_d[client], "Gravity", "0.1"); // doesn't work
+		// DispatchKeyValue(g_propindex_d[client], "Color", "0 255 0"); // doesn't work
+
+		AcceptEntityInput(g_propindex_d[client], "DisableShadow"); // works
+		// AcceptEntityInput(g_propindex_d[client], "Ignite"); // works
+
+		DispatchSpawn(g_propindex_d[client]); 		// without this lines, prop will stay in place and not move, but will block bullets
+		ActivateEntity(g_propindex_d[client]);
+
+		#if DEBUG
+		rendfx = view_as<int>(GetEntityRenderFx(g_propindex_d[client]));
+		rendm = view_as<int>(GetEntityRenderMode(g_propindex_d[client]));
+		gravity = GetEntityGravity(g_propindex_d[client]);
+
+		GetEntityRenderColor(g_propindex_d[client], r, g, b, a);
+		PrintToConsole(client, "Rendered after: %s with colors: %d,%d,%d,%d rendermode %d, fx %d gravity %f", clsname, r,g,b,a, rendm, rendfx, gravity);
+		#endif
+	}
+}
+
+
+PrintPluginCommandInfo(int client)
 {
 	PrintToChat(client, "[sm_props] Admin, check console for useful commands and convars...");
 	PrintToConsole(client, "[sm_props] Admins, some useful commands:");
 	PrintToConsole(client, "\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_props_max_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.\nsm_props_max_ttl: props get deleted after that time.\nsm_props_enabled: disable the command.");
-
-	return Plugin_Handled;
+	PrintToConsole(client, "You may also do sm_props \"model_path\" \"renderfx\" \"movetype\" \"ignite\"");
 }
 
 
@@ -524,6 +608,11 @@ public Action CommandPropSpawn(int client, int args)
 		if (IsAdmin(client))
 		{
 			PrintPluginCommandInfo(client);
+			decl String:s_args[PLATFORM_MAX_PATH];
+			//bypass credit system
+			GetCmdArgString(s_args, sizeof(s_args));
+			Prop_Spawn_Dispatch_Admin(client, s_args);
+			return Plugin_Handled;
 		}
 
 		return Plugin_Handled;
@@ -539,16 +628,16 @@ public Action CommandPropSpawn(int client, int args)
 	decl String:model_name[PLATFORM_MAX_PATH];
 	GetCmdArg(1, model_name, sizeof(model_name));
 
-	for (int index=0; index < sizeof(gs_allowed_models); ++index)
+	for (int index=0; index < sizeof(gs_allowed_physics_models); ++index)
 	{
 		//TODO: check the path
 		//TODO: make selection menu // Don't stop at first match
-		//if (strcmp(model_name, gs_allowed_models[i]) == 0)
-		if (StrContains(gs_allowed_models[index], model_name, false) != -1)
+		//if (strcmp(model_name, gs_allowed_physics_models[i]) == 0)
+		if (StrContains(gs_allowed_physics_models[index], model_name, false) != -1)
 		{
 			if (hasEnoughCredits(client, 5)) 								//FIXME: for now everything costs 5!
 			{
-				PrintToConsole(client, "Spawned: %s.", gs_allowed_models[index]);
+				PrintToConsole(client, "Spawned: %s.", gs_allowed_physics_models[index]);
 				PrintToChat(client, "Spawning your %s.", model_name);
 				PropSpawnDispatch(client, index);
 
@@ -587,10 +676,12 @@ public DongDispatch(int client, int scale, int bstatic)
 		{
 			if (!bstatic)
 			{
-				if (Should_Use_TE)
-					Spawn_TE_Dong(client, gs_dongs[scale-1], gs_TE_type[0]);
+				if (Should_Use_TE()) // use TempEnts to avoid showing to people who don't like it
+					Spawn_TE_Dong(client, gs_dongs[scale-1], gs_PropType[TE_PHYSICS]);
 				else
+				{
 					g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 50);
+				}
 			}
 			else
 				g_propindex_d[client] = CreatePropDynamicOverride(client, gs_dongs[scale-1], 50);
@@ -599,8 +690,8 @@ public DongDispatch(int client, int scale, int bstatic)
 		{
 			if (!bstatic)
 			{
-				if (Should_Use_TE)
-					Spawn_TE_Dong(client, gs_dongs[scale-1], gs_TE_type[0]);
+				if (Should_Use_TE()) // use TempEnts to avoid showing to people who don't like it
+					Spawn_TE_Dong(client, gs_dongs[scale-1], gs_PropType[TE_PHYSICS]);
 				else
 				{
 					g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 120);
@@ -726,15 +817,26 @@ public Action Command_Dong_Spawn(int client, int args)
 	}
 }
 
+
 bool Should_Use_TE()
 {
 	for (int client=1; client <= MaxClients; client++)
 	{
-		if (g_prefs_nowantprops[client]) // at least one person doesn't want to see them
-			return true;
-	}
-	return false;
+		if (!IsValidClient(client))
+			continue;
 
+		if (g_prefs_nowantprops[client]) // at least one person doesn't want to see them
+		{
+			#if DEBUG
+			PrintToServer("Client %s has set pref to opt out of props. We should use TE!", GetClientOfUserId(client));
+			#endif
+			return true;
+		}
+	}
+	#if DEBUG
+	PrintToServer("Nobody opted out of props, we can use physics or dynamics.");
+	#endif
+	return false;
 }
 
 
@@ -747,7 +849,7 @@ DisplayActivity(int client, const char[] model)
 
 
 // sets the client as the entity's new parent and attach the entity to client
-public MakeParent(int client, int entity)
+MakeParent(int client, int entity)
 {
 	decl String:Buffer[64];
 	Format(Buffer, sizeof(Buffer), "Client%d", client);
@@ -816,29 +918,43 @@ FireWorksOnPlayer(int client, int type)
 	{
 		case 0: //dongs
 		{
-			PropFireworks(client, gs_dongs[0], gs_TE_type[1], true);
+			Setup_Firework(client, gs_dongs[0], TE_PHYSICS, true);
 		}
 		case 1: //ducks
 		{
-			PropFireworks(client, gs_allowed_models[0], gs_TE_type[1], false);
+			Setup_Firework(client, gs_allowed_physics_models[0], TE_BREAKMODEL, false);
 		}
 		case 2: //tigers
 		{
-			PropFireworks(client, gs_allowed_models[1], gs_TE_type[1], false);
+			Setup_Firework(client, gs_allowed_physics_models[1], TE_BREAKMODEL, false);
 		}
 		case 3: //team logo
 		{
 			if (GetClientTeam(client) == 2)
-				PropFireworks(client, gs_allowed_models[3], gs_TE_type[1], false);
+				Setup_Firework(client, gs_allowed_physics_models[3], TE_BREAKMODEL, false);
 			else // probably NSF
-				PropFireworks(client, gs_allowed_models[2], gs_TE_type[1], false);
+				Setup_Firework(client, gs_allowed_physics_models[2], TE_BREAKMODEL, false);
 		}
 	}
 }
 
 
+public Action Command_Spawn_TEST_fireworks(int client, int args)
+{
+	decl String:s_modelname[255], String:s_type[255], String:s_shock[255];
+	GetCmdArg(1, s_modelname, sizeof(s_modelname));
+	GetCmdArg(2, s_type, sizeof(s_type));
+	GetCmdArg(2, s_shock, sizeof(s_shock));
+	bool bshock = (StringToInt(s_shock) ? true : false);
+	PropMdlType itype = view_as<PropMdlType>(StringToInt(s_type));
 
-PropFireworks (int client, const char[] modelname, const char[] TE_type, bool shocking)
+	//bind p "sm_props_fireworks models/d/d_s02.mdl breakmodel 1"
+	Setup_Firework(client, s_modelname, itype, bshock);
+	return Plugin_Handled;
+}
+
+
+Setup_Firework (int client, const char[] modelname, const PropMdlType TE_type, bool shocking)
 {
 	if (!IsValidClient(client))
 		return;
@@ -852,40 +968,85 @@ PropFireworks (int client, const char[] modelname, const char[] TE_type, bool sh
 
 	float origin[3];
 	GetClientEyePosition(client, origin);
-	// origin[0] += 1500.0;
-	// origin[1] += 1500.0;
-	// origin[2] += 1500.0;
+	origin[2] += 90.0;
 
-	new String:TE_type[255] = "physicsprop";
-	TE_Start(TE_type); //TE_type
+	//new String:TE_type[255] = "breakmodel";
+
+	for (int i=1; i>=0; i--)
+	{
+		Setup_TE(cached_mdl, TE_type, origin);
+		if (shocking) 		// only send to clients who have not opted out
+			TE_Send(dongclients, numClients, 0.0);
+		else
+			TE_SendToAll(0.0);
+	}
+
+	PrintToConsole(client, "Spawned fireworks of %s at: %f %f %f for model %s index %d", gs_PropType[TE_type], origin[0], origin[1], origin[2], modelname, cached_mdl);
+}
+
+
+// setup rotators and multiple instances here
+void Setup_TE(int cached_mdl, const PropMdlType TE_type, const float[3] origin)
+{
+	TE_Start(gs_PropType[TE_type]); //TE_type
+
+	switch(TE_type)
+	{
+		case TE_PHYSICS:
+		{
+			Set_Firework_TE_PhysicsProp(cached_mdl, origin);
+		}
+		case TE_BREAKMODEL:
+		{
+			Set_Firework_TE_BreakModel(cached_mdl, origin);
+		}
+		case PHYSICS:
+		{
+			Set_Firework_PhysicsProp(cached_mdl, origin);
+		}
+		case DYNAMIC:
+		{
+			Set_Firework_DynamicProp(cached_mdl, origin);
+		}
+	}
+
+	// if (strcmp(TE_type, gs_PropType[TE_PHYSICS])
+
+	// else if (strcmp(TE_type, gs_PropType[TE_BREAKMODEL]))
+
+	// else if (strcmp(TE_type, gs_PropType[PHYSICS]))
+
+	// else if (strcmp(TE_type, gs_PropType[DYNAMIC]))
+
+}
+
+
+void Set_Firework_TE_PhysicsProp(int cached_mdl, const float[3] origin)
+{
 	TE_WriteVector("m_vecOrigin", origin);
 	TE_WriteNum("m_nModelIndex", cached_mdl);
-
-	Set_TE_Props_By_Type(TE_type);
-
-	if (shocking)
-		TE_Send(dongclients, numClients, 0.0);
-	else
-		TE_SendToAll(0.0);
-	PrintToConsole(client, "Spawned fireworks of %s at: %f %f %f for model %s index %d", TE_type, origin[0], origin[1], origin[2], modelname, cached_mdl);
 }
 
-
-void Set_TE_Props_By_Type(const char[] type)
+void Set_Firework_TE_BreakModel(int cached_mdl, const float[3] origin)
 {
-	if (strcmp(type, gs_TE_type[0]) == 0) //physicsprops
-	{
-
-	}
-	else if (strcmp(type, gs_TE_type[1]) == 0) //breakmodel
-	{
-		TE_WriteNum("m_nCount", 30);
-		TE_WriteNum("m_nRandomization", 30);
-		TE_WriteFloat("m_fTime", 10.0);
-	}
-
+	TE_WriteVector("m_vecOrigin", origin);
+	TE_WriteNum("m_nModelIndex", cached_mdl);
+	TE_WriteNum("m_nCount", 10);
+	TE_WriteNum("m_nRandomization", 10);
+	TE_WriteFloat("m_fTime", 5.0);
 }
 
+void Set_Firework_PhysicsProp(int cached_mdl, const float[3] origin)
+{
+	//unfinished business
+	return;
+}
+
+void Set_Firework_DynamicProp(int cached_mdl, const float[3] origin)
+{
+	//unfinished business
+	return;
+}
 
 
 // create arg1 and strap to ourself
@@ -1030,7 +1191,7 @@ int GetDongClients(int outClients[MAXPLAYERS+1], int arraySize)
 }
 
 
-public Action Spawn_TE_Prop(int client, int args)
+public Action Command_Spawn_TE_Prop(int client, int args)
 {
 	if (!IsValidClient(client))
 		return Plugin_Handled;
@@ -1041,9 +1202,12 @@ public Action Spawn_TE_Prop(int client, int args)
 		return Plugin_Handled;
 	}
 
-	new String:s_tetype[PLATFORM_MAX_PATH], String:s_modelname[PLATFORM_MAX_PATH];
-	s_tetype = gs_TE_type[0]; // or physicsprop or breakmodel
+	// char s_tetype[];
+	decl String:s_modelname[PLATFORM_MAX_PATH] = '\0';
+	char s_tetype[150];
 	GetCmdArg(1, s_modelname, sizeof(s_modelname));
+	//GetCmdArg(2, s_tetype, sizeof(s_tetype));
+	strcopy(s_tetype, sizeof(s_tetype), gs_PropType[TE_PHYSICS]); // forcing physicsprop or breakmodel for testing
 
 	int dongclients[MAXPLAYERS+1];
 	int numClients = GetDongClients(dongclients, sizeof(dongclients));
