@@ -5,13 +5,13 @@
 #include <nt_entitytools>
 
 #pragma semicolon 1
-#define PLUGIN_VERSION "20190924"
+#define PLUGIN_VERSION "20190925"
 
 Handle g_cvar_props_enabled, g_cvar_restrict_alive, g_cvar_give_initial_credits, g_cvar_credits_replenish, g_cvar_score_as_credits= INVALID_HANDLE;
 Handle cvMaxPropsCreds = INVALID_HANDLE; // maximum credits given
 Handle cvPropMaxTTL = INVALID_HANDLE; // maximum time to live before prop gets auto removed
 Handle g_PropPrefCookie = INVALID_HANDLE; // handle to client preferences
-Handle g_cvar_props_oncapture, g_cvar_props_onghostpickup = INVALID_HANDLE;
+Handle g_cvar_props_oncapture, g_cvar_props_onghostpickup, g_cvar_props_oncapture_nodongs = INVALID_HANDLE;
 bool gb_PausePropSpawning;
 bool gb_hashadhisd[MAXPLAYERS+1];
 
@@ -44,11 +44,10 @@ new const String:gs_PropType[][] = {  // should be an enum?
 		"prop_physics_override",
 		"prop_dynamic_override" };
 
-enum PropMdlType {
+enum FireworksPropType {
 	TE_PHYSICS = 0,
 	TE_BREAKMODEL,
-	PHYSICS,
-	DYNAMIC
+	REGULAR_PHYSICS,
 };
 
 // [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
@@ -57,7 +56,7 @@ new g_RemainingCreds[MAXPLAYERS+1][3];
 #define SCORE_CRED 1
 #define MAX_CRED 2
 
-new g_propindex_d[MAXPLAYERS+1]; // holds a temporary entity index for timer destruction
+new g_propindex_d[MAXPLAYERS+1]; // holds the last spawned entity by client
 new g_precachedModels[10];
 new g_prefs_nowantprops[MAXPLAYERS+1];
 
@@ -74,9 +73,7 @@ public Plugin:myinfo =
 
 // TODO:
 // → rework logic for credits, might be broken
-// → recheck keeping precached model indices in list
-// → command to spawn props with random coords around a target (player) and velocity, towards their origin
-// -> use rotators and parenting
+// → spawn props with random coords around a target (player) and velocity, towards their position
 // → make menu to spawn props
 // → add sparks to props spawned and maybe a squishy sound for in range with TE_SendToAllInRange
 // → save credits in sqlite db for longer term?
@@ -93,10 +90,11 @@ public OnPluginStart()
 
 	RegConsoleCmd("sm_dick", Command_Dong_Spawn, "Spawns a dick [scale 1-5] [1 for static prop]");
 	RegConsoleCmd("sm_props", CommandPropSpawn, "Spawns a prop.");
-	RegConsoleCmd("sm_strapon", Command_Strap_Dong, "Strap a dong onto [me|team|all].");
+	RegConsoleCmd("sm_strapdong", Command_Strap_Dong, "Strap a dong onto [me|team|all].");
 
-	g_cvar_props_onghostpickup = CreateConVar("sm_props_onghostpickup", "1", "Picking up the ghost is exciting,", FCVAR_NONE, true, 0.0, true, 1.0 );
+	g_cvar_props_onghostpickup = CreateConVar("sm_props_onghostpickup", "0", "Picking up the ghost is exciting,", FCVAR_NONE, true, 0.0, true, 1.0 );
 	g_cvar_props_oncapture = CreateConVar("sm_props_oncapture", "0", "Fireworks on ghost capture.", FCVAR_NONE, true, 0.0, true, 1.0 );
+	g_cvar_props_oncapture_nodongs = CreateConVar("sm_props_oncapture_nodongs", "1", "No dong firework on capture.", FCVAR_NONE, true, 0.0, true, 1.0 );
 
 
 	g_cvar_props_enabled = CreateConVar( "sm_props_enabled", "1",
@@ -486,7 +484,7 @@ public Action Command_Set_Credits_For_Client(int client, int args)
 
 PropSpawnDispatch(int client, int model_index)
 {
-	g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_allowed_physics_models[model_index], 50);
+	g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_allowed_physics_models[model_index], 50);
 }
 
 
@@ -507,15 +505,17 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 	//FIXME: unfinished business, check strings, use enums accordingly
 
 
-	g_propindex_d[client] = CreatePropPhysicsOverride(client, model_path, 50);
+	g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, model_path, 50);
 
-	//disable shadow
+	// FIXME: find a way to make bullets go through physic_props
 	if (!strcmp(model_path, gs_allowed_physics_models[2]) || !strcmp(model_path, gs_allowed_physics_models[3]))
 	{
 		SetEntityRenderFx(g_propindex_d[client], RENDERFX_DISTORT); // works, only good for team logos
 		AcceptEntityInput(g_propindex_d[client], "DisableShadow"); // works
-
-		DispatchSpawn(g_propindex_d[client]); 		// without this lines, prop will stay in place and not move, but will block bullets
+		// SetEntProp(g_propindex_d[client], Prop_Send, "m_usSolidFlags", 136);
+		// SetEntProp(g_propindex_d[client], Prop_Send, "m_CollisionGroup", 13);
+		// SetEntProp(g_propindex_d[client], Prop_Send, "m_nSolidType", 0);
+		DispatchSpawn(g_propindex_d[client]); 		// without this line, prop will stay in place and not move, but will still block bullets
 		ActivateEntity(g_propindex_d[client]);
 	}
 	else
@@ -625,20 +625,20 @@ public Action CommandPropSpawn(int client, int args)
 		return Plugin_Handled;
 	}
 
-	decl String:model_name[PLATFORM_MAX_PATH];
-	GetCmdArg(1, model_name, sizeof(model_name));
+	decl String:model_pathname[PLATFORM_MAX_PATH];
+	GetCmdArg(1, model_pathname, sizeof(model_pathname));
 
 	for (int index=0; index < sizeof(gs_allowed_physics_models); ++index)
 	{
 		//TODO: check the path
 		//TODO: make selection menu // Don't stop at first match
-		//if (strcmp(model_name, gs_allowed_physics_models[i]) == 0)
-		if (StrContains(gs_allowed_physics_models[index], model_name, false) != -1)
+		//if (strcmp(model_pathname, gs_allowed_physics_models[i]) == 0)
+		if (StrContains(gs_allowed_physics_models[index], model_pathname, false) != -1)
 		{
 			if (hasEnoughCredits(client, 5)) 								//FIXME: for now everything costs 5!
 			{
 				PrintToConsole(client, "Spawned: %s.", gs_allowed_physics_models[index]);
-				PrintToChat(client, "Spawning your %s.", model_name);
+				PrintToChat(client, "Spawning your %s.", model_pathname);
 				PropSpawnDispatch(client, index);
 
 				PrintToChat(client, "[] You have just used %d credits.", 5);
@@ -656,8 +656,8 @@ public Action CommandPropSpawn(int client, int args)
 			}
 		}
 	}
-	PrintToConsole(client, "Did not find requested model \"%s\" among allowed models.", model_name);
-	PrintToChat(client, "Did not find requested model \"%s\" among allowed models.", model_name);
+	PrintToConsole(client, "Did not find requested model \"%s\" among allowed models.", model_pathname);
+	PrintToChat(client, "Did not find requested model \"%s\" among allowed models.", model_pathname);
 	return Plugin_Handled;
 }
 
@@ -680,11 +680,11 @@ public DongDispatch(int client, int scale, int bstatic)
 					Spawn_TE_Dong(client, gs_dongs[scale-1], gs_PropType[TE_PHYSICS]);
 				else
 				{
-					g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 50);
+					g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale-1], 50);
 				}
 			}
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride(client, gs_dongs[scale-1], 50);
+				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale-1], 50);
 		}
 		case 2:
 		{
@@ -694,22 +694,22 @@ public DongDispatch(int client, int scale, int bstatic)
 					Spawn_TE_Dong(client, gs_dongs[scale-1], gs_PropType[TE_PHYSICS]);
 				else
 				{
-					g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 120);
+					g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale-1], 120);
 					CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
 				}
 			}
 			else
 			{
-				g_propindex_d[client] = CreatePropDynamicOverride(client, gs_dongs[scale-1], 120);
+				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale-1], 120);
 				CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
 			}
 		}
 		case 3:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 180);
+				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale-1], 180);
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride(client, gs_dongs[scale-1], 180);
+				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale-1], 180);
 
 			// remove the prop when it's touched by a player
 			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
@@ -718,9 +718,9 @@ public DongDispatch(int client, int scale, int bstatic)
 		case 4:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 200);
+				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale-1], 200);
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride(client, gs_dongs[scale-1], 200);
+				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale-1], 200);
 
 			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
 			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
@@ -728,9 +728,9 @@ public DongDispatch(int client, int scale, int bstatic)
 		case 5:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride(client, gs_dongs[scale-1], 250);
+				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale-1], 250);
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride(client, gs_dongs[scale-1], 250);
+				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale-1], 250);
 
 			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
 			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
@@ -864,8 +864,8 @@ MakeParent(int client, int entity)
 	SetVariantString("grenade2");
 	AcceptEntityInput(entity, "SetParentAttachmentMaintainOffset");
 
-	new Float:origin[3];
-	new Float:angle[3];
+	float origin[3];
+	float angle[3];
 	GetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin);
 	GetEntPropVector(entity, Prop_Send, "m_angRotation", angle);
 
@@ -876,10 +876,15 @@ MakeParent(int client, int entity)
 	angle[0] += 0.0;
 	angle[1] += 3.0;
 	angle[2] += 0.3;
+	SetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin); // these might not be working actually
+	SetEntPropVector(entity, Prop_Send, "m_angRotation", angle);
+
 	//DispatchKeyValueVector(entity, "Origin", origin);    //FIX testing offset coordinates, remove! -glub
 	//DispatchKeyValueVector(entity, "Angles", angle);
-	DispatchSpawn(entity); // might not be needed?
-	//PrintToChat(client, "origin: %f %f %f; angles: %f %f %f", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2]);
+	DispatchSpawn(entity);
+	char name[255];
+	GetClientName(client, name, sizeof(name));
+	PrintToConsole(client, "Made parent: at origin: %f %f %f; angles: %f %f %f for client %s", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2], name);
 
 }
 
@@ -904,7 +909,7 @@ public void OnGhostCapture(int client)
 {
 	if (GetConVarBool(g_cvar_props_oncapture))
 	{
-		FireWorksOnPlayer(client, GetRandomInt(0,0));
+		FireWorksOnPlayer(client, GetConVarBool(g_cvar_props_oncapture_nodongs) ? GetRandomInt(1,3) : GetRandomInt(0,3));
 	}
 }
 
@@ -931,9 +936,9 @@ FireWorksOnPlayer(int client, int type)
 		case 3: //team logo
 		{
 			if (GetClientTeam(client) == 2)
-				Setup_Firework(client, gs_allowed_physics_models[3], TE_BREAKMODEL, false);
+				Setup_Firework(client, gs_allowed_physics_models[3], REGULAR_PHYSICS, false);
 			else // probably NSF
-				Setup_Firework(client, gs_allowed_physics_models[2], TE_BREAKMODEL, false);
+				Setup_Firework(client, gs_allowed_physics_models[2], REGULAR_PHYSICS, false);
 		}
 	}
 }
@@ -941,20 +946,25 @@ FireWorksOnPlayer(int client, int type)
 
 public Action Command_Spawn_TEST_fireworks(int client, int args)
 {
-	decl String:s_modelname[255], String:s_type[255], String:s_shock[255];
-	GetCmdArg(1, s_modelname, sizeof(s_modelname));
+	decl String:s_model_pathname[255], String:s_type[255], String:s_shock[255];
+	GetCmdArg(1, s_model_pathname, sizeof(s_model_pathname));
 	GetCmdArg(2, s_type, sizeof(s_type));
-	GetCmdArg(2, s_shock, sizeof(s_shock));
-	bool bshock = (StringToInt(s_shock) ? true : false);
-	PropMdlType itype = view_as<PropMdlType>(StringToInt(s_type));
+	GetCmdArg(3, s_shock, sizeof(s_shock));
+	bool bshock = (view_as<bool>(StringToInt(s_shock)) ? true : false);
+	FireworksPropType itype = view_as<FireworksPropType>(StringToInt(s_type));
+
+	#if DEBUG
+	PrintToConsole(client, "[DEBUG] asked for fireworks: model: %s, type: %s shock: %d, itype %d", s_model_pathname, s_type, bshock, itype);
+	#endif
 
 	//bind p "sm_props_fireworks models/d/d_s02.mdl breakmodel 1"
-	Setup_Firework(client, s_modelname, itype, bshock);
+	Setup_Firework(client, s_model_pathname, itype, bshock);
+
 	return Plugin_Handled;
 }
 
 
-Setup_Firework (int client, const char[] modelname, const PropMdlType TE_type, bool shocking)
+Setup_Firework (int client, const char[] model_pathname, const FireworksPropType PropEntClass, bool shocking)
 {
 	if (!IsValidClient(client))
 		return;
@@ -964,89 +974,126 @@ Setup_Firework (int client, const char[] modelname, const PropMdlType TE_type, b
 	if (shocking)
 		numClients = GetDongClients(dongclients, sizeof(dongclients));
 
-	int cached_mdl = PrecacheModel(modelname, false);
-
-	float origin[3];
-	GetClientEyePosition(client, origin);
-	origin[2] += 90.0;
-
-	//new String:TE_type[255] = "breakmodel";
-
-	for (int i=1; i>=0; i--)
+	int i_cached_model_index = PrecacheModel(model_pathname, false);
+	if (i_cached_model_index == 0)
 	{
-		Setup_TE(cached_mdl, TE_type, origin);
-		if (shocking) 		// only send to clients who have not opted out
-			TE_Send(dongclients, numClients, 0.0);
-		else
-			TE_SendToAll(0.0);
+		LogError("[sm_props] Couldn't find or precache model \"%s\".", model_pathname);
+		return;
 	}
 
-	PrintToConsole(client, "Spawned fireworks of %s at: %f %f %f for model %s index %d", gs_PropType[TE_type], origin[0], origin[1], origin[2], modelname, cached_mdl);
-}
+	float pos[3];
+	// GetClientEyePosition(client, pos);
+	// pos[2] += 90.0;
 
+	GetRandomPosAboveClient(client, pos);
 
-// setup rotators and multiple instances here
-void Setup_TE(int cached_mdl, const PropMdlType TE_type, const float[3] origin)
-{
-	TE_Start(gs_PropType[TE_type]); //TE_type
-
-	switch(TE_type)
+	for (int i=1; i>0; i--)
 	{
-		case TE_PHYSICS:
+		switch(PropEntClass)
 		{
-			Set_Firework_TE_PhysicsProp(cached_mdl, origin);
+			case TE_PHYSICS:
+			{
+				TE_Start(gs_PropType[PropEntClass]); //PropEntClass
+				Set_Firework_TE_PhysicsProp(i_cached_model_index, pos);
+				if (shocking) 	// only send to clients who have not opted out
+					TE_Send(dongclients, numClients, 0.0);
+				else
+					TE_SendToAll(0.0);
+			}
+			case TE_BREAKMODEL:
+			{
+				TE_Start(gs_PropType[PropEntClass]); //PropEntClass
+				Set_Firework_TE_BreakModel(i_cached_model_index, pos);
+				if (shocking)
+					TE_Send(dongclients, numClients, 0.0);
+				else
+					TE_SendToAll(0.0);
+			}
+			case REGULAR_PHYSICS:
+			{
+				Set_Firework_PhysicsProp(client, model_pathname, pos);
+			}
 		}
-		case TE_BREAKMODEL:
-		{
-			Set_Firework_TE_BreakModel(cached_mdl, origin);
-		}
-		case PHYSICS:
-		{
-			Set_Firework_PhysicsProp(cached_mdl, origin);
-		}
-		case DYNAMIC:
-		{
-			Set_Firework_DynamicProp(cached_mdl, origin);
-		}
+		#if DEBUG
+		PrintToConsole(client, "Spawned fireworks of %s at: %f %f %f for model %s index %d",
+		gs_PropType[PropEntClass], pos[0], pos[1], pos[2], model_pathname, i_cached_model_index);
+		#endif
 	}
-
-	// if (strcmp(TE_type, gs_PropType[TE_PHYSICS])
-
-	// else if (strcmp(TE_type, gs_PropType[TE_BREAKMODEL]))
-
-	// else if (strcmp(TE_type, gs_PropType[PHYSICS]))
-
-	// else if (strcmp(TE_type, gs_PropType[DYNAMIC]))
-
 }
 
 
-void Set_Firework_TE_PhysicsProp(int cached_mdl, const float[3] origin)
+void Set_Firework_TE_PhysicsProp(int i_cached_model_index, const float[3] origin)
 {
 	TE_WriteVector("m_vecOrigin", origin);
-	TE_WriteNum("m_nModelIndex", cached_mdl);
+	TE_WriteNum("m_nModelIndex", i_cached_model_index);
 }
 
-void Set_Firework_TE_BreakModel(int cached_mdl, const float[3] origin)
+
+void Set_Firework_TE_BreakModel(int i_cached_model_index, const float[3] origin)
 {
 	TE_WriteVector("m_vecOrigin", origin);
-	TE_WriteNum("m_nModelIndex", cached_mdl);
+	TE_WriteNum("m_nModelIndex", i_cached_model_index);
 	TE_WriteNum("m_nCount", 10);
 	TE_WriteNum("m_nRandomization", 10);
 	TE_WriteFloat("m_fTime", 5.0);
 }
 
-void Set_Firework_PhysicsProp(int cached_mdl, const float[3] origin)
+
+void Set_Firework_PhysicsProp(int client, const char[] model_pathname, const float[3] origin)
 {
-	//unfinished business
+	g_propindex_d[client] = SimpleCreatePropPhysicsOverride(model_pathname, 50);
+	DispatchKeyValueVector(g_propindex_d[client], "Origin", origin);
+	//TeleportEntity(g_propindex_d[client], origin, NULL_VECTOR, NULL_VECTOR);
+
+	if (StrContains(model_pathname, "logo.mdl") != -1)
+	{
+		SetEntityRenderFx(g_propindex_d[client], RENDERFX_DISTORT); // works, only good for team logos
+		AcceptEntityInput(g_propindex_d[client], "DisableShadow");
+	}
+
+	DispatchSpawn(g_propindex_d[client]);
 	return;
 }
 
-void Set_Firework_DynamicProp(int cached_mdl, const float[3] origin)
+
+void GetRandomPosAboveClient(int client, float[3] origin)
 {
-	//unfinished business
-	return;
+	float vAngles[3], vOrigin[3], normal[3];
+	vAngles[0] -= 90.0 + GetRandomInt(-20,20); // 90 degrees above head of client
+	vAngles[1] -= 90.0 + GetRandomInt(-20,20);
+	vAngles[2] -= 90.0 + GetRandomInt(-20,20);
+
+	GetClientEyePosition(client, vOrigin);
+
+	new Handle:trace = TR_TraceRayFilterEx(vOrigin, vAngles, MASK_SHOT, RayType_Infinite, TraceEntityFilterPlayer);
+
+	if(TR_DidHit(trace)){
+
+		//TR_GetEndPosition(end, INVALID_HANDLE);    //Get position player looking at
+		//TR_GetPlaneNormal(INVALID_HANDLE, normal);    //???
+		//GetVectorAngles(normal, normal);    //Get angles of vector, which is returned by GetPlaneNormal
+		//normal[0] += 90.0;    //Add some angle to existing angles
+
+		TR_GetEndPosition(origin, trace);
+		origin[2] -= 40.0; // avoid spawning in ceiling?
+
+
+		TR_GetPlaneNormal(INVALID_HANDLE, normal);
+		GetVectorAngles(normal, normal);
+		normal[0] += 90.0;
+
+
+		#if DEBUG
+		float ClientOrigin[3];
+		GetClientEyePosition(client, ClientOrigin);
+		PrintToConsole(client, "ClientOrigin: %f %f %f", ClientOrigin[0], ClientOrigin[1], ClientOrigin[2]);
+		PrintToConsole(client, "ClientEyeAngles: %f %f %f", vAngles[0], vAngles[1], vAngles[2]);
+		PrintToConsole(client, "origin: %f %f %f", origin[0], origin[1], origin[2]);
+		#endif
+	}
+	CloseHandle(trace);
 }
+
 
 
 // create arg1 and strap to ourself
@@ -1063,29 +1110,32 @@ public Action Command_Strap_Dong(int client, int args)
 
 	new String:arg[10];
 	GetCmdArg(1, arg, sizeof(arg));
-	if (strcmp(arg, "me"))
+
+	if (strcmp(arg, "me") == 0)
 	{
 		SpawnAndStrapDongToSelf(client);
 	}
-	else if (strcmp(arg, "team"))
+	else if (strcmp(arg, "team") == 0)
 	{
 		int team = GetClientTeam(client);
-		for (client = 1; client <= MaxClients; client++)
+
+		for (int i = 1; i <= MaxClients; i++)
 		{
-			if (!IsValidClient(client))
+			if (!IsValidClient(i))
 				continue;
-			if (GetClientTeam(client) != team)
+			if (GetClientTeam(i) != team)
 				continue;
-			SpawnAndStrapDongToSelf(client);
+
+			SpawnAndStrapDongToSelf(i);
 		}
 	}
-	else if (strcmp(arg, "all"))
+	else if (strcmp(arg, "all") == 0)
 	{
-		for (client = 1; client <= MaxClients; client++)
+		for (int i = 1; i <= MaxClients; i++)
 		{
-			if (!IsValidClient(client))
+			if (!IsValidClient(i))
 				continue;
-			SpawnAndStrapDongToSelf(client);
+			SpawnAndStrapDongToSelf(i);
 		}
 	}
 	return Plugin_Handled;
@@ -1094,8 +1144,18 @@ public Action Command_Strap_Dong(int client, int args)
 
 public void SpawnAndStrapDongToSelf(int client)
 {
-	new created = CreatePropDynamicOverride(client, gs_dongs[0], 5);
-	MakeParent(client, created);
+	#if DEBUG
+	char name[255];
+	GetClientName(client, name, sizeof(name));
+	PrintToConsole(client, "Processing: Strapdongself on client index %d \"%s\"", client, name);
+	#endif
+
+	if (!gb_hashadhisd[client]) // limit to once only per round
+	{
+		g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[0], 5);
+		MakeParent(client, g_propindex_d[client]);
+		gb_hashadhisd[client] = true;
+	}
 }
 
 
@@ -1203,29 +1263,29 @@ public Action Command_Spawn_TE_Prop(int client, int args)
 	}
 
 	// char s_tetype[];
-	decl String:s_modelname[PLATFORM_MAX_PATH] = '\0';
+	decl String:s_model_pathname[PLATFORM_MAX_PATH] = '\0';
 	char s_tetype[150];
-	GetCmdArg(1, s_modelname, sizeof(s_modelname));
+	GetCmdArg(1, s_model_pathname, sizeof(s_model_pathname));
 	//GetCmdArg(2, s_tetype, sizeof(s_tetype));
 	strcopy(s_tetype, sizeof(s_tetype), gs_PropType[TE_PHYSICS]); // forcing physicsprop or breakmodel for testing
 
 	int dongclients[MAXPLAYERS+1];
 	int numClients = GetDongClients(dongclients, sizeof(dongclients));
-	int cached_mdl = PrecacheModel(s_modelname, false);
+	int i_cached_model_index = PrecacheModel(s_model_pathname, false);
 
 	float origin[3];
 	GetClientEyePosition(client, origin);
 
 	TE_Start(s_tetype);
 	TE_WriteVector("m_vecOrigin", origin);
-	TE_WriteNum("m_nModelIndex", cached_mdl);
+	TE_WriteNum("m_nModelIndex", i_cached_model_index);
 	TE_Send(dongclients, numClients, 0.0);
-	//PrintToConsole(client, "Spawned at: %f %f %f for model index: %d", origin[0], origin[1], origin[2], cached_mdl);
+	//PrintToConsole(client, "Spawned at: %f %f %f for model index: %d", origin[0], origin[1], origin[2], i_cached_model_index);
 	return Plugin_Handled;
 }
 
 
-public Action Spawn_TE_Dong(int client, const char[] modelname, const char[] TE_type)
+public Action Spawn_TE_Dong(int client, const char[] model_pathname, const char[] TE_type)
 {
 	if (!IsValidClient(client))
 		return Plugin_Handled;
@@ -1238,16 +1298,16 @@ public Action Spawn_TE_Dong(int client, const char[] modelname, const char[] TE_
 
 	int dongclients[MAXPLAYERS+1];
 	int numClients = GetDongClients(dongclients, sizeof(dongclients));
-	int cached_mdl = PrecacheModel(modelname, false);
+	int i_cached_model_index = PrecacheModel(model_pathname, false);
 
 	float origin[3];
 	GetClientEyePosition(client, origin);
 
 	TE_Start(TE_type);
 	TE_WriteVector("m_vecOrigin", origin);
-	TE_WriteNum("m_nModelIndex", cached_mdl);
+	TE_WriteNum("m_nModelIndex", i_cached_model_index);
 	TE_Send(dongclients, numClients, 0.0);
-	//PrintToConsole(client, "Spawned at: %f %f %f for model index: %d", origin[0], origin[1], origin[2], cached_mdl);
+	//PrintToConsole(client, "Spawned at: %f %f %f for model index: %d", origin[0], origin[1], origin[2], i_cached_model_index);
 	return Plugin_Handled;
 }
 
@@ -1311,4 +1371,63 @@ UpdatePlayerRankXP(int client, int xp)
 		rank = 4; // Lieutenant
 
 	SetEntProp(client, Prop_Send, "m_iRank", rank);
+}
+
+
+
+//==================================
+//			Props UTILS
+//==================================
+
+
+int SimpleCreatePropPhysicsOverride(const char[] model_pathname, int health)
+{
+
+	new EntIndex = CreateEntityByName("prop_physics_override");
+
+
+	if (EntIndex != -1 && IsValidEntity(EntIndex))
+	{
+		if(!IsModelPrecached(model_pathname))
+		{
+			PrecacheModel(model_pathname);
+		}
+
+		//SetEntityModel(EntIndex, model_pathname);   <-- this doesn't work, it spawns at 0 0 0 no matter what!
+		//SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);   // 4 should be OK, but it's set to 0 instead? <-- 1073741824 now don't collide with players, but ignore collisions altogether
+		SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 11);   //2, changed to 11 so that they collide bewteen each other, 11 = weapon
+		SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);   // Do I need to change this to 9218?????  <- doesn't work, we need to try with prop_multiplayer
+		SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  //16 is suggested, ghost is 136!??     <- doesn't work, we need to try with prop_multiplayer
+
+		//int health=150
+		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);  // Prop_Send didn't work but this works!
+		SetEntProp(EntIndex, Prop_Data, "m_iMaxHealth", health, 1);
+
+		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 1.0);  // doesn't seem to do anything?
+		SetEntityGravity(EntIndex, 0.5); 						// (default = 1.0, half = 0.5, double = 2.0)
+
+		SetEntPropFloat(EntIndex, Prop_Data, "m_massScale", 1.0);  //FIXME!
+		DispatchKeyValue(EntIndex, "massScale", "1.0");
+		DispatchKeyValue(EntIndex, "physdamagescale", "1.0");  // FIXME! not sure if it works
+
+		DispatchKeyValue(EntIndex, "targetname", "test");
+		DispatchKeyValue(EntIndex, "model", model_pathname);     //does the same as SetEntityModel but works better! can teleport!?
+		//DispatchKeyValue(EntIndex, "CCollisionProperty", "2");
+		//DispatchKeyValueFloat(EntIndex, "solid", 2.0);  //remettre 2.0 !
+		//DispatchKeyValue(EntIndex, "Solid", "6");    // might need to disable this one (unnecessary?)
+		DispatchKeyValue(EntIndex, "inertiaScale", "1.0");
+
+		SetEntityMoveType(EntIndex, MOVETYPE_VPHYSICS);   //MOVETYPE_VPHYSICS seems oK, doesn't seem to change anything
+
+		//DispatchKeyValueVector(EntIndex, "Origin", PropStartOrigin); // works!
+		//DispatchKeyValueVector(EntIndex, "Angles", ClientEyeAngles); // works!
+		//DispatchKeyValueVector(EntIndex, "basevelocity", clienteyeposition);
+		DispatchKeyValue(EntIndex, "physdamagescale", "0.1");   // works! positive value = breaks when falling
+		DispatchKeyValue(EntIndex, "friction", "1.0");
+		DispatchKeyValue(EntIndex, "gravity", "0.2");
+		//TeleportEntity(EntIndex, ClientOrigin, NULL_VECTOR, NULL_VECTOR);
+		//DispatchSpawn(EntIndex);
+
+	}
+	return EntIndex;
 }

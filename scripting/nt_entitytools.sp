@@ -6,6 +6,8 @@
 #pragma semicolon 1
 #define PLUGIN_VERSION "20190924"
 
+#define DEBUG 1
+
 Handle g_cvar_adminonly, g_cvar_enabled = INVALID_HANDLE;
 
 public Plugin:myinfo =
@@ -78,12 +80,12 @@ public Action CommandPropCreatePhysicsOverride(int client, int args)
 		new String:arg2[10];
 		GetCmdArg(2, arg2, sizeof(arg2));
 
-		CreatePropPhysicsOverride(client, arg1, StringToInt(arg2));
+		CreatePropPhysicsOverride_AtClientPos(client, arg1, StringToInt(arg2));
 		return Plugin_Handled;
 	}
 	if(args == 1)
 	{
-		CreatePropPhysicsOverride(client, arg1, 100); // we default to 100 health points if none is entered
+		CreatePropPhysicsOverride_AtClientPos(client, arg1, 100); // we default to 100 health points if none is entered
 		return Plugin_Handled;
 	}
 	return Plugin_Handled;
@@ -181,13 +183,14 @@ public Action CommandPropCreatePhysicsOverrideVector(int client, int args)
 
 		SetEntityMoveType(EntIndex, MOVETYPE_VPHYSICS);   //MOVETYPE_VPHYSICS seems oK, doesn't seem to change anything
 
-/*		PrintToServer("PropStartOrigin: %f %f %f", PropStartOrigin[0], PropStartOrigin[1], PropStartOrigin[2]);
+		#if DEBUG
+		PrintToServer("PropStartOrigin: %f %f %f", PropStartOrigin[0], PropStartOrigin[1], PropStartOrigin[2]);
 		PrintToServer("client origin: %f %f %f", ClientOrigin[0], ClientOrigin[1], ClientOrigin[2]);
 		PrintToServer("GetAngleVectors: %f %f %f", ClientEyeAngles[0], ClientEyeAngles[1], ClientEyeAngles[2]);
 		PrintToServer("clientabsangle: %f %f %f", clientabsangle[0], clientabsangle[1], clientabsangle[2]);
 		PrintToServer("ClientEyeAngles: %f %f %f", ClientEyeAngles[0], ClientEyeAngles[1], ClientEyeAngles[2]);
 		PrintToServer("propangles: %f %f %f", propangles[0], propangles[1], propangles[2]);
-*/
+		#endif
 
 		new Float:vAngles[3], Float:vOrigin[3], Float:pos[3];
 
@@ -245,12 +248,12 @@ public Action CommandCreatePropDynamicOverride(int client, int args)
 		new String:arg2[10];
 		GetCmdArg(2, arg2, sizeof(arg2));
 
-		CreatePropDynamicOverride(client, arg1, StringToInt(arg2));
+		CreatePropDynamicOverride_AtClientPos(client, arg1, StringToInt(arg2));
 		return Plugin_Handled;
 	}
 	if(args == 1)
 	{
-		CreatePropDynamicOverride(client, arg1, 100); // we default to 100 health points if none is entered
+		CreatePropDynamicOverride_AtClientPos(client, arg1, 100); // we default to 100 health points if none is entered
 		return Plugin_Handled;
 	}
 	return Plugin_Handled;
@@ -640,13 +643,14 @@ public Action:CommandPropCreateDynamicOverride(int client, int args)  // not use
 
 //		SetEntityMoveType(EntIndex, MOVETYPE_NOCLIP);   //MOVETYPE_VPHYSICS seems oK, doesn't seem to change anything
 
-/*		PrintToServer("PropStartOrigin: %f %f %f", PropStartOrigin[0], PropStartOrigin[1], PropStartOrigin[2]);
+		#if DEBUG
+		PrintToServer("PropStartOrigin: %f %f %f", PropStartOrigin[0], PropStartOrigin[1], PropStartOrigin[2]);
 		PrintToServer("client origin: %f %f %f", ClientOrigin[0], ClientOrigin[1], ClientOrigin[2]);
 		PrintToServer("GetAngleVectors: %f %f %f", ClientEyeAngles[0], ClientEyeAngles[1], ClientEyeAngles[2]);
 		PrintToServer("clientabsangle: %f %f %f", clientabsangle[0], clientabsangle[1], clientabsangle[2]);
 		PrintToServer("ClientEyeAngles: %f %f %f", ClientEyeAngles[0], ClientEyeAngles[1], ClientEyeAngles[2]);
 		PrintToServer("propangles: %f %f %f", propangles[0], propangles[1], propangles[2]);
-*/
+		#endif
 
 
 

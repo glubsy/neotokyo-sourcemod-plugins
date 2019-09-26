@@ -1,6 +1,6 @@
 // This include is very messy and unstable, don't use it!
 
-stock CreatePropPhysicsOverride(int client, const String:modelname[], int health)
+stock int CreatePropPhysicsOverride_AtClientPos(int client, const String:modelname[], int health)
 {
 	new String:arg1[130];
 	GetCmdArg(1, arg1, sizeof(arg1));
@@ -120,11 +120,7 @@ stock CreatePropPhysicsOverride(int client, const String:modelname[], int health
 
 		}
 		CloseHandle(trace);
-
-
 */
-
-
 		DispatchKeyValueVector(EntIndex, "Origin", PropStartOrigin); // works!
 		DispatchKeyValueVector(EntIndex, "Angles", ClientEyeAngles); // works!
 		//DispatchKeyValueVector(EntIndex, "basevelocity", clienteyeposition);
@@ -141,7 +137,7 @@ stock CreatePropPhysicsOverride(int client, const String:modelname[], int health
 }
 
 
-stock int CreatePropDynamicOverride(int client, const String:modelname[], int health)
+stock int CreatePropDynamicOverride_AtClientPos(int client, const String:modelname[], int health)
 {
 	new EntIndex = CreateEntityByName("prop_dynamic_override");
 
@@ -150,7 +146,6 @@ stock int CreatePropDynamicOverride(int client, const String:modelname[], int he
 		PrecacheModel(modelname);
 	}
 
-	new String:name[130];
 	new Float:VecOrigin[3];
 	new Float:VecAngles[3];
 	new Float:normal[3];
@@ -186,8 +181,13 @@ stock int CreatePropDynamicOverride(int client, const String:modelname[], int he
 	RotateYaw(angles, degree);
 
 	DispatchKeyValueVector(EntIndex, "Angles", angles );  // rotates 180 degrees! -glub
-	GetClientName(client, name, sizeof(name));
-	//PrintToChatAll("%s spawned something", name);
+
+	// #if DEBUG
+	// new String:name[130];
+	// GetClientName(client, name, sizeof(name));
+	// PrintToChatAll("%s spawned a %s.", name, GetEntityClassname(EntIndex));
+	// #endif
+
 	return EntIndex;
 }
 
