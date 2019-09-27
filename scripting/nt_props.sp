@@ -16,6 +16,16 @@ bool gb_PausePropSpawning;
 bool gb_hashadhisd[MAXPLAYERS+1];
 int AttachmentEnt[MAXPLAYERS+1] = {-1,...};
 
+// [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
+new g_RemainingCreds[MAXPLAYERS+1][3];
+#define VIRT_CRED 0
+#define SCORE_CRED 1
+#define MAX_CRED 2
+
+new g_propindex_d[MAXPLAYERS+1]; // holds the last spawned entity by client
+new g_precachedModels[10];
+new g_optedout[MAXPLAYERS+1];
+
 // WARNING: the custom files require the sm_downloader plugin to force clients to download them
 // otherwise, have to add all custom files to downloads table ourselves with AddFileToDownloadsTable()
 new const String:gs_dongs[][] = {
@@ -25,7 +35,7 @@ new const String:gs_dongs[][] = {
 	"models/d/d_g02.mdl", //gigantic
 	"models/d/d_mh02.mdl" }; //megahuge
 // Prices: scale 1= 1 creds, 2= 3 creds, 3= 6 creds, 4= 8 creds, 5= 10 creds
-new const g_DongPropPrice[] = { 1, 3, 6, 8, 10 };
+new const g_DongPropPrice[] = { 1, 6, 9, 13, 20 };
 
 new const String:gs_allowed_physics_models[][] = {
 	"models/nt/a_lil_tiger.mdl",
@@ -50,16 +60,6 @@ enum FireworksPropType {
 	TE_BREAKMODEL,
 	REGULAR_PHYSICS,
 };
-
-// [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
-new g_RemainingCreds[MAXPLAYERS+1][3];
-#define VIRT_CRED 0
-#define SCORE_CRED 1
-#define MAX_CRED 2
-
-new g_propindex_d[MAXPLAYERS+1]; // holds the last spawned entity by client
-new g_precachedModels[10];
-new g_prefs_nowantprops[MAXPLAYERS+1];
 
 #define DEBUG 1
 
@@ -154,7 +154,7 @@ public OnClientPostAdminCheck(int client)
 {
 	if(!GetConVarBool(g_cvar_props_enabled))
 	{
-		//g_prefs_nowantprops[client] = false;
+		//g_optedout[client] = false;
 		return;
 	}
 
@@ -170,7 +170,18 @@ public OnClientPostAdminCheck(int client)
 public OnClientDisconnect(int client)
 {
 	if(GetConVarBool(g_cvar_props_enabled))
-		g_prefs_nowantprops[client] = false;
+		g_optedout[client] = false;
+}
+
+
+bool HasAnyOptedOut()
+{
+	for (int i = 1; i < MaxClients; i++)
+	{
+		if (g_optedout[client])
+			return true;
+	}
+	return false;
 }
 
 
@@ -181,7 +192,7 @@ ProcessCookies(int client)
 
 	if(!FindClientCookie("no-props-plz"))
 	{
-		g_prefs_nowantprops[client] = false;
+		g_optedout[client] = false;
 		CreateTimer(10.0, DisplayNotification, client);
 		return;
 	}
@@ -191,12 +202,12 @@ ProcessCookies(int client)
 
 	if (StrEqual(cookie, "penabled"))
 	{
-		g_prefs_nowantprops[client] = false;
+		g_optedout[client] = false;
 		return;
 	}
 	else if (StrEqual(cookie, "pdisabled"))
 	{
-		g_prefs_nowantprops[client] = true;
+		g_optedout[client] = true;
 		return;
 	}
 	return;
@@ -207,7 +218,7 @@ public Action DisplayNotification(Handle timer, int client)
 {
 	if(client > 0 && IsClientConnected(client) && IsClientInGame(client))
 	{
-		if(!g_prefs_nowantprops[client])
+		if(!g_optedout[client])
 		{
 			PrintToChat(client, 	"[sm_props] You can toggle seeing custom props completely by typing !props_nothx");
 			PrintToConsole(client, 	"\n[sm_props] You can toggle seeing custom props completely by typing sm_props_nothx\n");
@@ -226,7 +237,7 @@ public Action Command_Hate_Props_Toggle(int client, int args)
 
 	if(!FindClientCookie("no-props-plz")) // this might not be working, REMOVE
 	{
-		g_prefs_nowantprops[client] = true;
+		g_optedout[client] = true;
 		SetClientCookie(client, g_PropPrefCookie, "pdisabled");
 		ReplyToCommand(client, "You preference has been recorded. You do like props after all.");
 		PrintToConsole(client, "no found cookiz?");
@@ -239,14 +250,14 @@ public Action Command_Hate_Props_Toggle(int client, int args)
 	if (StrEqual(cookie, "pdisabled"))
 	{
 		SetClientCookie(client, g_PropPrefCookie, "penabled");
-		g_prefs_nowantprops[client] = false;
+		g_optedout[client] = false;
 		ReplyToCommand(client, "You preference has been recorded. You do like props after all.");
 		return Plugin_Handled;
 	}
 	else // was enabled, or not yet set
 	{
 		SetClientCookie(client, g_PropPrefCookie, "pdisabled");
-		g_prefs_nowantprops[client] = true;
+		g_optedout[client] = true;
 		ReplyToCommand(client, "You preference has been recorded. You no like props.");
 		ShowActivity2(client, "[sm_props] ", "%s opted out of sm_props models.", client);
 		LogAction(client, -1, "[sm_props] \"%L\" opted out of sm_props models.", client);
@@ -325,7 +336,8 @@ public OnEventShutdown(){
 }*/ //might be responsible for weapon disappearing, don't even remember why I used this in the first place
 
 
-public OnClientPutInServer(int client){
+public OnClientPutInServer(int client)
+{
 	if(client && !IsFakeClient(client))
 	{
 		// if we use score as credit, restore them
@@ -372,7 +384,7 @@ public void event_RoundStart(Handle event, const String:name[], bool dontBroadca
 
 public Action OnPlayerDeath(Handle event, const String:name[], bool dontBroadcast)
 {
-	// remove entities attached to victim if any
+	// attempt to remove entities attached to victim if any
 	new victim = GetClientOfUserId(GetEventInt(event, "victim"));
 	if (g_propindex_d[victim] != 0)
 	{
@@ -512,7 +524,7 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 	strcopy(renderfx, sizeof(renderfx), buffers[1]);
 	strcopy(movetype, sizeof(movetype), buffers[2]);
 	strcopy(ignite, sizeof(ignite), buffers[3]);
-	ReplyToCommand(client, "args: modelpath: %s, rest: %s %s %s", model_path, renderfx, movetype, ignite);
+	ReplyToCommand(client, "args: modelpath: %s, renderfx: %s, movetype %s, ignite: %s", model_path, renderfx, movetype, ignite);
 	//FIXME: unfinished business, check strings, use enums accordingly
 
 
@@ -593,6 +605,12 @@ public Action CommandPropSpawn(int client, int args)
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
+	if (HasAnyOptedOut())
+	{
+		ReplyToCommand(client, "Sorry, someone asked not to see props. Command disabled until they leave.")
+		return Plugin_Handled;
+	}
+
 	if (gb_PausePropSpawning)
 	{
 		ReplyToCommand(client, "Prop spawning is currently paused.");
@@ -624,7 +642,7 @@ public Action CommandPropSpawn(int client, int args)
 		{
 			PrintPluginCommandInfo(client);
 			decl String:s_args[PLATFORM_MAX_PATH];
-			//bypass credit system
+			//bypass credit system for DEBUG
 			GetCmdArgString(s_args, sizeof(s_args));
 			Prop_Spawn_Dispatch_Admin(client, s_args);
 			return Plugin_Handled;
@@ -842,7 +860,7 @@ bool Should_Use_TE()
 		if (!IsValidClient(client))
 			continue;
 
-		if (g_prefs_nowantprops[client]) // at least one person doesn't want to see them
+		if (g_optedout[client]) // at least one person doesn't want to see them
 		{
 			#if DEBUG
 			PrintToServer("Client %s has set pref to opt out of props. We should use TE!", GetClientOfUserId(client));
@@ -905,10 +923,9 @@ MakeParent(int client, int entity)
 
 }
 
-
 public void OnGhostPickUp(int client)
 {
-	if (GetConVarBool(g_cvar_props_onghostpickup))
+	if (GetConVarBool(g_cvar_props_onghostpickup) && !HasAnyOptedOut())
 	{
 		if (!IsValidClient(client))
 			return;
@@ -924,7 +941,7 @@ public void OnGhostPickUp(int client)
 
 public void OnGhostCapture(int client)
 {
-	if (GetConVarBool(g_cvar_props_oncapture))
+	if (GetConVarBool(g_cvar_props_oncapture) && !HasAnyOptedOut())
 	{
 		FireWorksOnPlayer(client, GetConVarBool(g_cvar_props_oncapture_nodongs) ? GetRandomInt(1,3) : GetRandomInt(0,3));
 	}
@@ -1119,6 +1136,12 @@ public Action Command_Strap_Dong(int client, int args)
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
+	if (HasAnyOptedOut())
+	{
+		ReplyToCommand(client, "Sorry, someone asked not to see custom props. Command disabled until they leave.")
+		return Plugin_Handled;
+	}
+
 	if (gb_PausePropSpawning)
 	{
 		ReplyToCommand(client, "Prop spawning is currently paused.");
@@ -1134,6 +1157,9 @@ public Action Command_Strap_Dong(int client, int args)
 	}
 	else if (strcmp(arg, "team") == 0)
 	{
+		if (!IsAdmin(client))
+			return Plugin_Handled;
+
 		int team = GetClientTeam(client);
 
 		for (int i = 1; i <= MaxClients; i++)
@@ -1148,6 +1174,9 @@ public Action Command_Strap_Dong(int client, int args)
 	}
 	else if (strcmp(arg, "all") == 0)
 	{
+		if (!IsAdmin(client))
+			return Plugin_Handled;
+
 		for (int i = 1; i <= MaxClients; i++)
 		{
 			if (!IsValidClient(i))
@@ -1333,7 +1362,7 @@ public Action Spawn_TE_Dong(int client, const char[] model_pathname, const char[
 
 bool WantsDong(int client)
 {
-	if (IsValidClient(client) && !g_prefs_nowantprops[client])
+	if (IsValidClient(client) && !g_optedout[client])
 		return true;
 	return false;
 }
