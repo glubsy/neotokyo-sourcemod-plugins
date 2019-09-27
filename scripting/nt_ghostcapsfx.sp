@@ -74,6 +74,8 @@ public Plugin myinfo =
 	url = "https://github.com/glubsy"
 };
 
+//FIXME: ghost doesn't explode when carried AND not currently primary weapon AND neo_restart_this 1 (probably not really important)
+
 public void OnPluginStart()
 {
 	convar_ghostexplodes = CreateConVar("nt_ghostexplodes", "1", "Ghost explodes on removal", FCVAR_SPONLY, true, 0.0, true, 1.0);
@@ -92,6 +94,7 @@ public void OnPluginStart()
 	if(GetConVarFloat(convar_nt_ghostcap_version) < 1.70000000)
 		ThrowError("[nt_ghostcapsfx] nt_ghostcap plugin is outdated (version is %f and should be at least 1.6)! Aborting.", GetConVarFloat(convar_nt_ghostcap_version));
 	
+	// currently we need doublecap to remove the ghost properly and stuff
 	if(convar_nt_doublecap_version == INVALID_HANDLE)
 		ThrowError("[nt_ghostcapsfx] Couldn't find nt_doublecap plugin. Wrong version? Aborting.");
 	// We need the version of nt_doublecap where the ghost is removed with RemoveEdict(), not AcceptEntityInput() otherwise they will crash the server!
@@ -550,6 +553,10 @@ public void OnEntityDestroyed(int entity)
 
 void Explode(int entity)
 {
+	#if DEBUG
+	PrintToServer("Explode() called!");
+	#endif
+
 	int carrier = GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity");
 
 	if(MaxClients > carrier > 0)
@@ -575,6 +582,9 @@ void Explode(int entity)
 
 	if ( DispatchSpawn(explosion) )
 	{
+		#if DEBUG
+		PrintToServer("DispatchSpawn(explosion) true");
+		#endif
 		EmitExplosionSound(explosion, pos);
 		SetEntPropEnt(explosion, Prop_Data, "m_hOwnerEntity", carrier);
 		ActivateEntity(explosion);

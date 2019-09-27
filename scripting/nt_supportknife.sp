@@ -3,11 +3,13 @@
 #include <sdkhooks>
 #include <smlib>
 #include <neotokyo>
-#define DEBUG 0
+#define DEBUG 1
 
 bool IsClientSupport[MAXPLAYERS+1]
 Handle g_CvarWeaponEconomyCheck = INVALID_HANDLE;
 Handle g_CvarVIPModeCheck = INVALID_HANDLE;
+
+//TODO: fix knife spawning when selecting "auto-select team" (line 80)
 
 public Plugin:myinfo = 
 {
@@ -75,7 +77,7 @@ public event_PlayerSpawn(Handle:event, const String:name[], bool:dontBroadcast)
 {
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
 
-	if (!IsClientInGame(client) && !IsPlayerAlive(client))
+	if (!IsClientInGame(client) && !IsPlayerAlive(client)) // FIXME: player is considered alive when changing team -> spawning, which spawns a knife!
 		return;
 	if(IsPlayerSupport(client) == true)
 		IsClientSupport[client] = true;
@@ -216,7 +218,7 @@ public int SwitchToWeaponSlot(int client, int slot)
 			//EquipPlayerWeapon(client, currentweapon);	 THIS CRASHES THE SERVER on player death!
 			
 			SetEntPropEnt(client, Prop_Send, "m_hActiveWeapon", currentweapon);  //Works well enough, but no animation.
-			ChangeEdictState(client, FindDataMapOffs(client, "m_hActiveWeapon"));
+			ChangeEdictState(client, FindDataMapInfo(client, "m_hActiveWeapon"));
 			
 			//Client_SetActiveWeapon(client, currentweapon);	//smlib testing: works the same as above.
 			//Client_EquipWeapon(client, currentweapon, true);	//smlib testing: CRASHES as it uses EquipPlayerWeapon, also if the primary wpn was dropped on floor, it's given back to owner! (always same wpn index)

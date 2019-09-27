@@ -14,6 +14,7 @@ Handle g_PropPrefCookie = INVALID_HANDLE; // handle to client preferences
 Handle g_cvar_props_oncapture, g_cvar_props_onghostpickup, g_cvar_props_oncapture_nodongs = INVALID_HANDLE;
 bool gb_PausePropSpawning;
 bool gb_hashadhisd[MAXPLAYERS+1];
+int AttachmentEnt[MAXPLAYERS+1] = {-1,...};
 
 // WARNING: the custom files require the sm_downloader plugin to force clients to download them
 // otherwise, have to add all custom files to downloads table ourselves with AddFileToDownloadsTable()
@@ -24,7 +25,7 @@ new const String:gs_dongs[][] = {
 	"models/d/d_g02.mdl", //gigantic
 	"models/d/d_mh02.mdl" }; //megahuge
 // Prices: scale 1= 1 creds, 2= 3 creds, 3= 6 creds, 4= 8 creds, 5= 10 creds
-new const g_DongPropPrice[] = { 0, 1, 3, 6, 8, 10 };
+new const g_DongPropPrice[] = { 1, 3, 6, 8, 10 };
 
 new const String:gs_allowed_physics_models[][] = {
 	"models/nt/a_lil_tiger.mdl",
@@ -81,7 +82,9 @@ public Plugin:myinfo =
 // KNOWN ISSUES:
 // -> AFAIK the TE cannot be destroyed by timer, so client preference is very limited, ie. if someone asks for a big scale model that is supposed to be auto-removed
 //    we can't use a TE because they don't get affected by timers, so regular physics_prop take precedence. Same for dynamic props, cannot have them as TempEnts.
-
+//
+// FIXME: restore score credit properly on reconnect after nt_savescore restored it (maybe need a timer)
+// FIXME: destroy strapped prop when client dies
 
 public OnPluginStart()
 {
@@ -369,6 +372,14 @@ public void event_RoundStart(Handle event, const String:name[], bool dontBroadca
 
 public Action OnPlayerDeath(Handle event, const String:name[], bool dontBroadcast)
 {
+	// remove entities attached to victim if any
+	new victim = GetClientOfUserId(GetEventInt(event, "victim"));
+	if (g_propindex_d[victim] != 0)
+	{
+		AcceptEntityInput(g_propindex_d[victim], "ClearParent"); // TODO: TEST THIS!
+		g_propindex_d[victim] = 0;
+	}
+
 	// keep track of the player score in our credits array
 	new attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
 	if (!IsValidClient(attacker))
@@ -508,8 +519,12 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 	g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, model_path, 50);
 
 	// FIXME: find a way to make bullets go through physic_props
-	if (!strcmp(model_path, gs_allowed_physics_models[2]) || !strcmp(model_path, gs_allowed_physics_models[3]))
+	if (strcmp(model_path, gs_allowed_physics_models[2]) == 0 || strcmp(model_path, gs_allowed_physics_models[3]) == 0)
 	{
+		#if DEBUG
+		PrintToConsole(client, "Called CreatePhysicsOverride_AtclientPos for admin");
+		#endif
+
 		SetEntityRenderFx(g_propindex_d[client], RENDERFX_DISTORT); // works, only good for team logos
 		AcceptEntityInput(g_propindex_d[client], "DisableShadow"); // works
 		// SetEntProp(g_propindex_d[client], Prop_Send, "m_usSolidFlags", 136);
@@ -672,65 +687,65 @@ public DongDispatch(int client, int scale, int bstatic)
 {
 	switch(scale)
 	{
+		case 0:
+		{
+			if (!bstatic)
+			{
+				if (Should_Use_TE()) // use TempEnts to avoid showing to people who don't like it
+					Spawn_TE_Dong(client, gs_dongs[scale], gs_PropType[TE_PHYSICS]);
+				else
+				{
+					g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 50);
+				}
+			}
+			else
+				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 50);
+		}
 		case 1:
 		{
 			if (!bstatic)
 			{
 				if (Should_Use_TE()) // use TempEnts to avoid showing to people who don't like it
-					Spawn_TE_Dong(client, gs_dongs[scale-1], gs_PropType[TE_PHYSICS]);
+					Spawn_TE_Dong(client, gs_dongs[scale], gs_PropType[TE_PHYSICS]);
 				else
 				{
-					g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale-1], 50);
-				}
-			}
-			else
-				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale-1], 50);
-		}
-		case 2:
-		{
-			if (!bstatic)
-			{
-				if (Should_Use_TE()) // use TempEnts to avoid showing to people who don't like it
-					Spawn_TE_Dong(client, gs_dongs[scale-1], gs_PropType[TE_PHYSICS]);
-				else
-				{
-					g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale-1], 120);
+					g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 120);
 					CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
 				}
 			}
 			else
 			{
-				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale-1], 120);
+				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 120);
 				CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
 			}
+		}
+		case 2:
+		{
+			if (!bstatic)
+				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 180);
+			else
+				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 180);
+
+			// remove the prop when it's touched by a player
+			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
+			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
 		}
 		case 3:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale-1], 180);
+				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 200);
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale-1], 180);
+				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 200);
 
-			// remove the prop when it's touched by a player
 			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
 			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
 		}
 		case 4:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale-1], 200);
+				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 250);
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale-1], 200);
-
-			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
-			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
-		}
-		case 5:
-		{
-			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale-1], 250);
-			else
-				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale-1], 250);
+				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 250);
 
 			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
 			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
@@ -790,13 +805,15 @@ public Action Command_Dong_Spawn(int client, int args)
 	GetCmdArg(1, model_scale, sizeof(model_scale));
 	GetCmdArg(2, model_property, sizeof(model_property));
 
-	//new iModelScale = trim_quotes(model_scale);  returns 0 ?
 	int iModelScale = (strlen(model_scale) > 0) ? StringToInt(model_scale) : 1;
 	if (iModelScale > 5)
-		iModelScale = 5;
-	int iModelProperty = (strlen(model_property) > 0) ? StringToInt(model_property) : 0;
+		iModelScale = 4;
+	else if (iModelScale <= 0)
+		iModelScale = 0;
+	else
+		iModelScale--;
 
-	//PrintToConsole(client, "model_scale %s model_property %d iModelScale %d", model_scale, model_propertynum, num);
+	int iModelProperty = (strlen(model_property) > 0) ? StringToInt(model_property) : 0;
 
 	if (hasEnoughCredits(client, g_DongPropPrice[iModelScale]))
 	{
@@ -868,20 +885,20 @@ MakeParent(int client, int entity)
 	float angle[3];
 	GetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin);
 	GetEntPropVector(entity, Prop_Send, "m_angRotation", angle);
+	DispatchSpawn(entity);
+	origin[0] += 3.0;
+	origin[1] += 1.0;
+	origin[2] += 2.0;
 
-	origin[0] += 0.0;
-	origin[1] += 0.0;
-	origin[2] += 0.0;
-
-	angle[0] += 0.0;
-	angle[1] += 3.0;
-	angle[2] += 0.3;
+	angle[0] -= 0.0;
+	angle[1] -= 0.0;
+	angle[2] += 0.0;
 	SetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin); // these might not be working actually
 	SetEntPropVector(entity, Prop_Send, "m_angRotation", angle);
 
 	//DispatchKeyValueVector(entity, "Origin", origin);    //FIX testing offset coordinates, remove! -glub
 	//DispatchKeyValueVector(entity, "Angles", angle);
-	DispatchSpawn(entity);
+
 	char name[255];
 	GetClientName(client, name, sizeof(name));
 	PrintToConsole(client, "Made parent: at origin: %f %f %f; angles: %f %f %f for client %s", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2], name);
@@ -1154,6 +1171,9 @@ public void SpawnAndStrapDongToSelf(int client)
 	{
 		g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[0], 5);
 		MakeParent(client, g_propindex_d[client]);
+		#if DEBUG < 1
+		return; // skip limitation to only one per round
+		#endif 
 		gb_hashadhisd[client] = true;
 	}
 }
