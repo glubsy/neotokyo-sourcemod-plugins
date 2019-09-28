@@ -239,8 +239,10 @@ public Action Command_Hate_Props_Toggle(int client, int args)
 	{
 		g_optedout[client] = true;
 		SetClientCookie(client, g_PropPrefCookie, "pdisabled");
-		ReplyToCommand(client, "You preference has been recorded. You do like props after all.");
-		PrintToConsole(client, "no found cookiz?");
+		ReplyToCommand(client, "Your preference has been recorded. You do like props after all.");
+		#if DEBUG
+		PrintToConsole(client, "Cookie not found?");
+		#endif
 		return Plugin_Handled;
 	}
 
@@ -251,14 +253,14 @@ public Action Command_Hate_Props_Toggle(int client, int args)
 	{
 		SetClientCookie(client, g_PropPrefCookie, "penabled");
 		g_optedout[client] = false;
-		ReplyToCommand(client, "You preference has been recorded. You do like props after all.");
+		ReplyToCommand(client, "Your preference has been recorded. You do like props after all.");
 		return Plugin_Handled;
 	}
 	else // was enabled, or not yet set
 	{
 		SetClientCookie(client, g_PropPrefCookie, "pdisabled");
 		g_optedout[client] = true;
-		ReplyToCommand(client, "You preference has been recorded. You no like props.");
+		ReplyToCommand(client, "Your preference has been recorded. You no like props.");
 		ShowActivity2(client, "[sm_props] ", "%s opted out of sm_props models.", client);
 		LogAction(client, -1, "[sm_props] \"%L\" opted out of sm_props models.", client);
 		return Plugin_Handled;
