@@ -178,7 +178,7 @@ bool HasAnyOptedOut()
 {
 	for (int i = 1; i < MaxClients; i++)
 	{
-		if (g_optedout[client])
+		if (g_optedout[i] && IsValidClient(i))
 			return true;
 	}
 	return false;
@@ -607,7 +607,7 @@ public Action CommandPropSpawn(int client, int args)
 
 	if (HasAnyOptedOut())
 	{
-		ReplyToCommand(client, "Sorry, someone asked not to see props. Command disabled until they leave.")
+		ReplyToCommand(client, "Sorry, someone requested this command be disabled temporarily.");
 		return Plugin_Handled;
 	}
 
@@ -786,11 +786,15 @@ public Action Command_Dong_Spawn(int client, int args)
 		ReplyToCommand(client, "Prop spawning is currently paused.");
 		return Plugin_Handled;
 	}
-
-	if (!GetConVarBool(g_cvar_props_enabled))
+	else if (!GetConVarBool(g_cvar_props_enabled))
 	{
 		PrintToConsole(client, "This command is currently disabled. Ask an admin to enable with sm_props_enabled");
 		PrintToChat(client, "This command is currently disabled. Ask an admin to enable with sm_props_enabled");
+		return Plugin_Handled;
+	}
+	else if (HasAnyOptedOut())
+	{
+		ReplyToCommand(client, "Sorry, someone requested this command be disabled temporarily.");
 		return Plugin_Handled;
 	}
 
@@ -1138,7 +1142,7 @@ public Action Command_Strap_Dong(int client, int args)
 
 	if (HasAnyOptedOut())
 	{
-		ReplyToCommand(client, "Sorry, someone asked not to see custom props. Command disabled until they leave.")
+		ReplyToCommand(client, "Sorry, someone requested this command be disabled temporarily.");
 		return Plugin_Handled;
 	}
 

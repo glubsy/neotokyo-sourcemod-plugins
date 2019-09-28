@@ -75,6 +75,7 @@ public Plugin myinfo =
 };
 
 //FIXME: ghost doesn't explode when carried AND not currently primary weapon AND neo_restart_this 1 (probably not really important)
+//TODO: make clientpref to disable
 
 public void OnPluginStart()
 {

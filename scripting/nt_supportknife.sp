@@ -3,7 +3,7 @@
 #include <sdkhooks>
 #include <smlib>
 #include <neotokyo>
-#define DEBUG 1
+#define DEBUG 0
 
 bool IsClientSupport[MAXPLAYERS+1]
 Handle g_CvarWeaponEconomyCheck = INVALID_HANDLE;
@@ -174,7 +174,7 @@ public Action timer_SwitchToWeaponSlot(Handle timer, client)
 			SwitchToLastWeapon(client);
 
 		#if DEBUG > 0
-		PrintToChatAll("[SUPPORTKNIFE] client %N attempted switch back weapon", client);
+		PrintToServer("[SUPPORTKNIFE] client %N attempted switch back weapon", client);
 		#endif
 	}
 	
@@ -224,7 +224,6 @@ public int SwitchToWeaponSlot(int client, int slot)
 			//Client_EquipWeapon(client, currentweapon, true);	//smlib testing: CRASHES as it uses EquipPlayerWeapon, also if the primary wpn was dropped on floor, it's given back to owner! (always same wpn index)
 			
 			#if DEBUG > 0
-			PrintToChatAll("[SUPPORTKNIFE] client %N forced switching to: slot %i, currentweapon: %s %i", client, slot, classname, currentweapon);
 			PrintToServer("[SUPPORTKNIFE] client %N forced switching to: slot %i, currentweapon: %s %i", client, slot, classname, currentweapon);
 			#endif
 			return currentweapon;
