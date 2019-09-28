@@ -12,6 +12,8 @@ elif [[ "$1" -eq "19" ]]; then
 elif [[ "$1" -eq "110" ]]; then
 	TARGETVER="1.10.0-git6445-windows";
 	SPVER="SPVER=110";
+else
+	echo "Asked wrong version";
 fi
 
 SMPATH=$DESKTOP/neotokyo/sourcemod-$TARGETVER

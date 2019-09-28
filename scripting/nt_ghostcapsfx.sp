@@ -1,6 +1,7 @@
 #include <sourcemod>
 #include <sdktools>
 #include <neotokyo>
+#include <clientprefs>
 #pragma semicolon 1
 #pragma newdecls required
 #define DEBUG 0
@@ -8,7 +9,7 @@
 #define MAX_ANNOUNCER_OCCURENCES 6
 #define MAX_FUZZ_OCCURENCES 3
 
-#define PLUGIN_VERSION	"0.22"
+#define PLUGIN_VERSION	"0.23"
 
 int ghost, ghostCarrier, ghostCarrierTeam;
 bool g_bGhostIsCaptured;
@@ -17,15 +18,16 @@ int g_iTickCount = 95;
 bool g_bGhostIsHeld;
 float g_fFuzzRepeatDelay = 0.0;
 
-Handle convar_ghostexplodes = INVALID_HANDLE;
-Handle convar_ghostexplosiondamages = INVALID_HANDLE;
-Handle convar_roundtimelimit = INVALID_HANDLE;
+Handle convar_ghostexplodes, convar_ghostexplosiondamages, convar_roundtimelimit,
+convar_nt_doublecap_version, convar_nt_ghostcap_version, convar_ghost_sounds_enabled = INVALID_HANDLE;
 Handle GhostTimer[MAX_SOUND_OCCURENCES] = { INVALID_HANDLE, ...};
 Handle AnnouncerTimer[MAX_ANNOUNCER_OCCURENCES] = { INVALID_HANDLE, ...};
 Handle FuzzTimer[MAX_FUZZ_OCCURENCES] = { INVALID_HANDLE, ...};
 Handle TimerStarter[2] = { INVALID_HANDLE, ... };
-Handle convar_nt_doublecap_version = INVALID_HANDLE;
-Handle convar_nt_ghostcap_version = INVALID_HANDLE;
+Handle g_PropPrefCookie = INVALID_HANDLE; // handle to client preferences
+bool g_optedout[MAXPLAYERS+1];
+int g_soundsEnabledClient[MAXPLAYERS+1];
+int g_numClients;
 
 char g_sRadioChatterSoundEffect[][] =
 {
@@ -43,9 +45,9 @@ char g_sRadioChatterSoundEffect[][] =
 	"ambient/levels/prison/radio_random12.wav",
 	"ambient/levels/prison/radio_random13.wav",
 	"ambient/levels/prison/radio_random14.wav",
-	"ambient/levels/prison/radio_random15.wav"	
+	"ambient/levels/prison/radio_random15.wav"
 };
-char g_sSoundEffect[][] = 
+char g_sSoundEffect[][] =
 {
 	"weapons/cguard/charging.wav",
 	"weapons/stunstick/alyx_stunner1.wav",
@@ -79,22 +81,26 @@ public Plugin myinfo =
 
 public void OnPluginStart()
 {
+	convar_ghost_sounds_enabled = CreateConVar("nt_ghost_sounds_enabled", "1", "Ghost emits sounds when held and captured.", FCVAR_SPONLY, true, 0.0, true, 1.0);
 	convar_ghostexplodes = CreateConVar("nt_ghostexplodes", "1", "Ghost explodes on removal", FCVAR_SPONLY, true, 0.0, true, 1.0);
 	convar_ghostexplosiondamages = CreateConVar("nt_ghostexplosiondamages", "1", "Explosion from ghost damages players", FCVAR_SPONLY, true, 0.0, true, 1.0);
-	
-	
+
+
 	HookEvent("game_round_start", OnRoundStart);
-	
+
 	convar_roundtimelimit = FindConVar("neo_round_timelimit");
-	
+
 	convar_nt_doublecap_version = FindConVar("nt_doublecap_version");
 	convar_nt_ghostcap_version = FindConVar("sm_ntghostcap_version");
-	
+
+	RegConsoleCmd("sm_sounds_nothx", Command_Hate_Sounds_Toggle, "Toggle your preference to not hear custom ghost capture sound effect.");
+	g_PropPrefCookie = RegClientCookie("no-sounds-plz", "Asked for no ghost capture sound effects.", CookieAccess_Public);
+
 	if(convar_nt_ghostcap_version == INVALID_HANDLE)
 		ThrowError("[nt_ghostcapsfx] Couldn't find nt_ghostcap plugin. Wrong version? Aborting.");
 	if(GetConVarFloat(convar_nt_ghostcap_version) < 1.70000000)
 		ThrowError("[nt_ghostcapsfx] nt_ghostcap plugin is outdated (version is %f and should be at least 1.6)! Aborting.", GetConVarFloat(convar_nt_ghostcap_version));
-	
+
 	// currently we need doublecap to remove the ghost properly and stuff
 	if(convar_nt_doublecap_version == INVALID_HANDLE)
 		ThrowError("[nt_ghostcapsfx] Couldn't find nt_doublecap plugin. Wrong version? Aborting.");
@@ -116,27 +122,192 @@ public void OnConfigsExecuted()
 }
 
 
+//==================================
+//		Client preferences
+//==================================
+
+
+public void OnClientCookiesCached(int client)
+{
+	ProcessCookies(client);
+}
+
+
+public void OnClientPostAdminCheck(int client)
+{
+	if(!GetConVarBool(convar_ghost_sounds_enabled))
+	{
+		//g_optedout[client] = false;
+		return;
+	}
+
+	if (AreClientCookiesCached(client))
+	{
+		ProcessCookies(client);
+		//CreateTimer(120.0, DisplayNotification, client);
+		return;
+	}
+}
+
+
+public void OnClientDisconnect(int client)
+{
+	if(GetConVarBool(convar_ghost_sounds_enabled))
+	{
+		g_optedout[client] = false;
+		UpdateSoundEffectOptedOutArray();
+	}
+}
+
+
+void ProcessCookies(int client)
+{
+	if (!IsValidClient(client))
+		return;
+
+	if(!FindClientCookie("no-sounds-plz"))
+	{
+		g_optedout[client] = false;
+		UpdateSoundEffectOptedOutArray();
+
+		CreateTimer(60.0, DisplayNotification, client);
+		return;
+	}
+
+	char cookie[10];
+	GetClientCookie(client, g_PropPrefCookie, cookie, sizeof(cookie));
+
+	if (StrEqual(cookie, "senabled"))
+	{
+		g_optedout[client] = false;
+		UpdateSoundEffectOptedOutArray();
+		return;
+	}
+	else if (StrEqual(cookie, "sdisabled"))
+	{
+		g_optedout[client] = true;
+		UpdateSoundEffectOptedOutArray();
+		return;
+	}
+	return;
+}
+
+
+public Action DisplayNotification(Handle timer, int client)
+{
+	if(client > 0 && IsClientConnected(client) && IsClientInGame(client))
+	{
+		if(!g_optedout[client])
+		{
+			PrintToChat(client, 	"[sm_ghostcapsfx] You can toggle hearing ghost sound effects by typing !sounds_nothx");
+			PrintToConsole(client, 	"\n[sm_ghostcapsfx] You can toggle hearing ghost sound effects by typing sm_sounds_nothx\n");
+		}
+	}
+	return Plugin_Handled;
+}
+
+
+public Action Command_Hate_Sounds_Toggle(int client, int args)
+{
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+
+	if(!FindClientCookie("no-props-plz")) // this might not be working, REMOVE
+	{
+		g_optedout[client] = true;
+		SetClientCookie(client, g_PropPrefCookie, "sdisabled");
+		ReplyToCommand(client, "Your preference has been recorded. You don't like sounds.");
+		UpdateSoundEffectOptedOutArray();
+		return Plugin_Handled;
+	}
+
+	char cookie[10];
+	GetClientCookie(client, g_PropPrefCookie, cookie, sizeof(cookie));
+
+	if (StrEqual(cookie, "sdisabled"))
+	{
+		SetClientCookie(client, g_PropPrefCookie, "senabled");
+		g_optedout[client] = false;
+		ReplyToCommand(client, "Your preference has been recorded. You do like sounds after all.");
+		UpdateSoundEffectOptedOutArray();
+		return Plugin_Handled;
+	}
+	else // was enabled, or not yet set
+	{
+		SetClientCookie(client, g_PropPrefCookie, "sdisabled");
+		g_optedout[client] = true;
+		ReplyToCommand(client, "You preference has been recorded. You don't like sounds.");
+		UpdateSoundEffectOptedOutArray();
+		ShowActivity2(client, "[sm_ghostcapsfx] ", "%s opted out of sm_ghostcapsfx sounds.", client);
+		LogAction(client, -1, "[sm_ghostcapsfx] \"%L\" opted out of sm_ghostcapsfx sounds.", client);
+		return Plugin_Handled;
+	}
+}
+
+
+bool HasAnyoneOptedOut()
+{
+	for (int i = 1; i < MaxClients; i++)
+	{
+		if (g_optedout[i] && IsValidClient(i))
+			return true;
+	}
+	return false;
+}
+
+
+void UpdateSoundEffectOptedOutArray()
+{
+	int index = 0;
+	int arraySize = sizeof(g_soundsEnabledClient);
+
+	for (int thisClient = 1; thisClient <= MaxClients; thisClient++)
+	{
+		// Reached the max size of array
+		if (index == arraySize)
+			break;
+
+		if (IsValidClient(thisClient) && !HatesSounds(thisClient))
+		{
+			g_soundsEnabledClient[index++] = thisClient;
+		}
+	}
+
+	g_numClients = index;
+}
+
+
+bool HatesSounds(int client)
+{
+	if (IsValidClient(client) && !g_optedout[client])
+		return false;
+	return true;
+}
+
+
+
+
 public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
 	g_bGhostIsHeld = false;
 	g_fFuzzRepeatDelay = 0.0;
-	
+
 	if(!GetConVarBool(convar_ghostexplodes))
-		return; 
+		return;
 
 	g_bEndOfRound = false;
 	g_iTickCount = 95;
-	
+
 	for(int i = 0; i < MAX_SOUND_OCCURENCES; i++)
 	{
 		//killing all remaining timers for sound effects
 		if(GhostTimer[i] != INVALID_HANDLE)
 		{
 			KillTimer(GhostTimer[i]);
-			GhostTimer[i] = INVALID_HANDLE; 
+			GhostTimer[i] = INVALID_HANDLE;
 		}
 	}
-	
+
 	GhostTimer[0] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 3.8, timer_SoundEffect0, 0, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 	GhostTimer[1] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 33.0, timer_SoundEffect1, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //30 sec before timeout
 	GhostTimer[2] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 26.0, timer_SoundEffect1, 2, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //sparks
@@ -173,26 +344,13 @@ public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 public Action timer_SoundEffect0(Handle timer, int timernumber) //charging sound effect
 {
 	GhostTimer[timernumber] = INVALID_HANDLE;
-	
-	if(g_bGhostIsCaptured)
-		return Plugin_Stop;
-	
-	if(!IsValidEntity(ghost))
-	{
-		return Plugin_Stop;
-	}
-	
+
 	float vecOrigin[3];
-	int carrier = GetEntPropEnt(ghost, Prop_Data, "m_hOwnerEntity");
+	if (!SetupSoundEffect(vecOrigin))
+		return Plugin_Stop;
 
-	if(MaxClients > carrier > 0)
-		GetEntPropVector(carrier, Prop_Send, "m_vecOrigin", vecOrigin);
-	else
-		GetEntPropVector(ghost, Prop_Send, "m_vecOrigin", vecOrigin);
-	
-	vecOrigin[2] += 10;
+	g_bEndOfRound = true; //it's ok to hook entity destruction for a bit
 
-	g_bEndOfRound = true; //it's ok to hook entity destruction for a bit	
 	EmitSoundToAll(g_sSoundEffect[0], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.4, 100, -1, vecOrigin); //charging effect
 
 	return Plugin_Stop;
@@ -202,24 +360,10 @@ public Action timer_SoundEffect0(Handle timer, int timernumber) //charging sound
 public Action timer_SoundEffect1(Handle timer, int timernumber)  //sparks sound effect
 {
 	GhostTimer[timernumber] = INVALID_HANDLE;
-	
-	if(g_bGhostIsCaptured)
-		return Plugin_Stop;
-	
-	if(!IsValidEntity(ghost))
-	{
-		return Plugin_Stop;
-	}
-	
-	float vecOrigin[3];
-	int carrier = GetEntPropEnt(ghost, Prop_Data, "m_hOwnerEntity");
 
-	if(MaxClients > carrier > 0)
-		GetEntPropVector(carrier, Prop_Send, "m_vecOrigin", vecOrigin);
-	else
-		GetEntPropVector(ghost, Prop_Send, "m_vecOrigin", vecOrigin);
-	
-	vecOrigin[2] += 10;
+	float vecOrigin[3];
+	if (!SetupSoundEffect(vecOrigin))
+		return Plugin_Stop;
 
 	EmitSoundToAll(g_sSoundEffect[GetRandomInt(3,5)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, GetRandomInt(90, 110), -1, vecOrigin); //sparks
 
@@ -230,24 +374,10 @@ public Action timer_SoundEffect1(Handle timer, int timernumber)  //sparks sound 
 public Action timer_SoundEffect2(Handle timer, int timernumber) //grenade tick sound effect
 {
 	GhostTimer[timernumber] = INVALID_HANDLE;
-	
-	if(g_bGhostIsCaptured)
-		return Plugin_Stop;
-	
-	if(!IsValidEntity(ghost))
-	{
-		return Plugin_Stop;
-	}
-	
-	float vecOrigin[3];
-	int carrier = GetEntPropEnt(ghost, Prop_Data, "m_hOwnerEntity");
 
-	if(MaxClients > carrier > 0)
-		GetEntPropVector(carrier, Prop_Send, "m_vecOrigin", vecOrigin);
-	else
-		GetEntPropVector(ghost, Prop_Send, "m_vecOrigin", vecOrigin);
-	
-	vecOrigin[2] += 10;
+	float vecOrigin[3];
+	if (!SetupSoundEffect(vecOrigin))
+		return Plugin_Stop;
 
 	EmitSoundToAll(g_sSoundEffect[6], SOUND_FROM_WORLD, SNDCHAN_AUTO, 120, SND_NOFLAGS, SNDVOL_NORMAL, g_iTickCount, -1, vecOrigin); //ticks
 	g_iTickCount += 5;
@@ -255,33 +385,43 @@ public Action timer_SoundEffect2(Handle timer, int timernumber) //grenade tick s
 	return Plugin_Stop;
 }
 
-public Action timer_SoundEffect3(Handle timer, int timernumber) //beeps countdown 
+
+public Action timer_SoundEffect3(Handle timer, int timernumber) //beeps countdown
 {
 	GhostTimer[timernumber] = INVALID_HANDLE;
-	
-	if(g_bGhostIsCaptured)
-		return Plugin_Stop;
-	
-	if(!IsValidEntity(ghost))
-	{
-		return Plugin_Stop;
-	}
-	
-	float vecOrigin[3];
-	int carrier = GetEntPropEnt(ghost, Prop_Data, "m_hOwnerEntity");
 
-	if(MaxClients > carrier > 0)
-		GetEntPropVector(carrier, Prop_Send, "m_vecOrigin", vecOrigin);
-	else
-		GetEntPropVector(ghost, Prop_Send, "m_vecOrigin", vecOrigin);
-	
-	vecOrigin[2] += 10;
+	float vecOrigin[3];
+	if (!SetupSoundEffect(vecOrigin))
+		return Plugin_Stop;
 
 	EmitSoundToAll(g_sSoundEffect[10], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.5, g_iTickCount, -1, vecOrigin); //beeps
 	g_iTickCount += 5;
 
 	return Plugin_Stop;
 }
+
+
+bool SetupSoundEffect(float[3] vecOrigin)
+{
+	if(g_bGhostIsCaptured)
+		return false;
+
+	if(!IsValidEntity(ghost))
+	{
+		return false;
+	}
+
+	int carrier = GetEntPropEnt(ghost, Prop_Data, "m_hOwnerEntity");
+
+	if(MaxClients > carrier > 0)
+		GetEntPropVector(carrier, Prop_Send, "m_vecOrigin", vecOrigin);
+	else
+		GetEntPropVector(ghost, Prop_Send, "m_vecOrigin", vecOrigin);
+
+	vecOrigin[2] += 10;
+	return true;
+}
+
 
 public void OnGhostSpawn(int entity)
 {
@@ -294,17 +434,17 @@ public void OnGhostCapture(int client)
 {
 	g_bGhostIsCaptured = true;
 	g_bGhostIsHeld = false;
-	
+
 	EmmitCapSound(client);
-	
+
 	CreateTimer(6.1, timer_EmitRadioChatterSound, client);
 	CreateTimer(6.4, timer_EmitRadioChatterSound, client);
 	CreateTimer(6.7, timer_EmitRadioChatterSound, client);
 	CreateTimer(6.9, timer_EmitRadioChatterSound, client);
 	CreateTimer(7.3, timer_EmitRadioChatterSound, client);
 	CreateTimer(7.6, timer_EmitRadioChatterSound, client);
-	
-	
+
+
 	CreateTimer(1.0, timer_DoSparks, client);
 	CreateTimer(1.5, timer_DoSparks, client);
 	CreateTimer(2.0, timer_DoSparks, client);
@@ -322,27 +462,27 @@ public void OnGhostCapture(int client)
 public void OnGhostPickUp(int client)
 {
 	g_bGhostIsHeld = true;
-	
+
 	ghostCarrier = client;
 
 	ghostCarrierTeam = GetClientTeam(ghostCarrier);
-	
+
 
 	TimerStarter[0] = CreateTimer(0.0, timer_CreateAnnouncerTimers, 0, TIMER_FLAG_NO_MAPCHANGE);
 	TimerStarter[1] = CreateTimer(g_fFuzzRepeatDelay + 15.0, timer_CreateFuzzTimers, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	
+
 	g_fFuzzRepeatDelay = 10.0;
-	
+
 	if(TimerStarter[1] != INVALID_HANDLE)
 		TriggerTimer(TimerStarter[1]);
 }
 
 public void OnGhostDrop(int client)
 {
-	g_bGhostIsHeld = false; 
+	g_bGhostIsHeld = false;
 	ghostCarrier = -1;
 	g_fFuzzRepeatDelay = 0.0;
-	
+
 	for(int i; i < sizeof(AnnouncerTimer); i++)
 	{
 		if(AnnouncerTimer[i] != INVALID_HANDLE)
@@ -351,7 +491,7 @@ public void OnGhostDrop(int client)
 			AnnouncerTimer[i] = INVALID_HANDLE;
 		}
 	}
-	
+
 	for(int i; i < sizeof(TimerStarter); i++)
 	{
 		if(TimerStarter[i] != INVALID_HANDLE)
@@ -373,13 +513,14 @@ public Action timer_CreateFuzzTimers(Handle timer, int timerindex)
 			FuzzTimer[i] = INVALID_HANDLE;
 		}
 	}
-	
+
 	FuzzTimer[0] = CreateTimer(1.0, timer_EmmitPickupSound1, 0, TIMER_FLAG_NO_MAPCHANGE);
 	FuzzTimer[1] = CreateTimer(1.5, timer_EmmitPickupSound1, 1, TIMER_FLAG_NO_MAPCHANGE);
 	FuzzTimer[2] = CreateTimer(2.0, timer_EmmitPickupSound1, 2, TIMER_FLAG_NO_MAPCHANGE);
-	
+
 	return Plugin_Continue;
 }
+
 
 public Action timer_CreateAnnouncerTimers(Handle timer, int timerindex)
 {
@@ -393,7 +534,7 @@ public Action timer_CreateAnnouncerTimers(Handle timer, int timerindex)
 			AnnouncerTimer[i] = INVALID_HANDLE;
 		}
 	}
-	
+
 	AnnouncerTimer[0] = CreateTimer(3.5, timer_EmmitPickupSound2, 0, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //2 = warning
 	AnnouncerTimer[1] = CreateTimer(4.5, timer_EmmitPickupSound2, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //2 = warning
 	AnnouncerTimer[2] = CreateTimer(6.5, timer_EmmitPickupSound3, 2, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //3 = automatic targetting system
@@ -407,93 +548,108 @@ public Action timer_CreateAnnouncerTimers(Handle timer, int timerindex)
 public Action timer_EmmitPickupSound1(Handle timer, int timerindex) //fuzz
 {
 	FuzzTimer[timerindex] = INVALID_HANDLE;
-	
+
 	if(!g_bGhostIsHeld)
 		return Plugin_Stop;
-	
+
 	for(int client = 1; client < MaxClients; client++)
 	{
 		if(!IsClientInGame(client))
 			continue;
-		
-		if(client == ghostCarrier) 
+
+		if(client == ghostCarrier)
 			continue;
-		
+
+		if (!g_optedout[client]) // no wants soundz
+			continue;
+
 		if(!IsPlayerAlive(client))
 		{
 			EmitSoundToClient(client, g_sSoundEffect[11], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 60, SND_NOFLAGS, 0.2, 100, -1, NULL_VECTOR, NULL_VECTOR);
 			continue;
 		}
-		
+
 		EmitSoundToClient(client, g_sSoundEffect[11], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.4, 100, -1, NULL_VECTOR, NULL_VECTOR);
 	}
-	
+
 	return Plugin_Stop;
 }
 
-public Action timer_EmmitPickupSound2(Handle timer, int timerindex) //warning  
+public Action timer_EmmitPickupSound2(Handle timer, int timerindex) //warning
 {
 	AnnouncerTimer[timerindex] = INVALID_HANDLE;
-	
+
 	if(!g_bGhostIsHeld)
 		return Plugin_Stop;
-	
+
 	for(int client = 1; client < MaxClients; client++)
 	{
 		if(!IsClientInGame(client) || !IsPlayerAlive(client))
 			continue;
-		
+
+		if (!g_optedout[client]) // no wants soundz
+			continue;
+
 		if(client == ghostCarrier)
 			continue;
-		
+
 		if(GetClientTeam(client) == ghostCarrierTeam)
 			continue;
-		
+
 		EmitSoundToClient(client, g_sSoundEffect[12], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
 	}
-	
+
 	return Plugin_Stop;
 }
+
 
 public Action timer_EmmitPickupSound3(Handle timer, int timerindex) //automatic target aquisition system
 {
 	AnnouncerTimer[timerindex] = INVALID_HANDLE;
-	
+
 	if(!g_bGhostIsHeld)
 		return Plugin_Stop;
-	
+
 	for(int client = 1; client < MaxClients; client++)
 	{
 		if(!IsClientInGame(client) || !IsPlayerAlive(client))
 			continue;
-		
+
+		if (!g_optedout[client]) // no wants soundz
+			continue;
+
 		if(client == ghostCarrier)
 			continue;
-		
+
 		EmitSoundToClient(client, g_sSoundEffect[13], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
 	}
-	
+
+
 	return Plugin_Stop;
 }
+
 
 public Action timer_EmmitPickupSound4(Handle timer, int timerindex) //acquired
 {
 	AnnouncerTimer[timerindex] = INVALID_HANDLE;
-	
+
 	if(!g_bGhostIsHeld)
 		return Plugin_Stop;
-	
+
 	for(int client = 1; client < MaxClients; client++)
 	{
 		if(!IsClientInGame(client) || !IsPlayerAlive(client))
 			continue;
-		
+
+		if (!g_optedout[client]) // no wants soundz
+			continue;
+
 		if(client == ghostCarrier)
 			continue;
-		
+
 		EmitSoundToClient(client, g_sSoundEffect[14], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
 	}
-	
+
 	return Plugin_Stop;
 }
 
@@ -504,18 +660,19 @@ public Action timer_DoSparks(Handle timer, int client)
 	DoSparkleEffect(client);
 }
 
+
 public void DoSparkleEffect(int client)
 {
 	if(!IsClientInGame(client))
 		return;
-	
+
 	float vecOrigin[3], vecEyeAngles[3];
 	GetClientEyePosition(client, vecOrigin);
 	vecOrigin[2] += 10.0;
 	vecEyeAngles[2] = 1.0;
-	
+
 	//TE_SetupSparks(vecOrigin, vecEyeAngles, 1, 1);
-	
+
 	TE_Start("Sparks");
 	TE_WriteFloat("m_vecOrigin[0]", vecOrigin[0]);
 	TE_WriteFloat("m_vecOrigin[1]", vecOrigin[1]);
@@ -531,26 +688,27 @@ public void OnEntityDestroyed(int entity)
 {
 	if(!IsValidEntity(entity) || entity < MaxClients)
 		return;
-	
+
 	if(!GetConVarBool(convar_ghostexplodes))
 		return;
-	
+
 	if(!g_bEndOfRound)
 		return;
-	
+
 	char classname[50];
 	GetEntityClassname(entity, classname, sizeof(classname));
-    
+
 	#if DEBUG > 0
 	PrintToServer("entity destroyed %s", classname);
 	#endif
-	
+
     if (StrEqual(classname, "weapon_ghost"))
     {
-		g_bGhostIsHeld = false; 
+		g_bGhostIsHeld = false;
 		Explode(entity);
     }
 }
+
 
 void Explode(int entity)
 {
@@ -565,16 +723,16 @@ void Explode(int entity)
 
 	float pos[3];
 	GetEntPropVector(entity, Prop_Send, "m_vecOrigin", pos);
-	
+
 	int explosion;
-	
+
 	if(g_bGhostIsCaptured)
 		explosion = CreateEntityByName("env_physexplosion");
 	if(!g_bGhostIsCaptured && GetConVarBool(convar_ghostexplosiondamages))
 		explosion = CreateEntityByName("env_explosion");
 	else
 		explosion = CreateEntityByName("env_physexplosion");
-	
+
 	//DispatchKeyValueFloat(explosion, "magnitude", GetConVarFloat(cv_JarateKnockForce));
 	DispatchKeyValue(explosion, "iMagnitude", "400");
 	//DispatchKeyValue(explosion, "spawnflags", "18428");
@@ -592,14 +750,15 @@ void Explode(int entity)
 		TeleportEntity(explosion, pos, NULL_VECTOR, NULL_VECTOR);
 		AcceptEntityInput(explosion, "Explode");
 		AcceptEntityInput(explosion, "Kill");
-		
+
 		float dir[3] = {0.0, 0.0, 1.0};
 		TE_SetupSparks(pos, dir, 50, 8);
 		TE_SendToAll();
 	}
-	
+
 	g_bEndOfRound = false; //don't check for destroyed entities anymore as round is about to restart (lots of them and errors)
 }
+
 
 public void EmitExplosionSound(int entity, float position[3])
 {
@@ -613,28 +772,30 @@ public Action timer_EmitRadioChatterSound(Handle timer, int client)
 {
 	if(!IsValidEntity(client))
 		return;
-	
+
 	float vecOrigin[3];
 	GetEntPropVector(client, Prop_Send, "m_vecOrigin", vecOrigin);
 	vecOrigin[2] += 20.0;
 
-	EmitSoundToAll(g_sRadioChatterSoundEffect[GetRandomInt(0, sizeof(g_sRadioChatterSoundEffect) -1)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 130, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
+
+	if (!HasAnyoneOptedOut())
+		EmitSoundToAll(g_sRadioChatterSoundEffect[GetRandomInt(0, sizeof(g_sRadioChatterSoundEffect) -1)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 130, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
+	else
+		EmitSound(g_soundsEnabledClient, g_numClients, g_sRadioChatterSoundEffect[GetRandomInt(0, sizeof(g_sRadioChatterSoundEffect) -1)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 130, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
 }
+
 
 void EmmitCapSound(int client)
 {
 	if(!IsValidEntity(client))
 		return;
-	
+
 	float vecOrigin[3];
 	GetEntPropVector(client, Prop_Send, "m_vecOrigin", vecOrigin);
 	vecOrigin[2] += 20.0;
 
 	EmitSoundToAll(g_sSoundEffect[GetRandomInt(1,2)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 100, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
 }
-
-
-
 
 
 
@@ -646,19 +807,19 @@ public void OnMapEnd()
 		if(GhostTimer[i] != INVALID_HANDLE)
 			GhostTimer[i] = INVALID_HANDLE;
 	}
-	
+
 	for(i = 0; i < MAX_ANNOUNCER_OCCURENCES; i++)
 	{
 		if(AnnouncerTimer[i] != INVALID_HANDLE)
 			AnnouncerTimer[i] = INVALID_HANDLE;
 	}
-	
+
 	for(i = 0; i < sizeof(FuzzTimer); i++)
 	{
 		if(FuzzTimer[i] != INVALID_HANDLE)
 			FuzzTimer[i] = INVALID_HANDLE;
 	}
-	
+
 	for(i = 0; i < sizeof(TimerStarter); i++)
 	{
 		if(TimerStarter[i] != INVALID_HANDLE)
