@@ -21,7 +21,11 @@ public Plugin:myinfo =
 
 public OnPluginStart()
 {
+	#if SPVER < 18
+	CreateConVar("sm_nt_entitytools", PLUGIN_VERSION, "NEOTOKYO entitytools version");
+	#else  //need sm1.8 compiler for this
 	CreateConVar("sm_nt_entitytools", PLUGIN_VERSION, "NEOTOKYO entitytools version", FCVAR_HIDDEN);
+	#endif
 
 	g_cvar_adminonly = CreateConVar( "entitycreate_adminonly", "0",
 									"0: every client can build, 1: only admin can build",

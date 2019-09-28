@@ -137,6 +137,11 @@ stock int CreatePropPhysicsOverride_AtClientPos(int client, const String:modelna
 }
 
 
+public bool TraceEntityFilterPlayer(int entity, int contentsMask){
+	return ((entity > MaxClients) || entity == 0);
+}
+
+
 stock int CreatePropDynamicOverride_AtClientPos(int client, const String:modelname[], int health)
 {
 	new EntIndex = CreateEntityByName("prop_dynamic_override");
@@ -146,9 +151,9 @@ stock int CreatePropDynamicOverride_AtClientPos(int client, const String:modelna
 		PrecacheModel(modelname);
 	}
 
-	new Float:VecOrigin[3];
-	new Float:VecAngles[3];
-	new Float:normal[3];
+	float VecOrigin[3];
+	float VecAngles[3];
+	float normal[3];
 
 	DispatchKeyValue(EntIndex, "model", modelname);
 	DispatchKeyValue(EntIndex, "Solid", "6");
@@ -192,26 +197,21 @@ stock int CreatePropDynamicOverride_AtClientPos(int client, const String:modelna
 }
 
 
-stock bool:TraceEntityFilterPlayer(entity, contentsMask){
-	return ((entity > MaxClients) || entity == 0);
-}
-
-
 //---------------------------------------------------------
 // get position, angles and normal of aimed location if the parameters are not NULL_VECTOR
 // return the index of entity you aimed
 //---------------------------------------------------------
-stock GetClientAimedLocationData( client, Float:position[3], Float:angles[3], Float:normal[3] )
+stock GetClientAimedLocationData( int client, float[3] position, float[3] angles, float[3] normal )
 {
     new index = -1;
 
     new player = GetPlayerIndex( client );
 
-    decl Float:_origin[3], Float:_angles[3];
+    float _origin[3], _angles[3];
     GetClientEyePosition( player, _origin );
     GetClientEyeAngles( player, _angles );
 
-    new Handle:trace = TR_TraceRayFilterEx( _origin, _angles, MASK_ALL, RayType_Infinite, TraceEntityFilterPlayers );  //was MASK_SOLID_BRUSHONLY -glub
+    Handle trace = TR_TraceRayFilterEx( _origin, _angles, MASK_ALL, RayType_Infinite, TraceEntityFilterPlayers );  //was MASK_SOLID_BRUSHONLY -glub
     if( !TR_DidHit( trace ) )
     {
         ReplyToCommand( player, "Failed to pick the aimed location" );
@@ -262,13 +262,13 @@ stock Float:GetAngleBetweenVectors( const Float:vector1[3], const Float:vector2[
 }
 
 
-stock bool:TraceEntityFilterPlayers(entity, contentsMask, any:data)
+public bool TraceEntityFilterPlayers(int entity, int contentsMask, any data)
 {
     return entity > MaxClients && entity != data;
 }
 
 
-stock bool:TraceFilterIgnorePlayers(entity, contentsMask, any:client)
+stock bool TraceFilterIgnorePlayers(int entity, int contentsMask, any client)
 {
     if(entity >= 1 && entity <= MaxClients)
     {

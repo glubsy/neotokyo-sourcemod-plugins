@@ -174,7 +174,7 @@ public OnClientDisconnect(int client)
 }
 
 
-bool HasAnyOptedOut()
+bool HasAnyoneOptedOut()
 {
 	for (int i = 1; i < MaxClients; i++)
 	{
@@ -197,7 +197,7 @@ ProcessCookies(int client)
 		return;
 	}
 
-	new String:cookie[10] = '\0';
+	char cookie[10];
 	GetClientCookie(client, g_PropPrefCookie, cookie, sizeof(cookie));
 
 	if (StrEqual(cookie, "penabled"))
@@ -313,7 +313,7 @@ public Action Command_Give_Score (int client, int args)
 
 public Action Command_Credit_Status(int client, int args)
 {
-	decl String:name[MAX_NAME_LENGTH] = '\0';
+	char name[MAX_NAME_LENGTH];
 	PrintToConsole(client, "\n--------- Current props ppawning credits status ---------");
 	for (int i=1; i < MaxClients; i++)
 	{
@@ -476,9 +476,9 @@ public Action Command_Set_Credits_For_Client(int client, int args)
 		return Plugin_Handled;
 	}
 
-	decl String:s_amount[5];
-	decl String:s_target[3];
-	decl String:s_targetname[MAX_NAME_LENGTH] = '\0';
+	char s_amount[5];
+	char s_target[3];
+	char s_targetname[MAX_NAME_LENGTH];
 	int i_target;
 	GetCmdArg(1, s_target, sizeof(s_target));
 	GetCmdArg(2, s_amount, sizeof(s_amount));
@@ -552,13 +552,14 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 		int r,g,b,a, rendm, rendfx;
 		float gravity;
 
+		#if SPVER > 17
 		GetEntityClassname(g_propindex_d[client], clsname, sizeof(clsname));
 		GetEntityRenderColor(g_propindex_d[client], r, g, b, a);
 		rendfx = view_as<int>(GetEntityRenderFx(g_propindex_d[client]));
 		rendm = view_as<int>(GetEntityRenderMode(g_propindex_d[client]));
 		gravity = GetEntityGravity(g_propindex_d[client]);
-
 		PrintToConsole(client, "Rendered before: %s with colors: %d,%d,%d,%d rendermode %d fx %d gravity %f", clsname, r,g,b,a, rendm, rendfx, gravity );
+		#endif
 		#endif
 
 		// SetEntityRenderMode(g_propindex_d[client], RENDER_NORMAL);
@@ -584,7 +585,9 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 		rendm = view_as<int>(GetEntityRenderMode(g_propindex_d[client]));
 		gravity = GetEntityGravity(g_propindex_d[client]);
 
+		#if SPVER > 17
 		GetEntityRenderColor(g_propindex_d[client], r, g, b, a);
+		#endif
 		PrintToConsole(client, "Rendered after: %s with colors: %d,%d,%d,%d rendermode %d, fx %d gravity %f", clsname, r,g,b,a, rendm, rendfx, gravity);
 		#endif
 	}
@@ -605,7 +608,7 @@ public Action CommandPropSpawn(int client, int args)
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
-	if (HasAnyOptedOut())
+	if (HasAnyoneOptedOut())
 	{
 		ReplyToCommand(client, "Sorry, someone requested this command be disabled temporarily.");
 		return Plugin_Handled;
@@ -792,7 +795,7 @@ public Action Command_Dong_Spawn(int client, int args)
 		PrintToChat(client, "This command is currently disabled. Ask an admin to enable with sm_props_enabled");
 		return Plugin_Handled;
 	}
-	else if (HasAnyOptedOut())
+	else if (HasAnyoneOptedOut())
 	{
 		ReplyToCommand(client, "Sorry, someone requested this command be disabled temporarily.");
 		return Plugin_Handled;
@@ -929,7 +932,7 @@ MakeParent(int client, int entity)
 
 public void OnGhostPickUp(int client)
 {
-	if (GetConVarBool(g_cvar_props_onghostpickup) && !HasAnyOptedOut())
+	if (GetConVarBool(g_cvar_props_onghostpickup) && !HasAnyoneOptedOut())
 	{
 		if (!IsValidClient(client))
 			return;
@@ -945,7 +948,7 @@ public void OnGhostPickUp(int client)
 
 public void OnGhostCapture(int client)
 {
-	if (GetConVarBool(g_cvar_props_oncapture) && !HasAnyOptedOut())
+	if (GetConVarBool(g_cvar_props_oncapture) && !HasAnyoneOptedOut())
 	{
 		FireWorksOnPlayer(client, GetConVarBool(g_cvar_props_oncapture_nodongs) ? GetRandomInt(1,3) : GetRandomInt(0,3));
 	}
@@ -1103,7 +1106,7 @@ void GetRandomPosAboveClient(int client, float[3] origin)
 
 	GetClientEyePosition(client, vOrigin);
 
-	new Handle:trace = TR_TraceRayFilterEx(vOrigin, vAngles, MASK_SHOT, RayType_Infinite, TraceEntityFilterPlayer);
+	Handle trace = TR_TraceRayFilterEx(vOrigin, vAngles, MASK_SHOT, RayType_Infinite, TraceEntityFilterPlayer);
 
 	if(TR_DidHit(trace)){
 
@@ -1140,7 +1143,7 @@ public Action Command_Strap_Dong(int client, int args)
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
-	if (HasAnyOptedOut())
+	if (HasAnyoneOptedOut())
 	{
 		ReplyToCommand(client, "Sorry, someone requested this command be disabled temporarily.");
 		return Plugin_Handled;
@@ -1316,7 +1319,7 @@ public Action Command_Spawn_TE_Prop(int client, int args)
 	}
 
 	// char s_tetype[];
-	decl String:s_model_pathname[PLATFORM_MAX_PATH] = '\0';
+	char s_model_pathname[PLATFORM_MAX_PATH];
 	char s_tetype[150];
 	GetCmdArg(1, s_model_pathname, sizeof(s_model_pathname));
 	//GetCmdArg(2, s_tetype, sizeof(s_tetype));
