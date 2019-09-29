@@ -9,7 +9,7 @@
 #define MAX_ANNOUNCER_OCCURENCES 6
 #define MAX_FUZZ_OCCURENCES 3
 
-#define PLUGIN_VERSION	"0.23"
+#define PLUGIN_VERSION	"0.24"
 
 int ghost, ghostCarrier, ghostCarrierTeam;
 bool g_bGhostIsCaptured;
@@ -17,6 +17,7 @@ bool g_bEndOfRound;
 int g_iTickCount = 95;
 bool g_bGhostIsHeld;
 float g_fFuzzRepeatDelay = 0.0;
+float g_vecOrigin[3];
 
 Handle convar_ghostexplodes, convar_ghostexplosiondamages, convar_roundtimelimit,
 convar_nt_doublecap_version, convar_nt_ghostcap_version, convar_ghost_sounds_enabled = INVALID_HANDLE;
@@ -212,14 +213,14 @@ public Action Command_Hate_Sounds_Toggle(int client, int args)
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
-	if(!FindClientCookie("no-props-plz")) // this might not be working, REMOVE
-	{
-		g_optedout[client] = true;
-		SetClientCookie(client, g_PropPrefCookie, "sdisabled");
-		ReplyToCommand(client, "Your preference has been recorded. You don't like sounds.");
-		UpdateSoundEffectOptedOutArray();
-		return Plugin_Handled;
-	}
+	// if(!FindClientCookie("no-props-plz")) // this might not be working, REMOVE
+	// {
+	// 	g_optedout[client] = true;
+	// 	SetClientCookie(client, g_PropPrefCookie, "sdisabled");
+	// 	ReplyToCommand(client, "Your preference has been recorded. You don't like sounds.");
+	// 	UpdateSoundEffectOptedOutArray();
+	// 	return Plugin_Handled;
+	// }
 
 	char cookie[10];
 	GetClientCookie(client, g_PropPrefCookie, cookie, sizeof(cookie));
@@ -228,7 +229,9 @@ public Action Command_Hate_Sounds_Toggle(int client, int args)
 	{
 		SetClientCookie(client, g_PropPrefCookie, "senabled");
 		g_optedout[client] = false;
-		ReplyToCommand(client, "Your preference has been recorded. You do like sounds after all.");
+		ReplyToCommand(client, "Your preference has been recorded. You do like extra sounds after all.");
+		ShowActivity2(client, "[sm_ghostcapsfx] ", "%s opted back in.", client);
+		LogAction(client, -1, "[sm_ghostcapsfx] \"%L\" opted back in.", client);
 		UpdateSoundEffectOptedOutArray();
 		return Plugin_Handled;
 	}
@@ -236,10 +239,10 @@ public Action Command_Hate_Sounds_Toggle(int client, int args)
 	{
 		SetClientCookie(client, g_PropPrefCookie, "sdisabled");
 		g_optedout[client] = true;
-		ReplyToCommand(client, "You preference has been recorded. You don't like sounds.");
+		ReplyToCommand(client, "You preference has been recorded. You don't like extra sounds.");
 		UpdateSoundEffectOptedOutArray();
-		ShowActivity2(client, "[sm_ghostcapsfx] ", "%s opted out of sm_ghostcapsfx sounds.", client);
-		LogAction(client, -1, "[sm_ghostcapsfx] \"%L\" opted out of sm_ghostcapsfx sounds.", client);
+		ShowActivity2(client, "[sm_ghostcapsfx] ", "%s opted out.", client);
+		LogAction(client, -1, "[sm_ghostcapsfx] \"%L\" opted out.", client);
 		return Plugin_Handled;
 	}
 }
@@ -249,7 +252,7 @@ bool HasAnyoneOptedOut()
 {
 	for (int i = 1; i < MaxClients; i++)
 	{
-		if (g_optedout[i] && IsValidClient(i))
+		if (IsValidClient(i) && g_optedout[i])
 			return true;
 	}
 	return false;
@@ -285,8 +288,6 @@ bool HatesSounds(int client)
 }
 
 
-
-
 public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
 	g_bGhostIsHeld = false;
@@ -307,6 +308,24 @@ public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 			GhostTimer[i] = INVALID_HANDLE;
 		}
 	}
+	#if DEBUG
+	char clientname[MAX_NAME_LENGTH];
+	for (int i=1; i<MaxClients; i++)
+	{
+		if (!IsValidClient(i))
+			continue;
+		if (g_optedout[i])
+		{
+			GetClientName(i, clientname, sizeof(clientname));
+			PrintToServer("Client %s has opted out.", clientname);
+		}
+		else
+		{
+			GetClientName(i, clientname, sizeof(clientname));
+			PrintToServer("Client %s has sound effects active.", clientname);
+		}
+	}
+	#endif
 
 	GhostTimer[0] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) + 3.8, timer_SoundEffect0, 0, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 	GhostTimer[1] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 33.0, timer_SoundEffect1, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE); //30 sec before timeout
@@ -345,13 +364,12 @@ public Action timer_SoundEffect0(Handle timer, int timernumber) //charging sound
 {
 	GhostTimer[timernumber] = INVALID_HANDLE;
 
-	float vecOrigin[3];
-	if (!SetupSoundEffect(vecOrigin))
-		return Plugin_Stop;
-
 	g_bEndOfRound = true; //it's ok to hook entity destruction for a bit
 
-	EmitSoundToAll(g_sSoundEffect[0], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.4, 100, -1, vecOrigin); //charging effect
+	if (!SetupSoundEffect())
+		return Plugin_Stop;
+
+	EmitSoundToAll(g_sSoundEffect[0], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.4, 100, -1, g_vecOrigin); //charging effect
 
 	return Plugin_Stop;
 }
@@ -361,11 +379,13 @@ public Action timer_SoundEffect1(Handle timer, int timernumber)  //sparks sound 
 {
 	GhostTimer[timernumber] = INVALID_HANDLE;
 
-	float vecOrigin[3];
-	if (!SetupSoundEffect(vecOrigin))
+	if (!SetupSoundEffect())
 		return Plugin_Stop;
 
-	EmitSoundToAll(g_sSoundEffect[GetRandomInt(3,5)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, GetRandomInt(90, 110), -1, vecOrigin); //sparks
+	if (HasAnyoneOptedOut())
+		EmitSound(g_soundsEnabledClient, g_numClients, g_sSoundEffect[GetRandomInt(3,5)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, GetRandomInt(90, 110), -1, g_vecOrigin); //sparks
+	else
+		EmitSoundToAll(g_sSoundEffect[GetRandomInt(3,5)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, GetRandomInt(90, 110), -1, g_vecOrigin); //sparks
 
 	return Plugin_Stop;
 }
@@ -375,11 +395,10 @@ public Action timer_SoundEffect2(Handle timer, int timernumber) //grenade tick s
 {
 	GhostTimer[timernumber] = INVALID_HANDLE;
 
-	float vecOrigin[3];
-	if (!SetupSoundEffect(vecOrigin))
+	if (!SetupSoundEffect())
 		return Plugin_Stop;
 
-	EmitSoundToAll(g_sSoundEffect[6], SOUND_FROM_WORLD, SNDCHAN_AUTO, 120, SND_NOFLAGS, SNDVOL_NORMAL, g_iTickCount, -1, vecOrigin); //ticks
+	EmitSoundToAll(g_sSoundEffect[6], SOUND_FROM_WORLD, SNDCHAN_AUTO, 90, SND_NOFLAGS, SNDVOL_NORMAL, g_iTickCount, -1, g_vecOrigin); //ticks
 	g_iTickCount += 5;
 
 	return Plugin_Stop;
@@ -390,35 +409,47 @@ public Action timer_SoundEffect3(Handle timer, int timernumber) //beeps countdow
 {
 	GhostTimer[timernumber] = INVALID_HANDLE;
 
-	float vecOrigin[3];
-	if (!SetupSoundEffect(vecOrigin))
+	if (!SetupSoundEffect())
 		return Plugin_Stop;
 
-	EmitSoundToAll(g_sSoundEffect[10], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.5, g_iTickCount, -1, vecOrigin); //beeps
+	EmitSoundToAll(g_sSoundEffect[10], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.5, g_iTickCount, -1, g_vecOrigin); //beeps
 	g_iTickCount += 5;
 
 	return Plugin_Stop;
 }
 
 
-bool SetupSoundEffect(float[3] vecOrigin)
+bool SetupSoundEffect()
 {
-	if(g_bGhostIsCaptured)
+	if (g_bGhostIsCaptured)
 		return false;
 
-	if(!IsValidEntity(ghost))
+	if (!IsValidEntity(ghost))
 	{
+		#if DEBUG
+		PrintToServer("[sm_ghostcapsfx] ghost entity was not valid! index: %d", ghost);
+		#endif
 		return false;
 	}
 
 	int carrier = GetEntPropEnt(ghost, Prop_Data, "m_hOwnerEntity");
 
-	if(MaxClients > carrier > 0)
-		GetEntPropVector(carrier, Prop_Send, "m_vecOrigin", vecOrigin);
+	if (MaxClients > carrier > 0)
+	{
+		GetEntPropVector(carrier, Prop_Send, "m_vecOrigin", g_vecOrigin);
+		#if DEBUG
+		PrintToServer("[sm_ghostcapsfx] SetupSoundEffect(), client must be a player at pos: %f %f %f", g_vecOrigin[0], g_vecOrigin[1], g_vecOrigin[2]);
+		#endif
+	}
 	else
-		GetEntPropVector(ghost, Prop_Send, "m_vecOrigin", vecOrigin);
+	{
+		GetEntPropVector(ghost, Prop_Send, "m_vecOrigin", g_vecOrigin);
+		#if DEBUG
+		PrintToServer("[sm_ghostcapsfx] SetupSoundEffect(), ghost must be on the ground at pos: %f %f %f", g_vecOrigin[0], g_vecOrigin[1], g_vecOrigin[2]);
+		#endif
+	}
 
-	vecOrigin[2] += 10;
+	g_vecOrigin[2] += 10;
 	return true;
 }
 
@@ -429,6 +460,7 @@ public void OnGhostSpawn(int entity)
 	g_bGhostIsCaptured = false;
 	g_bGhostIsHeld = false;
 }
+
 
 public void OnGhostCapture(int client)
 {
@@ -459,6 +491,7 @@ public void OnGhostCapture(int client)
 	CreateTimer(11.0, timer_DoSparks, client);
 }
 
+
 public void OnGhostPickUp(int client)
 {
 	g_bGhostIsHeld = true;
@@ -476,6 +509,7 @@ public void OnGhostPickUp(int client)
 	if(TimerStarter[1] != INVALID_HANDLE)
 		TriggerTimer(TimerStarter[1]);
 }
+
 
 public void OnGhostDrop(int client)
 {
@@ -560,7 +594,7 @@ public Action timer_EmmitPickupSound1(Handle timer, int timerindex) //fuzz
 		if(client == ghostCarrier)
 			continue;
 
-		if (!g_optedout[client]) // no wants soundz
+		if (g_optedout[client]) // no wants soundz
 			continue;
 
 		if(!IsPlayerAlive(client))
@@ -587,7 +621,7 @@ public Action timer_EmmitPickupSound2(Handle timer, int timerindex) //warning
 		if(!IsClientInGame(client) || !IsPlayerAlive(client))
 			continue;
 
-		if (!g_optedout[client]) // no wants soundz
+		if (g_optedout[client]) // no wants soundz
 			continue;
 
 		if(client == ghostCarrier)
@@ -615,7 +649,7 @@ public Action timer_EmmitPickupSound3(Handle timer, int timerindex) //automatic 
 		if(!IsClientInGame(client) || !IsPlayerAlive(client))
 			continue;
 
-		if (!g_optedout[client]) // no wants soundz
+		if (g_optedout[client]) // no wants soundz
 			continue;
 
 		if(client == ghostCarrier)
@@ -641,7 +675,7 @@ public Action timer_EmmitPickupSound4(Handle timer, int timerindex) //acquired
 		if(!IsClientInGame(client) || !IsPlayerAlive(client))
 			continue;
 
-		if (!g_optedout[client]) // no wants soundz
+		if (g_optedout[client]) // no wants soundz
 			continue;
 
 		if(client == ghostCarrier)
@@ -699,11 +733,15 @@ public void OnEntityDestroyed(int entity)
 	GetEntityClassname(entity, classname, sizeof(classname));
 
 	#if DEBUG > 0
-	PrintToServer("entity destroyed %s", classname);
+	PrintToServer("[sm_ghostcapsfx] entity destroyed %s and id is: %d", classname, entity);
 	#endif
 
     if (StrEqual(classname, "weapon_ghost"))
     {
+		#if DEBUG
+		int carrier = GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity");
+		PrintToServer("[sm_ghostcapsfx] carrier of %s (%d) entity (%d) was: %d.", classname, ghost, entity, carrier);
+		#endif
 		g_bGhostIsHeld = false;
 		Explode(entity);
     }
@@ -713,16 +751,22 @@ public void OnEntityDestroyed(int entity)
 void Explode(int entity)
 {
 	#if DEBUG
-	PrintToServer("Explode() called!");
+	PrintToServer("[sm_ghostcapsfx] Explode(%d)!", entity);
 	#endif
 
 	int carrier = GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity");
-
 	if(MaxClients > carrier > 0)
 		entity = carrier;
 
+	#if DEBUG
+	PrintToServer("[sm_ghostcapsfx] carrier is %d.", carrier);
+	#endif
+
 	float pos[3];
 	GetEntPropVector(entity, Prop_Send, "m_vecOrigin", pos);
+	#if DEBUG
+	PrintToServer("[sm_ghostcapsfx] pos of %d is %f %f %f.", entity, pos[0], pos[1], pos[2]);
+	#endif
 
 	int explosion;
 
@@ -742,10 +786,12 @@ void Explode(int entity)
 	if ( DispatchSpawn(explosion) )
 	{
 		#if DEBUG
-		PrintToServer("DispatchSpawn(explosion) true");
+		PrintToServer("[sm_ghostcapsfx] DispatchSpawn(explosion) was true.");
 		#endif
 		EmitExplosionSound(explosion, pos);
-		SetEntPropEnt(explosion, Prop_Data, "m_hOwnerEntity", carrier);
+
+		if (IsValidClient(carrier))
+			SetEntPropEnt(explosion, Prop_Data, "m_hOwnerEntity", carrier);
 		ActivateEntity(explosion);
 		TeleportEntity(explosion, pos, NULL_VECTOR, NULL_VECTOR);
 		AcceptEntityInput(explosion, "Explode");
@@ -756,12 +802,15 @@ void Explode(int entity)
 		TE_SendToAll();
 	}
 
-	g_bEndOfRound = false; //don't check for destroyed entities anymore as round is about to restart (lots of them and errors)
+	g_bEndOfRound = false; //don't check for destroyed entities anymore as round is about to restart (lots of them and too verbose)
 }
 
 
 public void EmitExplosionSound(int entity, float position[3])
 {
+	#if DEBUG
+	PrintToServer("EmitExplosionSound at %f %f %f,", position[0], position[1], position[2]);
+	#endif
 	EmitSoundToAll(g_sSoundEffect[GetRandomInt(7, 9)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 85, SND_NOFLAGS, 0.7, GetRandomInt(85, 110), -1, position, NULL_VECTOR);
 }
 
