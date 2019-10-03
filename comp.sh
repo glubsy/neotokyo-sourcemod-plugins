@@ -1,5 +1,5 @@
 #!/bin/bash
-# call with $0 one script.sp
+# call with $0 [one|all] [version] [script.sp}
 # or $0 all
 
 WORKSPACE="$HOME/Programming/neotokyo-sourcemod-plugins/scripting"

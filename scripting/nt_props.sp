@@ -13,8 +13,7 @@ Handle cvPropMaxTTL = INVALID_HANDLE; // maximum time to live before prop gets a
 Handle g_PropPrefCookie = INVALID_HANDLE; // handle to client preferences
 Handle g_cvar_props_oncapture, g_cvar_props_onghostpickup, g_cvar_props_oncapture_nodongs = INVALID_HANDLE;
 bool gb_PausePropSpawning;
-bool gb_hashadhisd[MAXPLAYERS+1];
-int AttachmentEnt[MAXPLAYERS+1] = {-1,...};
+int g_AttachmentEnt[MAXPLAYERS+1] = {-1,...}; // strapped on prop
 
 // [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
 new g_RemainingCreds[MAXPLAYERS+1][3];
@@ -130,6 +129,9 @@ public OnPluginStart()
 
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("player_death", OnPlayerDeath);
+	AddCommandListener(OnSpecCmd, "spec_next");
+	AddCommandListener(OnSpecCmd, "spec_prev");
+	AddCommandListener(OnSpecCmd, "spec_mode");
 	HookEvent("game_round_start", event_RoundStart);
 
 	RegAdminCmd("sm_props_givescore", Command_Give_Score, ADMFLAG_SLAY, "DEBUG: add 20 frags to score");
@@ -353,7 +355,7 @@ public OnClientPutInServer(int client)
 }
 
 
-public Action OnPlayerSpawn(Handle event, const String:name[], bool dontBroadcast)
+public Action OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
 {
 	// reinitialize the virtual credits to constant value
 	new client = GetClientOfUserId(GetEventInt(event, "userid"));
@@ -365,11 +367,11 @@ public Action OnPlayerSpawn(Handle event, const String:name[], bool dontBroadcas
 }
 
 
-public void event_RoundStart(Handle event, const String:name[], bool dontBroadcast)
+public void event_RoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
 	for(int client = 1; client <= MaxClients; client++)
 	{
-		gb_hashadhisd[client] = false;
+		g_AttachmentEnt[client] = -1; // we assume attached prop has been removed by the game
 
 		if(!IsClientConnected(client) || !IsClientInGame(client) || IsFakeClient(client))
 			continue;
@@ -384,15 +386,11 @@ public void event_RoundStart(Handle event, const String:name[], bool dontBroadca
 }
 
 
-public Action OnPlayerDeath(Handle event, const String:name[], bool dontBroadcast)
+public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 {
-	// attempt to remove entities attached to victim if any
-	new victim = GetClientOfUserId(GetEventInt(event, "victim"));
-	if (g_propindex_d[victim] != 0)
-	{
-		AcceptEntityInput(g_propindex_d[victim], "ClearParent"); // TODO: TEST THIS!
-		g_propindex_d[victim] = 0;
-	}
+	// attempt to remove entities that were attached to victim if any
+	int victim = GetClientOfUserId(GetEventInt(event, "userid"));
+	DestroyAttachedPropForClient(victim);
 
 	// keep track of the player score in our credits array
 	new attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
@@ -407,6 +405,67 @@ public Action OnPlayerDeath(Handle event, const String:name[], bool dontBroadcas
 	if (g_RemainingCreds[attacker][SCORE_CRED] > g_RemainingCreds[attacker][MAX_CRED])
 		g_RemainingCreds[attacker][MAX_CRED] = g_RemainingCreds[attacker][SCORE_CRED];
 	//return Plugin_Continue;
+}
+
+
+
+public Action OnSpecCmd(int client, const char[] command, int args)
+{
+	if(!IsValidClient(client))
+		return Plugin_Continue;
+
+	int target = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget");
+
+	if(target <= 0)
+		return Plugin_Continue;
+
+	// destroy floating entity, preventing from annoying (alive) observed players
+	DestroyAttachedPropForClient(client);
+
+	return Plugin_Continue;
+}
+
+
+void DestroyAttachedPropForClient(int client)
+{
+	#if DEBUG
+	PrintToServer("Checking if need to remove strapped entity %d on client %d.", g_AttachmentEnt[client], client);
+	#endif
+	if (g_AttachmentEnt[client] != -1 && IsValidEntity(g_AttachmentEnt[client]))
+	{
+		#if DEBUG
+		PrintToServer("Killing strapped entity %d of client %d.", g_AttachmentEnt[client], client);
+		#endif
+		AcceptEntityInput(g_AttachmentEnt[client], "ClearParent");
+		AcceptEntityInput(g_AttachmentEnt[client], "kill");
+		g_AttachmentEnt[client] = -1;
+	}
+}
+
+void UpdateAttachedPropArray(int entity)
+{
+	for (int client = 1; client < MaxClients; client++)
+	{
+		if (!IsValidClient(client))
+			continue;
+
+		if (entity == g_AttachmentEnt[client])
+		{
+			#if DEBUG
+			PrintToServer("Strapped entity %d for client %d was destroyed, updated array.", entity, client);
+			#endif
+			g_AttachmentEnt[client] = -1;
+			break;
+		}
+	}
+
+}
+
+
+public void OnEntityDestroyed(int entity)
+{
+	// when strapped entity is destroyed, make sure our array is updated as well
+	UpdateAttachedPropArray(entity);
 }
 
 
@@ -888,7 +947,6 @@ DisplayActivity(int client, const char[] model)
 {
 	//ShowActivity2(client, "[sm_props] ", "%s spawned: %s.", client, model);
 	LogAction(client, -1, "[sm_props] \"%L\" spawned: %s", client, model);
-
 }
 
 
@@ -913,24 +971,26 @@ MakeParent(int client, int entity)
 	GetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin);
 	GetEntPropVector(entity, Prop_Send, "m_angRotation", angle);
 	DispatchSpawn(entity);
-	origin[0] += 3.0;
-	origin[1] += 1.0;
-	origin[2] += 2.0;
+	origin[0] += 6.6; // 6.6 vetical axis
+	origin[1] += 1.9; // 1.9 horizontal axis
+	origin[2] += 2.5; // 2.5 z axis (+ is forward from origin)
 
-	angle[0] -= 0.0;
-	angle[1] -= 0.0;
-	angle[2] += 0.0;
+	angle[0] -= 20.0; // 20.0 vertical pitch (+ goes up)
+	//angle[1] -= 0.0; // 0.0 roll (- goes clockwise)
+	angle[2] -= 15.0; // yaw
 	SetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin); // these might not be working actually
 	SetEntPropVector(entity, Prop_Send, "m_angRotation", angle);
 
 	//DispatchKeyValueVector(entity, "Origin", origin);    //FIX testing offset coordinates, remove! -glub
 	//DispatchKeyValueVector(entity, "Angles", angle);
 
+	#if DEBUG
 	char name[255];
 	GetClientName(client, name, sizeof(name));
 	PrintToConsole(client, "Made parent: at origin: %f %f %f; angles: %f %f %f for client %s", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2], name);
-
+	#endif
 }
+
 
 public void OnGhostPickUp(int client)
 {
@@ -939,11 +999,7 @@ public void OnGhostPickUp(int client)
 		if (!IsValidClient(client))
 			return;
 
-		if (!gb_hashadhisd[client])
-		{
-			gb_hashadhisd[client] = true;
-			SpawnAndStrapDongToSelf(client);
-		}
+		SpawnAndStrapDongToSelf(client);
 	}
 }
 
@@ -1157,12 +1213,12 @@ public Action Command_Strap_Dong(int client, int args)
 		return Plugin_Handled;
 	}
 
-	new String:arg[10];
+	char arg[5];
 	GetCmdArg(1, arg, sizeof(arg));
 
 	if (strcmp(arg, "me") == 0)
 	{
-		SpawnAndStrapDongToSelf(client);
+		SpawnAndStrapDongToSelf(client);  // TODO: use credits here too
 	}
 	else if (strcmp(arg, "team") == 0)
 	{
@@ -1173,7 +1229,7 @@ public Action Command_Strap_Dong(int client, int args)
 
 		for (int i = 1; i <= MaxClients; i++)
 		{
-			if (!IsValidClient(i))
+			if (!IsValidClient(i) /*|| !IsPlayerReallyAlive(i)*/) // TODO: add argument to affect spectators too
 				continue;
 			if (GetClientTeam(i) != team)
 				continue;
@@ -1188,12 +1244,28 @@ public Action Command_Strap_Dong(int client, int args)
 
 		for (int i = 1; i <= MaxClients; i++)
 		{
-			if (!IsValidClient(i))
+			if (!IsValidClient(i) /*|| !IsPlayerReallyAlive(i)*/)
 				continue;
 			SpawnAndStrapDongToSelf(i);
 		}
 	}
 	return Plugin_Handled;
+}
+
+
+bool IsPlayerReallyAlive(int client)
+{
+	if ((GetClientTeam(client) < 2)) // not in team, probably spectator
+		return false;
+
+	#if DEBUG
+	PrintToServer("Client %d has %d health.", client, GetEntProp(client, Prop_Send, "m_iHealth"));
+	#endif
+
+	if (GetEntProp(client, Prop_Send, "m_iHealth") <= 1) // For some reason, 1 health point means dead.
+		return false;
+
+	return true;
 }
 
 
@@ -1205,14 +1277,15 @@ public void SpawnAndStrapDongToSelf(int client)
 	PrintToConsole(client, "Processing: Strapdongself on client index %d \"%s\"", client, name);
 	#endif
 
-	if (!gb_hashadhisd[client]) // limit to once only per round
+	#if !DEBUG
+	if (!g_AttachmentEnt[client] == -1) // limit to once only per round
+	#endif
 	{
-		g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[0], 5);
-		MakeParent(client, g_propindex_d[client]);
-		#if DEBUG < 1
-		return; // skip limitation to only one per round
-		#endif 
-		gb_hashadhisd[client] = true;
+		g_AttachmentEnt[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[0], 5);
+		MakeParent(client, g_AttachmentEnt[client]);
+		#if DEBUG
+		PrintToServer("Strapped prop %d to client %d", g_AttachmentEnt[client], client);
+		#endif
 	}
 }
 
