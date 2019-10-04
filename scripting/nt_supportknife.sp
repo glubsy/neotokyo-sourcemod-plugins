@@ -9,7 +9,11 @@ bool IsClientSupport[MAXPLAYERS+1]
 Handle g_CvarWeaponEconomyCheck = INVALID_HANDLE;
 Handle g_CvarVIPModeCheck = INVALID_HANDLE;
 
-//TODO: fix knife spawning when selecting "auto-select team" (line 80)
+//FIXME: knife spawning when selecting "auto-select team" (line 80) while being dead
+// idea: delay giving the knife by a few seconds with a timer on event_PlayerSpawn()
+// and use SDKHook_WeaponEquipPost and check if we have weapons in slots, 
+// in order to check if player is indeed alive (which doesn't work in NT somehow) and has spawned as a support
+// note: we might start multiple timers for the same goal due to how Spawn event works in NT, use an arry of bools to restrain this to one timer only
 
 public Plugin:myinfo = 
 {
@@ -73,17 +77,22 @@ public Action:cmd_handler(client, const String:command[], args)
 	return Plugin_Continue;
 }
 
-public event_PlayerSpawn(Handle:event, const String:name[], bool:dontBroadcast)
+public Action event_PlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
 {
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
 
-	if (!IsClientInGame(client) && !IsPlayerAlive(client)) // FIXME: player is considered alive when changing team -> spawning, which spawns a knife!
-		return;
+	if (!IsClientInGame(client))
+		return Plugin_Continue;
+
+	//IsPlayerAlive() doesn't work anymore? (has it ever worked in NT?), always returns True
+	if (!IsPlayerAlive(client))
+		return Plugin_Continue;
+
 	if(IsPlayerSupport(client) == true)
 		IsClientSupport[client] = true;
 	
 	if(GetClientTeam(client) < 2)
-		return;
+		return Plugin_Continue;
 	
 	if(IsClientSupport[client])  //FIXME: this is dumb, still needs a rewrite
 	{
@@ -101,7 +110,9 @@ public event_PlayerSpawn(Handle:event, const String:name[], bool:dontBroadcast)
 	
 		//CreateKnifeForPlayer(client);  //our safe weapon creation function
 	}
+	return Plugin_Continue;
 }
+
 
 
 public Action timer_DelayGiveKnife(Handle timer, int client)
@@ -174,7 +185,7 @@ public Action timer_SwitchToWeaponSlot(Handle timer, client)
 			SwitchToLastWeapon(client);
 
 		#if DEBUG > 0
-		PrintToServer("[SUPPORTKNIFE] client %N attempted switch back weapon", client);
+		PrintToServer("[SUPPORTKNIFE] we attempted to switch back weapon for client %N", client);
 		#endif
 	}
 	

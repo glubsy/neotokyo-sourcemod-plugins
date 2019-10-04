@@ -1,6 +1,5 @@
-#pragma semicolon 1
-
 #include <neotokyo>
+#pragma semicolon 1
 
 bool g_bActiveVision[MAXPLAYERS+1][3];
 bool g_bVisionHeld[MAXPLAYERS+1];
