@@ -60,7 +60,7 @@ enum FireworksPropType {
 	REGULAR_PHYSICS,
 };
 
-#define DEBUG 0
+#define DEBUG 1
 
 public Plugin:myinfo =
 {
@@ -264,7 +264,7 @@ public Action Command_Hate_Props_Toggle(int client, int args)
 		SetClientCookie(client, g_PropPrefCookie, "pdisabled");
 		g_optedout[client] = true;
 		ReplyToCommand(client, "Your preference has been recorded. You no like props.");
-		ShowActivity2(client, "[sm_props] ", "%s opted out of sm_props models.", client);
+		ShowActivity2(client, "[sm_props] ", "%N opted out of sm_props models.", client);
 		LogAction(client, -1, "[sm_props] \"%L\" opted out of sm_props models.", client);
 		return Plugin_Handled;
 	}
@@ -732,6 +732,37 @@ public Action Command_Print_Help(int client, int args)
 }
 
 
+void Display_Why_Command_Is_Disabled(int client)
+{
+	ReplyToCommand(client, "Sorry, at least one player requested this command be disabled temporarily.");
+
+	char buffer[255], name[MAX_NAME_LENGTH];
+
+	for (int i=1, count=0; i <= MaxClients; i++)
+	{
+		if (g_optedout[i])
+		{
+			GetClientName(i, name, sizeof(name));
+			if (count == 0)
+			{
+				Format(name, sizeof(name), "%s", name);
+				count++;
+			}
+			else
+			{
+				Format(name, sizeof(name), ", %s", name);
+			}
+			StrCat(buffer, sizeof(buffer), name);
+			#if DEBUG
+			PrintToServer("DEBUG: buffer \"%s\"\nname \"%s\"", buffer, name);
+			#endif
+		}
+	}
+
+	PrintToChatAll("Sorry, these players asked not to be annoyed by props: %s.", buffer);
+}
+
+
 public Action CommandPropSpawn(int client, int args)
 {
 	if (!IsValidClient(client))
@@ -739,7 +770,7 @@ public Action CommandPropSpawn(int client, int args)
 
 	if (HasAnyoneOptedOut())
 	{
-		ReplyToCommand(client, "Sorry, someone requested this command be disabled temporarily.");
+		Display_Why_Command_Is_Disabled(client);
 		return Plugin_Handled;
 	}
 
@@ -925,7 +956,7 @@ public Action Command_Dong_Spawn(int client, int args)
 	}
 	else if (HasAnyoneOptedOut())
 	{
-		ReplyToCommand(client, "Sorry, someone requested this command be disabled temporarily.");
+		Display_Why_Command_Is_Disabled(client);
 		return Plugin_Handled;
 	}
 
@@ -1261,7 +1292,7 @@ public Action Command_Strap_Dong(int client, int args)
 
 	if (HasAnyoneOptedOut() && !IsAdmin(client))
 	{
-		ReplyToCommand(client, "Sorry, someone requested this command be disabled temporarily.");
+		Display_Why_Command_Is_Disabled(client);
 		return Plugin_Handled;
 	}
 
@@ -1271,6 +1302,7 @@ public Action Command_Strap_Dong(int client, int args)
 		return Plugin_Handled;
 	}
 
+	bool isadmin = IsAdmin(client);
 	char arg[5];
 	int i_case;
 	GetCmdArg(1, arg, sizeof(arg));
@@ -1282,6 +1314,9 @@ public Action Command_Strap_Dong(int client, int args)
 	else if (strcmp(arg, "all") == 0)
 		i_case = 2;
 
+	#if DEBUG
+	PrintToServer("[sm_props] DEBUG: case is %d.", i_case);
+	#endif
 
 	if (i_case >= 1)
 	{
@@ -1289,116 +1324,119 @@ public Action Command_Strap_Dong(int client, int args)
 		if (i_case == 1)
 			team = GetClientTeam(client);
 
-		if (IsAdmin(client)) //bypass credit system
+		int price;
+		bool affected[MAXPLAYERS+1];
+
+		// build the list of affected players
+		for (int i=1; i <= MaxClients; i++)
+		{
+			if (!IsValidClient(i))
+				continue;
+
+			if (i_case == 1)
+				if (GetClientTeam(i) != team)
+					continue;
+
+			// we're dead, we don't add to price
+			if (client == i && !IsPlayerAlive(client) && GetCmdArgs() < 2)
+				continue;
+
+			// didn't ask for specs to be affected
+			if (!IsPlayerReallyAlive(i) && GetCmdArgs() < 2)
+				continue;
+
+			// don't add on top of another already attached
+			if (g_AttachmentEnt[client] != -1)
+				continue;
+
+			if (!isadmin)
+				price++;
+
+			affected[i] = true;
+		}
+
+		#if DEBUG
+		PrintToServer("[sm_props] DEBUG: affected clients (sizeof(affected) is %d):\n", sizeof(affected));
+		// this DEBUG has a performance hit on the server!
+		for (int i=1; i <= MaxClients; i++)
+		{
+			PrintToServer("affected[%d] is %d", i, affected[i]);
+			if (!IsValidClient(i) || !affected[i])
+				continue;
+			PrintToServer("affected[%d] (%N?) is %d", i, i, affected[i]);
+		}
+		#endif
+
+		if (isadmin) //bypass credit system
 		{
 			for (int i=1; i <= MaxClients; i++)
 			{
-				if (!IsValidClient(i))
-					continue;
-
-				if (i_case == 1)
-					if (GetClientTeam(i) != team)
-						continue;
-
-				if (client == i && !IsPlayerAlive(client) && GetCmdArgs() < 2) // we're dead, we don't add to price
-					continue;
-
-				if (!IsPlayerReallyAlive(i) && GetCmdArgs() < 2) // didn't ask for specs to be affected
-					continue;
-
-				if (g_AttachmentEnt[client] != -1) // don't add on top of another already attached
-					continue;
-
-				SpawnAndStrapDongToSelf(i);
-				DisplayActivity(client, "Dong on team");
-				return Plugin_Handled;
+				if (affected[i] && IsValidClient(i))
+					SpawnAndStrapDongToSelf(i);
 			}
+			if (i_case == 1)
+				DisplayActivity(client, "Dong on team.");
+			else if (i_case == 2)
+				DisplayActivity(client, "Dong on everyone.");
+			return Plugin_Handled;
+		}
+
+		if (hasEnoughCredits(client, price) && price != 0)
+		{
+			for (int i=1; i <= MaxClients; i++)
+				if (affected[i])
+					SpawnAndStrapDongToSelf(i);
+
+			Client_Used_Credits(client, price);
+
+			if (i_case == 1)
+			{
+				ReplyToCommand(client, "[sm_props] Attached a dong to your team mates.");
+				DisplayActivity(client, "Dong on team.");
+			}
+			else if (i_case == 2)
+			{
+				ReplyToCommand(client, "[sm_props] Attached a dong to everyone.");
+				DisplayActivity(client, "Dong on everyone.");
+			}
+			return Plugin_Handled;
+		}
+		else if (price == 0)
+		{
+			ReplyToCommand(client, "[sm_props] Nobody would be affected by your request.");
+			return Plugin_Handled;
 		}
 		else
 		{
-			int price;
-			bool affected[MAXPLAYERS+1];
-
-			for (int i=1; i <= MaxClients; i++)
-			{
-				if (!IsValidClient(i))
-					continue;
-
-				if (i_case == 1)
-					if (GetClientTeam(i) != team)
-						continue;
-
-				if (client == i && !IsPlayerAlive(client) && GetCmdArgs() < 2) // we're dead, we don't add to price
-					continue;
-
-				if (!IsPlayerReallyAlive(i) && GetCmdArgs() < 2) // didn't ask for specs to be affected
-					continue;
-
-				if (g_AttachmentEnt[client] != -1) // don't add on top of another already attached
-					continue;
-
-				price++;
-				affected[i] = true;
-			}
-
-			#if DEBUG
-			PrintToServer("[sm_props] DEBUG: affected clients (sizeof(affected) is %d):\n", sizeof(affected));
-			for (int i=1; i <= MaxClients; i++) // this DEBUG has a performance hit on the server!
-			{
-				PrintToServer("affected[%d] is %d", i, affected[i]);
-				if (!IsValidClient(i) || !affected[i])
-					continue;
-				PrintToServer("affected[%d] (%N?) is %d", i, i, affected[i]);
-			}
-			#endif
-
-			if (hasEnoughCredits(client, price) && price != 0)
-			{
-				for (int i=1; i <= MaxClients; i++)
-					if (affected[i])
-						SpawnAndStrapDongToSelf(i);
-
-
-				Client_Used_Credits(client, price);
-				DisplayActivity(client, "Dong on team");
-				return Plugin_Handled;
-			}
-			else if (price == 0)
-			{
-				ReplyToCommand(client, "[sm_props] Nobody would be affected by your request.");
-				return Plugin_Handled;
-			}
-			else
-			{
-				ReplyToCommand(client, "[] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
-				price, g_RemainingCreds[client][VIRT_CRED]);
-				return Plugin_Handled;
-			}
+			ReplyToCommand(client, "[sm_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+			price, g_RemainingCreds[client][VIRT_CRED]);
+			return Plugin_Handled;
 		}
 	}
 	else //i_case 0, only "me"
 	{
-		if (!IsAdmin(client))
+		if (isadmin)
 		{
-			if (hasEnoughCredits(client, g_DongPropPrice[0]))
-			{
-				SpawnAndStrapDongToSelf(client);
-				Client_Used_Credits(client, g_DongPropPrice[0]);
-				DisplayActivity(client, "Dong on himself"); //FIXME: format this to add detail about the command passed in that string
-				return Plugin_Handled;
-			}
-			else
-			{
-				ReplyToCommand(client, "[] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
-				g_DongPropPrice[0], g_RemainingCreds[client][VIRT_CRED]);
-				return Plugin_Handled;
-			}
+			SpawnAndStrapDongToSelf(client);
+			ReplyToCommand(client, "[sm_props] Attached a dong to yourself.");
+			DisplayActivity(client, "Dong on themselves.");
+			return Plugin_Handled;
 		}
-		SpawnAndStrapDongToSelf(client);
-		DisplayActivity(client, "Dong on team");
-		return Plugin_Handled;
+
+		if (hasEnoughCredits(client, g_DongPropPrice[0]))
+		{
+			SpawnAndStrapDongToSelf(client);
+			Client_Used_Credits(client, g_DongPropPrice[0]);
+			DisplayActivity(client, "Dong on themselves."); //FIXME: format this to add detail about the exact command passed in that string
+			return Plugin_Handled;
+		}
+		else
+		{
+			ReplyToCommand(client, "[sm_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+			g_DongPropPrice[0], g_RemainingCreds[client][VIRT_CRED]);
+			return Plugin_Handled;
+		}
 	}
-	return Plugin_Handled;
 }
 
 
