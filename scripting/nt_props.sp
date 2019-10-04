@@ -60,7 +60,7 @@ enum FireworksPropType {
 	REGULAR_PHYSICS,
 };
 
-#define DEBUG 1
+#define DEBUG 0
 
 public Plugin:myinfo =
 {
@@ -83,7 +83,7 @@ public Plugin:myinfo =
 //    we can't use a TE because they don't get affected by timers, so regular physics_prop take precedence. Same for dynamic props, cannot have them as TempEnts.
 //
 // FIXME: restore score credit properly on reconnect after nt_savescore restored it (maybe need a timer)
-// FIXME: destroy strapped prop when client dies
+// FIXME: update prop angles according to viewangles for spectators (place before eyes preferably)
 
 public OnPluginStart()
 {
@@ -92,6 +92,7 @@ public OnPluginStart()
 
 	RegConsoleCmd("sm_dick", Command_Dong_Spawn, "Spawns a dick [scale 1-5] [1 for static prop]");
 	RegConsoleCmd("sm_props", CommandPropSpawn, "Spawns a prop.");
+	RegConsoleCmd("sm_props_help", Command_Print_Help, "Prints all props-related commands.");
 	RegConsoleCmd("sm_strapdong", Command_Strap_Dong, "Strap a dong onto [me|team|all].");
 
 	g_cvar_props_onghostpickup = CreateConVar("sm_props_onghostpickup", "0", "Picking up the ghost is exciting,", FCVAR_NONE, true, 0.0, true, 1.0 );
@@ -129,8 +130,8 @@ public OnPluginStart()
 
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("player_death", OnPlayerDeath);
-	AddCommandListener(OnSpecCmd, "spec_next");
-	AddCommandListener(OnSpecCmd, "spec_prev");
+	// AddCommandListener(OnSpecCmd, "spec_next"); // probably not needed
+	// AddCommandListener(OnSpecCmd, "spec_prev"); // probably not needed
 	AddCommandListener(OnSpecCmd, "spec_mode");
 	HookEvent("game_round_start", event_RoundStart);
 
@@ -178,7 +179,7 @@ public OnClientDisconnect(int client)
 
 bool HasAnyoneOptedOut()
 {
-	for (int i = 1; i < MaxClients; i++)
+	for (int i = 1; i <= MaxClients; i++)
 	{
 		if (g_optedout[i] && IsValidClient(i))
 			return true;
@@ -303,13 +304,33 @@ public Action Command_Give_Score (int client, int args)
 		ReplyToCommand(client, "This command cannot be executed by the server.");
 		return Plugin_Stop;
 	}
+	if (GetCmdArgs() == 1)
+	{
+		char arg[10];
+		GetCmdArg(1, arg, sizeof(arg));
+		int i_target = GetClientOfUserId(StringToInt(arg));
+		if (!IsValidClient(i_target))
+		{
+			ReplyToCommand(client, "Invalid target: %d", i_target);
+			return Plugin_Handled;
+		}
+		SetEntProp(i_target, Prop_Data, "m_iFrags", 60);
+		g_RemainingCreds[i_target][SCORE_CRED] = 60;
+		g_RemainingCreds[i_target][VIRT_CRED] = 60;
+		g_RemainingCreds[i_target][MAX_CRED] = 60;
+		Command_Set_Credits_For_Client(i_target, 60);
+		PrintToConsole(client, "[sm_props] DEBUG: %N gave score of 60 to %N.", client, i_target);
+
+		return Plugin_Handled;
+	}
 
 	SetEntProp(client, Prop_Data, "m_iFrags", 60);
 	g_RemainingCreds[client][SCORE_CRED] = 60;
 	g_RemainingCreds[client][VIRT_CRED] = 60;
 	g_RemainingCreds[client][MAX_CRED] = 60;
 	Command_Set_Credits_For_Client(client, 60);
-	PrintToConsole(client, "gave score to %d", client);
+	PrintToServer("[sm_props] DEBUG: %N gave score of 60 to himself.", client);
+	ReplyToCommand(client, "[sm_props] DEBUG: You gave score of 60 to yourself.");
 	return Plugin_Handled;
 
 }
@@ -318,8 +339,8 @@ public Action Command_Give_Score (int client, int args)
 public Action Command_Credit_Status(int client, int args)
 {
 	char name[MAX_NAME_LENGTH];
-	PrintToConsole(client, "\n--------- Current props ppawning credits status ---------");
-	for (int i=1; i < MaxClients; i++)
+	PrintToConsole(client, "\n--------- Current props spawning brouzoufs status ---------");
+	for (int i=1; i <= MaxClients; i++)
 	{
 		if (!IsValidClient(i))
 			continue;
@@ -419,7 +440,7 @@ public Action OnSpecCmd(int client, const char[] command, int args)
 	if(target <= 0)
 		return Plugin_Continue;
 
-	// destroy floating entity, preventing from annoying (alive) observed players
+	// destroy floating entity, prevents annoying (alive) observed players
 	DestroyAttachedPropForClient(client);
 
 	return Plugin_Continue;
@@ -444,7 +465,7 @@ void DestroyAttachedPropForClient(int client)
 
 void UpdateAttachedPropArray(int entity)
 {
-	for (int client = 1; client < MaxClients; client++)
+	for (int client = 1; client <= MaxClients; client++)
 	{
 		if (!IsValidClient(client))
 			continue;
@@ -485,29 +506,33 @@ bool hasEnoughCredits(int client, int asked)
 }
 
 
-DecCredits(int client, int amount, bool relaytoclient)
+void Decrease_Credits_For_Client(int client, int amount, bool relaytoclient)
+{
+	g_RemainingCreds[client][VIRT_CRED] -= amount;
+	if (relaytoclient)
+	{
+		PrintToChat(client, "[] brouzoufs remaining: %d.", g_RemainingCreds[client][VIRT_CRED]);
+		PrintToConsole(client, "[] brouzoufs remaining: %d.", g_RemainingCreds[client][VIRT_CRED]);
+	}
+}
+
+
+void Decrease_Score_For_Client(int client, int amount, bool relaytoclient)
 {
 	if ( GetConVarInt( g_cvar_score_as_credits ) > 0 )
 	{
 		DecrementScore(client, 1);
-		g_RemainingCreds[client][SCORE_CRED] -= 1;
+		g_RemainingCreds[client][SCORE_CRED] -= amount;
 
 		if (relaytoclient)
 		{
 			PrintToChat(client, "[] WARNING: Your score has been decreased by 1 point for using that command!");
 		}
 	}
-
-	g_RemainingCreds[client][VIRT_CRED] -= amount;
-	if (relaytoclient)
-	{
-		PrintToChat(client, "[] Credits remaining: %d.", g_RemainingCreds[client][VIRT_CRED]);
-		PrintToConsole(client, "[] Credits remaining: %d.", g_RemainingCreds[client][VIRT_CRED]);
-	}
 }
 
 
-SetCredits(int client, int amount)
+void SetCredits(int client, int amount)
 {
 	g_RemainingCreds[client][VIRT_CRED] = amount;
 
@@ -516,7 +541,7 @@ SetCredits(int client, int amount)
 }
 
 
-DecrementScore(int client, int amount)
+void DecrementScore(int client, int amount)
 {
 	new new_xp = GetClientFrags(client) - amount;
 	SetEntProp(client, Prop_Data, "m_iFrags", new_xp);
@@ -524,10 +549,28 @@ DecrementScore(int client, int amount)
 }
 
 
+void Client_Used_Credits(int client, int credits)
+{
+	PrintToChat(client, "[] You have just used %d brouzoufs.", credits);
+	PrintToConsole(client, "[] You have just used %d brouzoufs.", credits);
+	Decrease_Credits_For_Client(client, credits, true);
+	Decrease_Score_For_Client(client, 1, true);
+}
+
+
+void DisplayActivity(int client, const char[] model)
+{
+	//ShowActivity2(client, "[sm_props] ", "%s spawned: %s.", client, model);
+	LogAction(client, -1, "[sm_props] \"%L\" spawned: %s", client, model);
+}
+
+
+
+
 // increment (virtual) credits for target client
 public Action Command_Set_Credits_For_Client(int client, int args)
 {
-	if(!client || IsFakeClient(client))
+	if(!client || IsFakeClient(client) || !IsAdmin(client))
 		return Plugin_Stop;
 
 	if (GetCmdArgs() != 2)
@@ -550,8 +593,8 @@ public Action Command_Set_Credits_For_Client(int client, int args)
 
 	SetCredits(i_target, StringToInt(s_amount));
 
-	PrintToChat(i_target, "[] Your credits have been set to %d.", g_RemainingCreds[i_target][VIRT_CRED]);
-	PrintToConsole(i_target, "[] Your credits have been set to %d.", g_RemainingCreds[i_target][VIRT_CRED]);
+	PrintToChat(i_target, "[] Your brouzoufs have been set to %d.", g_RemainingCreds[i_target][VIRT_CRED]);
+	PrintToConsole(i_target, "[] Your brouzoufs have been set to %d.", g_RemainingCreds[i_target][VIRT_CRED]);
 
 	if (GetClientName(i_target, s_targetname, sizeof(s_targetname)) && client != i_target)
 	{
@@ -566,7 +609,7 @@ public Action Command_Set_Credits_For_Client(int client, int args)
 //==================================
 
 
-PropSpawnDispatch(int client, int model_index)
+Prop_Dispatch_Allowed_Model_Index(int client, int model_index)
 {
 	g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_allowed_physics_models[model_index], 50);
 }
@@ -655,12 +698,37 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 }
 
 
-PrintPluginCommandInfo(int client)
+Print_Usage_For_Admins(int client)
 {
 	PrintToChat(client, "[sm_props] Admin, check console for useful commands and convars...");
 	PrintToConsole(client, "[sm_props] Admins, some useful commands:");
 	PrintToConsole(client, "\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_props_max_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.\nsm_props_max_ttl: props get deleted after that time.\nsm_props_enabled: disable the command.");
 	PrintToConsole(client, "You may also do sm_props \"model_path\" \"renderfx\" \"movetype\" \"ignite\"");
+}
+
+
+Print_Usage_For_Client(int client, int type=1)
+{
+	if (type == 1)
+	{
+		PrintToConsole(client, "Usage: sm_props [model|model path]\nAvailable models currently: duck, tiger");
+		PrintToChat(client, "Usage: !props [model | model path]\nAvailable models currently: duck, tiger");
+	}
+	else //TODO write all commands
+	{
+		PrintToChat(client, "[sm_props] check console for commands.");
+		PrintToConsole(client, "[sm_props] Some \"useful\" commands:");
+		PrintToConsole(client, "\nsm_props_nothx: disables props for you and everyone in the server.\n\
+sm_strapdong [me|team|all] [specs]: straps a dong on people (including spectators)\n\
+sm_props [model|model path]: spawns a model in the game\n\
+sm_dick [1-5] [1 for static]: spawns a dong of scale 1 to 5 with optional static properties\n");
+	}
+}
+
+
+public Action Command_Print_Help(int client, int args)
+{
+	Print_Usage_For_Client(client, 2);
 }
 
 
@@ -688,25 +756,22 @@ public Action CommandPropSpawn(int client, int args)
 
 		if (IsAdmin(client))
 		{
-			PrintToConsole(client, "Admins, some useful commands:\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_props_max_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.\nsm_props_max_ttl: props get deleted after that time.\nsm_props_enabled: disable the command.");
-			PrintToChat(client, "Admin, check console for useful commands and convars (more to come later).");
+			Print_Usage_For_Admins(client);
 		}
 		return Plugin_Handled;
 	}
 
 	if( GetCmdArgs() != 1 )
 	{
-		PrintToConsole(client, "Usage: sm_props [model|model path]\nAvailable models currently: duck, tiger");
-		PrintToChat(client, "Usage: !props [model | model path]\nAvailable models currently: duck, tiger");
-
-		PrintToChat(client, "You currently have %d credits to spawn props.", g_RemainingCreds[client][VIRT_CRED]);
-		PrintToConsole(client, "You currently have %d credits to spawn props.", g_RemainingCreds[client][VIRT_CRED]);
+		Print_Usage_For_Client(client, 1);
+		PrintToChat(client, "You currently have %d brouzoufs to spawn props.", g_RemainingCreds[client][VIRT_CRED]);
+		PrintToConsole(client, "You currently have %d brouzoufs to spawn props.", g_RemainingCreds[client][VIRT_CRED]);
 
 		if (IsAdmin(client))
 		{
-			PrintPluginCommandInfo(client);
+			Print_Usage_For_Admins(client);
 			decl String:s_args[PLATFORM_MAX_PATH];
-			//bypass credit system for DEBUG
+			//FIXME: bypass credit system for DEBUGGING ONLY
 			GetCmdArgString(s_args, sizeof(s_args));
 			Prop_Spawn_Dispatch_Admin(client, s_args);
 			return Plugin_Handled;
@@ -734,20 +799,22 @@ public Action CommandPropSpawn(int client, int args)
 		{
 			if (hasEnoughCredits(client, 5)) 								//FIXME: for now everything costs 5!
 			{
+				#if DEBUG
 				PrintToConsole(client, "Spawned: %s.", gs_allowed_physics_models[index]);
 				PrintToChat(client, "Spawning your %s.", model_pathname);
-				PropSpawnDispatch(client, index);
+				#endif
 
-				PrintToChat(client, "[] You have just used %d credits.", 5);
-				PrintToConsole(client, "[] You have just used %d credits.", 5);
-				DecCredits(client, 5, true);
+				Prop_Dispatch_Allowed_Model_Index(client, index);
+
+				Client_Used_Credits(client, 5);
+				DisplayActivity(client, gs_allowed_physics_models[index]);
 				return Plugin_Handled;
 			}
 			else
 			{
-				PrintToChat(client, "[] You don't have enough credits to spawn a prop: credits needed: %d, credits remaining: %d.",
+				PrintToChat(client, "[] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
 				5, g_RemainingCreds[client][VIRT_CRED]);
-				PrintToConsole(client, "[] You don't have enough credits to spawn a prop: credits needed: %d, credits remaining: %d.",
+				PrintToConsole(client, "[] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
 				5, g_RemainingCreds[client][VIRT_CRED]);
 				return Plugin_Handled;
 			}
@@ -873,8 +940,8 @@ public Action Command_Dong_Spawn(int client, int args)
 	}
 	if (g_RemainingCreds[client][VIRT_CRED] <= 0)
 	{
-		PrintToChat(client, "[] You don't have any remaining credits to spawn a prop.");
-		PrintToConsole(client, "[] You don't have any remaining credits to spawn a prop.");
+		PrintToChat(client, "[] You don't have any remaining brouzoufs to spawn a prop.");
+		PrintToConsole(client, "[] You don't have any remaining brouzoufs to spawn a prop.");
 		return Plugin_Handled;
 	}
 
@@ -882,8 +949,8 @@ public Action Command_Dong_Spawn(int client, int args)
 	{
 		PrintToChat(client, "Usage: !dick [scale 1-5] [1 for static]");
 		PrintToConsole(client, "Usage: sm_dick [scale 1-5] [1 for static]");
-		PrintToChat(client, "Type: !props_credit_status see credits for everyone.");
-		PrintToConsole(client, "Type sm_props_credit_status to see credits for everyone.");
+		PrintToChat(client, "Type: !props_credit_status see brouzoufs for everyone.");
+		PrintToConsole(client, "Type sm_props_credit_status to see brouzoufs for everyone.");
 		return Plugin_Handled;
 	}
 
@@ -904,17 +971,15 @@ public Action Command_Dong_Spawn(int client, int args)
 	if (hasEnoughCredits(client, g_DongPropPrice[iModelScale]))
 	{
 		DongDispatch(client, iModelScale, iModelProperty);
-		PrintToChat(client, "[] You have just used %d credits.", g_DongPropPrice[iModelScale]);
-		PrintToConsole(client, "[] You have just used %d credits.", g_DongPropPrice[iModelScale]);
-		DecCredits(client, g_DongPropPrice[iModelScale], true);
+		Client_Used_Credits(client, g_DongPropPrice[iModelScale]);
 		DisplayActivity(client, gs_dongs[iModelScale]);
 		return Plugin_Handled;
 	}
 	else
 	{
-		PrintToChat(client, "[] You don't have enough credits to spawn a prop: credits needed: %d, credits remaining: %d.",
+		PrintToChat(client, "[] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
 		g_DongPropPrice[iModelScale], g_RemainingCreds[client][VIRT_CRED]);
-		PrintToConsole(client, "[] You don't have enough credits to spawn a prop: credits needed: %d, credits remaining: %d.",
+		PrintToConsole(client, "[] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
 		g_DongPropPrice[iModelScale], g_RemainingCreds[client][VIRT_CRED]);
 		return Plugin_Handled;
 	}
@@ -940,13 +1005,6 @@ bool Should_Use_TE()
 	PrintToServer("Nobody opted out of props, we can use physics or dynamics.");
 	#endif
 	return false;
-}
-
-
-DisplayActivity(int client, const char[] model)
-{
-	//ShowActivity2(client, "[sm_props] ", "%s spawned: %s.", client, model);
-	LogAction(client, -1, "[sm_props] \"%L\" spawned: %s", client, model);
 }
 
 
@@ -976,7 +1034,7 @@ MakeParent(int client, int entity)
 	origin[2] += 2.5; // 2.5 z axis (+ is forward from origin)
 
 	angle[0] -= 20.0; // 20.0 vertical pitch (+ goes up)
-	//angle[1] -= 0.0; // 0.0 roll (- goes clockwise)
+	angle[1] -= 0.0; // 0.0 roll (- goes clockwise)
 	angle[2] -= 15.0; // yaw
 	SetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin); // these might not be working actually
 	SetEntPropVector(entity, Prop_Send, "m_angRotation", angle);
@@ -1195,59 +1253,150 @@ void GetRandomPosAboveClient(int client, float[3] origin)
 
 
 
-// create arg1 and strap to ourself
+// Create dong and strap to target arg1, spectators too if arg2
 public Action Command_Strap_Dong(int client, int args)
 {
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
-	if (HasAnyoneOptedOut())
+	if (HasAnyoneOptedOut() && !IsAdmin(client))
 	{
 		ReplyToCommand(client, "Sorry, someone requested this command be disabled temporarily.");
 		return Plugin_Handled;
 	}
 
-	if (gb_PausePropSpawning)
+	if (gb_PausePropSpawning && !IsAdmin(client))
 	{
 		ReplyToCommand(client, "Prop spawning is currently paused.");
 		return Plugin_Handled;
 	}
 
 	char arg[5];
+	int i_case;
 	GetCmdArg(1, arg, sizeof(arg));
 
 	if (strcmp(arg, "me") == 0)
-	{
-		SpawnAndStrapDongToSelf(client);  // TODO: use credits here too
-	}
+		i_case = 0;
 	else if (strcmp(arg, "team") == 0)
+		i_case = 1;
+	else if (strcmp(arg, "all") == 0)
+		i_case = 2;
+
+
+	if (i_case >= 1)
 	{
-		if (!IsAdmin(client))
-			return Plugin_Handled;
+		int team;
+		if (i_case == 1)
+			team = GetClientTeam(client);
 
-		int team = GetClientTeam(client);
-
-		for (int i = 1; i <= MaxClients; i++)
+		if (IsAdmin(client)) //bypass credit system
 		{
-			if (!IsValidClient(i) /*|| !IsPlayerReallyAlive(i)*/) // TODO: add argument to affect spectators too
-				continue;
-			if (GetClientTeam(i) != team)
-				continue;
+			for (int i=1; i <= MaxClients; i++)
+			{
+				if (!IsValidClient(i))
+					continue;
 
-			SpawnAndStrapDongToSelf(i);
+				if (i_case == 1)
+					if (GetClientTeam(i) != team)
+						continue;
+
+				if (client == i && !IsPlayerAlive(client) && GetCmdArgs() < 2) // we're dead, we don't add to price
+					continue;
+
+				if (!IsPlayerReallyAlive(i) && GetCmdArgs() < 2) // didn't ask for specs to be affected
+					continue;
+
+				if (g_AttachmentEnt[client] != -1) // don't add on top of another already attached
+					continue;
+
+				SpawnAndStrapDongToSelf(i);
+				DisplayActivity(client, "Dong on team");
+				return Plugin_Handled;
+			}
+		}
+		else
+		{
+			int price;
+			bool affected[MAXPLAYERS+1];
+
+			for (int i=1; i <= MaxClients; i++)
+			{
+				if (!IsValidClient(i))
+					continue;
+
+				if (i_case == 1)
+					if (GetClientTeam(i) != team)
+						continue;
+
+				if (client == i && !IsPlayerAlive(client) && GetCmdArgs() < 2) // we're dead, we don't add to price
+					continue;
+
+				if (!IsPlayerReallyAlive(i) && GetCmdArgs() < 2) // didn't ask for specs to be affected
+					continue;
+
+				if (g_AttachmentEnt[client] != -1) // don't add on top of another already attached
+					continue;
+
+				price++;
+				affected[i] = true;
+			}
+
+			#if DEBUG
+			PrintToServer("[sm_props] DEBUG: affected clients (sizeof(affected) is %d):\n", sizeof(affected));
+			for (int i=1; i <= MaxClients; i++) // this DEBUG has a performance hit on the server!
+			{
+				PrintToServer("affected[%d] is %d", i, affected[i]);
+				if (!IsValidClient(i) || !affected[i])
+					continue;
+				PrintToServer("affected[%d] (%N?) is %d", i, i, affected[i]);
+			}
+			#endif
+
+			if (hasEnoughCredits(client, price) && price != 0)
+			{
+				for (int i=1; i <= MaxClients; i++)
+					if (affected[i])
+						SpawnAndStrapDongToSelf(i);
+
+
+				Client_Used_Credits(client, price);
+				DisplayActivity(client, "Dong on team");
+				return Plugin_Handled;
+			}
+			else if (price == 0)
+			{
+				ReplyToCommand(client, "[sm_props] Nobody would be affected by your request.");
+				return Plugin_Handled;
+			}
+			else
+			{
+				ReplyToCommand(client, "[] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+				price, g_RemainingCreds[client][VIRT_CRED]);
+				return Plugin_Handled;
+			}
 		}
 	}
-	else if (strcmp(arg, "all") == 0)
+	else //i_case 0, only "me"
 	{
 		if (!IsAdmin(client))
-			return Plugin_Handled;
-
-		for (int i = 1; i <= MaxClients; i++)
 		{
-			if (!IsValidClient(i) /*|| !IsPlayerReallyAlive(i)*/)
-				continue;
-			SpawnAndStrapDongToSelf(i);
+			if (hasEnoughCredits(client, g_DongPropPrice[0]))
+			{
+				SpawnAndStrapDongToSelf(client);
+				Client_Used_Credits(client, g_DongPropPrice[0]);
+				DisplayActivity(client, "Dong on himself"); //FIXME: format this to add detail about the command passed in that string
+				return Plugin_Handled;
+			}
+			else
+			{
+				ReplyToCommand(client, "[] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+				g_DongPropPrice[0], g_RemainingCreds[client][VIRT_CRED]);
+				return Plugin_Handled;
+			}
 		}
+		SpawnAndStrapDongToSelf(client);
+		DisplayActivity(client, "Dong on team");
+		return Plugin_Handled;
 	}
 	return Plugin_Handled;
 }
@@ -1259,11 +1408,16 @@ bool IsPlayerReallyAlive(int client)
 		return false;
 
 	#if DEBUG
-	PrintToServer("Client %d has %d health.", client, GetEntProp(client, Prop_Send, "m_iHealth"));
+	PrintToServer("[sm_props] DEBUG: Client %N (%d) has %d health.", client, client, GetEntProp(client, Prop_Send, "m_iHealth"));
 	#endif
 
 	if (GetEntProp(client, Prop_Send, "m_iHealth") <= 1) // For some reason, 1 health point means dead.
+	{
+		#if DEBUG
+		PrintToServer("[sm_props] DEBUG: Determined that %N is not alive right now.", client);
+		#endif
 		return false;
+	}
 
 	return true;
 }
@@ -1272,19 +1426,17 @@ bool IsPlayerReallyAlive(int client)
 public void SpawnAndStrapDongToSelf(int client)
 {
 	#if DEBUG
-	char name[255];
-	GetClientName(client, name, sizeof(name));
-	PrintToConsole(client, "Processing: Strapdongself on client index %d \"%s\"", client, name);
+	PrintToConsole(client, "[sm_props] DEBUG: SpawnAndStrapDongToSelf() on %L", client);
 	#endif
 
-	#if !DEBUG
-	if (!g_AttachmentEnt[client] == -1) // limit to once only per round
-	#endif
+	// #if DEBUG != 0
+	if (g_AttachmentEnt[client] == -1) // limit to once only per round
+	// #endif
 	{
 		g_AttachmentEnt[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[0], 5);
 		MakeParent(client, g_AttachmentEnt[client]);
 		#if DEBUG
-		PrintToServer("Strapped prop %d to client %d", g_AttachmentEnt[client], client);
+		PrintToServer("[sm_props] DEBUG: Strapped prop index %d to client %L", g_AttachmentEnt[client], client);
 		#endif
 	}
 }
