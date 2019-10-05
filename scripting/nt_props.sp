@@ -60,7 +60,7 @@ enum FireworksPropType {
 	REGULAR_PHYSICS,
 };
 
-#define DEBUG 1
+#define DEBUG 0
 
 public Plugin:myinfo =
 {
@@ -82,7 +82,6 @@ public Plugin:myinfo =
 // -> AFAIK the TE cannot be destroyed by timer, so client preference is very limited, ie. if someone asks for a big scale model that is supposed to be auto-removed
 //    we can't use a TE because they don't get affected by timers, so regular physics_prop take precedence. Same for dynamic props, cannot have them as TempEnts.
 //
-// FIXME: restore score credit properly on reconnect after nt_savescore restored it (maybe need a timer)
 // FIXME: update prop angles according to viewangles for spectators (place before eyes preferably)
 
 public OnPluginStart()
@@ -170,9 +169,15 @@ public OnClientPostAdminCheck(int client)
 }
 
 
+public Action timer_AdvertiseHelp(Handle timer, int client)
+{
+	PrintToChat(client, "[sm_props] You can print available commands with !props_help");
+}
+
+
 public OnClientDisconnect(int client)
 {
-	if(GetConVarBool(g_cvar_props_enabled))
+	//if(GetConVarBool(g_cvar_props_enabled)) // not worth checking
 		g_optedout[client] = false;
 }
 
@@ -365,9 +370,29 @@ public OnClientPutInServer(int client)
 {
 	if(client && !IsFakeClient(client))
 	{
+		CreateTimer(60.0, timer_AdvertiseHelp, client);
+
 		// if we use score as credit, restore them
 		if ( GetConVarBool(g_cvar_score_as_credits) )
 			g_RemainingCreds[client][SCORE_CRED] = GetClientFrags(client); //NEEDS TESTING!
+		if ( GetConVarBool(g_cvar_give_initial_credits) )
+			g_RemainingCreds[client][VIRT_CRED] = g_RemainingCreds[client][MAX_CRED] = GetConVarInt(cvMaxPropsCreds);
+		else
+			g_RemainingCreds[client][MAX_CRED] = g_RemainingCreds[client][VIRT_CRED] = 0;
+	}
+}
+
+
+public OnSavedScoreLoaded(int client, int score)
+{
+	if(client && !IsFakeClient(client))
+	{
+		#if DEBUG
+		PrintToServer("[sm_props] DEBUG: updating score of %d for player %N", score, client);
+		#endif
+		// if we use score as credit, restore them
+		if ( GetConVarBool(g_cvar_score_as_credits) )
+			g_RemainingCreds[client][SCORE_CRED] = score; //NEEDS TESTING!
 		if ( GetConVarBool(g_cvar_give_initial_credits) )
 			g_RemainingCreds[client][VIRT_CRED] = g_RemainingCreds[client][MAX_CRED] = GetConVarInt(cvMaxPropsCreds);
 		else
@@ -593,12 +618,12 @@ public Action Command_Set_Credits_For_Client(int client, int args)
 
 	SetCredits(i_target, StringToInt(s_amount));
 
-	PrintToChat(i_target, "[] Your brouzoufs have been set to %d.", g_RemainingCreds[i_target][VIRT_CRED]);
-	PrintToConsole(i_target, "[] Your brouzoufs have been set to %d.", g_RemainingCreds[i_target][VIRT_CRED]);
+	PrintToChat(i_target, "[sm_props] Your brouzoufs have been set to %d.", g_RemainingCreds[i_target][VIRT_CRED]);
+	PrintToConsole(i_target, "[sm_props] Your brouzoufs have been set to %d.", g_RemainingCreds[i_target][VIRT_CRED]);
 
 	if (GetClientName(i_target, s_targetname, sizeof(s_targetname)) && client != i_target)
 	{
-		ReplyToCommand(client, "[] The credits for player %s are now set to %d.", s_targetname, g_RemainingCreds[i_target][VIRT_CRED]);
+		ReplyToCommand(client, "[sm_props] The credits for player %s are now set to %d.", s_targetname, g_RemainingCreds[i_target][VIRT_CRED]);
 	}
 	return Plugin_Handled;
 }
@@ -721,7 +746,10 @@ Print_Usage_For_Client(int client, int type=1)
 		PrintToConsole(client, "\nsm_props_nothx: disables props for you and everyone in the server.\n\
 sm_strapdong [me|team|all] [specs]: straps a dong on people (including spectators)\n\
 sm_props [model|model path]: spawns a model in the game\n\
-sm_dick [1-5] [1 for static]: spawns a dong of scale 1 to 5 with optional static properties\n");
+sm_dick [1-5] [1 for static]: spawns a dong of scale 1 to 5 with optional static properties\n
+sm_props_credit_status: check credits of other players and yourself\n
+sm_props_pause: stops anyone from spawning props until the end of the current round\n");
+		ClientCommand(client, "toggleconsole");
 	}
 }
 
@@ -964,24 +992,24 @@ public Action Command_Dong_Spawn(int client, int args)
 	{
 		if (g_RemainingCreds[client][SCORE_CRED] <= 0)
 		{
-			PrintToChat(client, "[] Your current score doesn't allow you to spawn props.");
-			PrintToConsole(client, "[] Your current score doesn't allow you to spawn props.");
+			PrintToChat(client, "[sm_props] Your current score doesn't allow you to spawn props.");
+			PrintToConsole(client, "[sm_props] Your current score doesn't allow you to spawn props.");
 			return Plugin_Handled;
 		}
 	}
 	if (g_RemainingCreds[client][VIRT_CRED] <= 0)
 	{
-		PrintToChat(client, "[] You don't have any remaining brouzoufs to spawn a prop.");
-		PrintToConsole(client, "[] You don't have any remaining brouzoufs to spawn a prop.");
+		PrintToChat(client, "[sm_props] You don't have any remaining brouzoufs to spawn a prop.");
+		PrintToConsole(client, "[sm_props] You don't have any remaining brouzoufs to spawn a prop.");
 		return Plugin_Handled;
 	}
 
 	if ((GetCmdArgs() > 2) || (GetCmdArgs() == 0))
 	{
-		PrintToChat(client, "Usage: !dick [scale 1-5] [1 for static]");
-		PrintToConsole(client, "Usage: sm_dick [scale 1-5] [1 for static]");
-		PrintToChat(client, "Type: !props_credit_status see brouzoufs for everyone.");
-		PrintToConsole(client, "Type sm_props_credit_status to see brouzoufs for everyone.");
+		PrintToChat(client, "[sm_props] Usage: !dick [scale 1-5] [1 for static]");
+		PrintToConsole(client, "[sm_props] Usage: sm_dick [scale 1-5] [1 for static]");
+		PrintToChat(client, "[sm_props] Type: !props_credit_status see brouzoufs for everyone.");
+		PrintToConsole(client, "[sm_props] Type sm_props_credit_status to see brouzoufs for everyone.");
 		return Plugin_Handled;
 	}
 
