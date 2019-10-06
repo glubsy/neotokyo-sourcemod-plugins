@@ -1109,6 +1109,48 @@ MakeParent(int client, int entity)
 }
 
 
+MakeParent_Spec(int client, int entity)
+{
+	decl String:Buffer[64];
+	Format(Buffer, sizeof(Buffer), "Client%d", client);
+
+	DispatchKeyValue(client, "targetname", Buffer);
+
+	SetVariantString("!activator");
+	AcceptEntityInput(entity, "SetParent", client);
+
+	SetVariantString("eyes");
+	AcceptEntityInput(entity, "SetParentAttachment");
+	SetVariantString("eyes");
+	AcceptEntityInput(entity, "SetParentAttachmentMaintainOffset");
+
+	float origin[3];
+	float angle[3];
+	GetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin);
+	GetEntPropVector(entity, Prop_Send, "m_angRotation", angle);
+	DispatchSpawn(entity);
+	origin[0] += 6.6; // 6.6 vetical axis
+	origin[1] += 1.9; // 1.9 horizontal axis
+	origin[2] += 2.5; // 2.5 z axis (+ is forward from origin)
+
+	angle[0] -= 20.0; // 20.0 vertical pitch (+ goes up)
+	angle[1] -= 0.0; // 0.0 roll (- goes clockwise)
+	angle[2] -= 15.0; // yaw
+	SetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin); // these might not be working actually
+	SetEntPropVector(entity, Prop_Send, "m_angRotation", angle);
+
+	//DispatchKeyValueVector(entity, "Origin", origin);    //FIX testing offset coordinates, remove! -glub
+	//DispatchKeyValueVector(entity, "Angles", angle);
+
+	#if DEBUG
+	char name[255];
+	GetClientName(client, name, sizeof(name));
+	PrintToConsole(client, "Made parent: at origin: %f %f %f; angles: %f %f %f for client %s", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2], name);
+	#endif
+}
+
+
+
 public void OnGhostPickUp(int client)
 {
 	if (GetConVarBool(g_cvar_props_onghostpickup) && !HasAnyoneOptedOut())
@@ -1342,10 +1384,6 @@ public Action Command_Strap_Dong(int client, int args)
 	else if (strcmp(arg, "all") == 0)
 		i_case = 2;
 
-	#if DEBUG
-	PrintToServer("[sm_props] DEBUG: case is %d.", i_case);
-	#endif
-
 	if (i_case >= 1)
 	{
 		int team;
@@ -1495,12 +1533,25 @@ public void SpawnAndStrapDongToSelf(int client)
 	PrintToConsole(client, "[sm_props] DEBUG: SpawnAndStrapDongToSelf() on %L", client);
 	#endif
 
-	// #if DEBUG != 0
-	if (g_AttachmentEnt[client] == -1) // limit to once only per round
-	// #endif
+	if (g_AttachmentEnt[client] != -1) // limit to one at a time
+		return;
+
+	if (IsPlayerReallyAlive(client))
 	{
 		g_AttachmentEnt[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[0], 5);
 		MakeParent(client, g_AttachmentEnt[client]);
+		#if DEBUG
+		PrintToServer("[sm_props] DEBUG: Strapped prop index %d to client %L", g_AttachmentEnt[client], client);
+		#endif
+	}
+	else //spectator
+	{
+		#if DEBUG
+		PrintToServer("Client %N is a spectator. Strapping differently.", client);
+		#endif
+
+		g_AttachmentEnt[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[0], 5);
+		MakeParent_Spec(client, g_AttachmentEnt[client]);
 		#if DEBUG
 		PrintToServer("[sm_props] DEBUG: Strapped prop index %d to client %L", g_AttachmentEnt[client], client);
 		#endif

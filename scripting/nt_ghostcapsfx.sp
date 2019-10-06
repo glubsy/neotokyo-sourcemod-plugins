@@ -128,6 +128,24 @@ public void OnConfigsExecuted()
 //==================================
 
 
+public void OnClientPutInServer(int client)
+{
+	if(client && !IsFakeClient(client))
+	{
+		CreateTimer(50.0, timer_AdvertiseHelp, client);
+	}
+}
+
+
+public Action timer_AdvertiseHelp(Handle timer, int client)
+{
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+	PrintToChat(client, "[nt_ghostcapsfx] You can disable extra ghost warning sounds with !sm_sounds_nothx");
+	return Plugin_Handled;
+}
+
+
 public void OnClientCookiesCached(int client)
 {
 	ProcessCookies(client);
