@@ -3,6 +3,7 @@
 #include <sdkhooks>
 #include <clientprefs>
 #include <nt_entitytools>
+// #include <smlib> //for entity flags
 
 #pragma semicolon 1
 #define PLUGIN_VERSION "20190925"
@@ -11,7 +12,7 @@ Handle g_cvar_props_enabled, g_cvar_restrict_alive, g_cvar_give_initial_credits,
 Handle cvMaxPropsCreds = INVALID_HANDLE; // maximum credits given
 Handle cvPropMaxTTL = INVALID_HANDLE; // maximum time to live before prop gets auto removed
 Handle g_PropPrefCookie = INVALID_HANDLE; // handle to client preferences
-Handle g_cvar_props_oncapture, g_cvar_props_onghostpickup, g_cvar_props_oncapture_nodongs = INVALID_HANDLE;
+Handle g_cvar_props_oncapture, g_cvar_props_onghostpickup, g_cvar_props_oncapture_nodongs, gTimer = INVALID_HANDLE;
 bool gb_PausePropSpawning;
 int g_AttachmentEnt[MAXPLAYERS+1] = {-1,...}; // strapped on prop
 
@@ -22,7 +23,6 @@ new g_RemainingCreds[MAXPLAYERS+1][3];
 #define MAX_CRED 2
 
 new g_propindex_d[MAXPLAYERS+1]; // holds the last spawned entity by client
-new g_precachedModels[10];
 new g_optedout[MAXPLAYERS+1];
 
 // WARNING: the custom files require the sm_downloader plugin to force clients to download them
@@ -33,7 +33,7 @@ new const String:gs_dongs[][] = {
 	"models/d/d_h02.mdl", //huge
 	"models/d/d_g02.mdl", //gigantic
 	"models/d/d_mh02.mdl" }; //megahuge
-// Prices: scale 1= 1 creds, 2= 3 creds, 3= 6 creds, 4= 8 creds, 5= 10 creds
+
 new const g_DongPropPrice[] = { 1, 6, 9, 13, 20 };
 
 new const String:gs_allowed_physics_models[][] = {
@@ -60,7 +60,7 @@ enum FireworksPropType {
 	REGULAR_PHYSICS,
 };
 
-#define DEBUG 0
+#define DEBUG 1
 
 public Plugin:myinfo =
 {
@@ -82,7 +82,10 @@ public Plugin:myinfo =
 // -> AFAIK the TE cannot be destroyed by timer, so client preference is very limited, ie. if someone asks for a big scale model that is supposed to be auto-removed
 //    we can't use a TE because they don't get affected by timers, so regular physics_prop take precedence. Same for dynamic props, cannot have them as TempEnts.
 //
-// FIXME: update prop angles according to viewangles for spectators (place before eyes preferably)
+// FIXME: debug why player are not spawning TE when opted-out clients are around
+// FIXME: figure out how to make attached props changed their material to cloak
+// FIXME: use ProcessTargetString to target a player by name
+// FIXME: use SDKHook_SetTransmit instead of TE for filtering props
 
 public OnPluginStart()
 {
@@ -109,7 +112,7 @@ public OnPluginStart()
 
 	g_cvar_give_initial_credits = CreateConVar( "sm_props_initial_credits", "0",
 												"0: players starts with zero credits 1: assign sm_max_props_credits to all players as soon as they connect",
-												FCVAR_NOTIFY, true, 0.0, true, 1.0 );
+												FCVAR_NONE, true, 0.0, true, 1.0 );
 	cvMaxPropsCreds = CreateConVar("sm_props_max_credits", "10",
 									"Max number of virtual credits allowed per round/life for spawning props");
 	cvPropMaxTTL = CreateConVar("sm_props_max_ttl", "60",
@@ -117,10 +120,10 @@ public OnPluginStart()
 
 	g_cvar_credits_replenish = CreateConVar( "sm_props_replenish_credits", "1",
 											"0: credits are lost forever after use. 1: credits replenish after each end of round",
-											FCVAR_NOTIFY, true, 0.0, true, 1.0 );
-	g_cvar_score_as_credits = CreateConVar( "sm_props_score_as_credits", "1",
+											FCVAR_NONE, true, 0.0, true, 1.0 );
+	g_cvar_score_as_credits = CreateConVar( "sm_props_score_as_credits", "0",
 											"0: use virtual props credits only, 1: use score as props credits on top of virtual props credits",
-											FCVAR_NOTIFY, true, 0.0, true, 1.0 );
+											FCVAR_NONE, true, 0.0, true, 1.0 );
 
 	RegConsoleCmd("sm_props_nothx", Command_Hate_Props_Toggle, "Toggle your preference to not see custom props wherever possible.");
 	g_PropPrefCookie = RegClientCookie("no-props-plz", "player doesn't like custom props", CookieAccess_Public);
@@ -171,6 +174,8 @@ public OnClientPostAdminCheck(int client)
 
 public Action timer_AdvertiseHelp(Handle timer, int client)
 {
+	if (!IsValidClient(client))
+		return;
 	PrintToChat(client, "[sm_props] You can print available commands with !props_help");
 }
 
@@ -181,6 +186,11 @@ public OnClientDisconnect(int client)
 		g_optedout[client] = false;
 }
 
+
+public OnMapEnd()
+{
+	CloseHandle(gTimer);
+}
 
 bool HasAnyoneOptedOut()
 {
@@ -746,8 +756,8 @@ Print_Usage_For_Client(int client, int type=1)
 		PrintToConsole(client, "\nsm_props_nothx: disables props for you and everyone in the server.\n\
 sm_strapdong [me|team|all] [specs]: straps a dong on people (including spectators)\n\
 sm_props [model|model path]: spawns a model in the game\n\
-sm_dick [1-5] [1 for static]: spawns a dong of scale 1 to 5 with optional static properties\n
-sm_props_credit_status: check credits of other players and yourself\n
+sm_dick [1-5] [1 for static]: spawns a dong of scale 1 to 5 with optional static properties\n\
+sm_props_credit_status: check credits of other players and yourself\n\
 sm_props_pause: stops anyone from spawning props until the end of the current round\n");
 		ClientCommand(client, "toggleconsole");
 	}
@@ -871,9 +881,9 @@ public Action CommandPropSpawn(int client, int args)
 			}
 			else
 			{
-				PrintToChat(client, "[] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+				PrintToChat(client, "[sm_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
 				5, g_RemainingCreds[client][VIRT_CRED]);
-				PrintToConsole(client, "[] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+				PrintToConsole(client, "[sm_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
 				5, g_RemainingCreds[client][VIRT_CRED]);
 				return Plugin_Handled;
 			}
@@ -898,14 +908,8 @@ public DongDispatch(int client, int scale, int bstatic)
 		case 0:
 		{
 			if (!bstatic)
-			{
-				if (Should_Use_TE()) // use TempEnts to avoid showing to people who don't like it
-					Spawn_TE_Dong(client, gs_dongs[scale], gs_PropType[TE_PHYSICS]);
-				else
-				{
-					g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 50);
-				}
-			}
+				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 50);
+				//Spawn_TE_Dong(client, gs_dongs[scale], gs_PropType[TE_PHYSICS]); // use TempEnts to avoid showing to people who don't like it
 			else
 				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 50);
 		}
@@ -913,13 +917,8 @@ public DongDispatch(int client, int scale, int bstatic)
 		{
 			if (!bstatic)
 			{
-				if (Should_Use_TE()) // use TempEnts to avoid showing to people who don't like it
-					Spawn_TE_Dong(client, gs_dongs[scale], gs_PropType[TE_PHYSICS]);
-				else
-				{
-					g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 120);
-					CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
-				}
+				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 120);
+				CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
 			}
 			else
 			{
@@ -935,7 +934,7 @@ public DongDispatch(int client, int scale, int bstatic)
 				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 180);
 
 			// remove the prop when it's touched by a player
-			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
+			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove); //FIXME
 			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
 		}
 		case 3:
@@ -963,7 +962,10 @@ public DongDispatch(int client, int scale, int bstatic)
 			//scale = 0 || scale > 5
 		}
 	}
+	if (Should_Hide_Props())
+		SDKHook(g_propindex_d[client], SDKHook_SetTransmit, Hide_SetTransmit);
 }
+
 
 
 public Action Command_Dong_Spawn(int client, int args)
@@ -980,11 +982,6 @@ public Action Command_Dong_Spawn(int client, int args)
 	{
 		PrintToConsole(client, "This command is currently disabled. Ask an admin to enable with sm_props_enabled");
 		PrintToChat(client, "This command is currently disabled. Ask an admin to enable with sm_props_enabled");
-		return Plugin_Handled;
-	}
-	else if (HasAnyoneOptedOut())
-	{
-		Display_Why_Command_Is_Disabled(client);
 		return Plugin_Handled;
 	}
 
@@ -1036,16 +1033,16 @@ public Action Command_Dong_Spawn(int client, int args)
 	}
 	else
 	{
-		PrintToChat(client, "[] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+		PrintToChat(client, "[sm_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
 		g_DongPropPrice[iModelScale], g_RemainingCreds[client][VIRT_CRED]);
-		PrintToConsole(client, "[] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+		PrintToConsole(client, "[sm_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
 		g_DongPropPrice[iModelScale], g_RemainingCreds[client][VIRT_CRED]);
 		return Plugin_Handled;
 	}
 }
 
 
-bool Should_Use_TE()
+bool Should_Hide_Props()
 {
 	for (int client=1; client <= MaxClients; client++)
 	{
@@ -1055,13 +1052,13 @@ bool Should_Use_TE()
 		if (g_optedout[client]) // at least one person doesn't want to see them
 		{
 			#if DEBUG
-			PrintToServer("Client %s has set pref to opt out of props. We should use TE!", GetClientOfUserId(client));
+			PrintToServer("[sm_props] DEBUG: Client %s has opted out of props, let's hide them!", GetClientOfUserId(client));
 			#endif
 			return true;
 		}
 	}
 	#if DEBUG
-	PrintToServer("Nobody opted out of props, we can use physics or dynamics.");
+	PrintToServer("[sm_props] DEBUG: Nobody opted out of props.");
 	#endif
 	return false;
 }
@@ -1083,6 +1080,9 @@ MakeParent(int client, int entity)
 	SetVariantString("grenade2");
 	AcceptEntityInput(entity, "SetParentAttachmentMaintainOffset");
 
+	AcceptEntityInput(entity, "DisableShadow");
+	// SetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity", client); // warning! do it right
+
 	float origin[3];
 	float angle[3];
 	GetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin);
@@ -1109,46 +1109,11 @@ MakeParent(int client, int entity)
 }
 
 
-MakeParent_Spec(int client, int entity)
+stock SetAlpha (int target, int alpha)
 {
-	decl String:Buffer[64];
-	Format(Buffer, sizeof(Buffer), "Client%d", client);
-
-	DispatchKeyValue(client, "targetname", Buffer);
-
-	SetVariantString("!activator");
-	AcceptEntityInput(entity, "SetParent", client);
-
-	SetVariantString("eyes");
-	AcceptEntityInput(entity, "SetParentAttachment");
-	SetVariantString("eyes");
-	AcceptEntityInput(entity, "SetParentAttachmentMaintainOffset");
-
-	float origin[3];
-	float angle[3];
-	GetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin);
-	GetEntPropVector(entity, Prop_Send, "m_angRotation", angle);
-	DispatchSpawn(entity);
-	origin[0] += 6.6; // 6.6 vetical axis
-	origin[1] += 1.9; // 1.9 horizontal axis
-	origin[2] += 2.5; // 2.5 z axis (+ is forward from origin)
-
-	angle[0] -= 20.0; // 20.0 vertical pitch (+ goes up)
-	angle[1] -= 0.0; // 0.0 roll (- goes clockwise)
-	angle[2] -= 15.0; // yaw
-	SetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin); // these might not be working actually
-	SetEntPropVector(entity, Prop_Send, "m_angRotation", angle);
-
-	//DispatchKeyValueVector(entity, "Origin", origin);    //FIX testing offset coordinates, remove! -glub
-	//DispatchKeyValueVector(entity, "Angles", angle);
-
-	#if DEBUG
-	char name[255];
-	GetClientName(client, name, sizeof(name));
-	PrintToConsole(client, "Made parent: at origin: %f %f %f; angles: %f %f %f for client %s", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2], name);
-	#endif
+	// SetEntityRenderMode(target, RENDER_TRANSCOLOR);
+	SetEntityRenderColor(target, 255, 255, 255, alpha); //only works for some models :(
 }
-
 
 
 public void OnGhostPickUp(int client)
@@ -1360,11 +1325,11 @@ public Action Command_Strap_Dong(int client, int args)
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
-	if (HasAnyoneOptedOut() && !IsAdmin(client))
-	{
-		Display_Why_Command_Is_Disabled(client);
-		return Plugin_Handled;
-	}
+	// if (HasAnyoneOptedOut() && !IsAdmin(client))
+	// {
+	// 	Display_Why_Command_Is_Disabled(client);
+	// 	return Plugin_Handled;
+	// }
 
 	if (gb_PausePropSpawning && !IsAdmin(client))
 	{
@@ -1412,7 +1377,7 @@ public Action Command_Strap_Dong(int client, int args)
 				continue;
 
 			// don't add on top of another already attached
-			if (g_AttachmentEnt[client] != -1)
+			if (g_AttachmentEnt[i] != -1)
 				continue;
 
 			if (!isadmin)
@@ -1450,7 +1415,7 @@ public Action Command_Strap_Dong(int client, int args)
 		if (hasEnoughCredits(client, price) && price != 0)
 		{
 			for (int i=1; i <= MaxClients; i++)
-				if (affected[i])
+				if (affected[i] && IsValidClient(i))
 					SpawnAndStrapDongToSelf(i);
 
 			Client_Used_Credits(client, price);
@@ -1506,6 +1471,14 @@ public Action Command_Strap_Dong(int client, int args)
 }
 
 
+bool IsPlayerReallyDead(int client)
+{
+	if (GetEntProp(client, Prop_Send, "m_iHealth") <= 1)
+		return true;
+	return false;
+}
+
+
 bool IsPlayerReallyAlive(int client)
 {
 	if ((GetClientTeam(client) < 2)) // not in team, probably spectator
@@ -1533,13 +1506,14 @@ public void SpawnAndStrapDongToSelf(int client)
 	PrintToConsole(client, "[sm_props] DEBUG: SpawnAndStrapDongToSelf() on %L", client);
 	#endif
 
-	if (g_AttachmentEnt[client] != -1) // limit to one at a time
+	if (g_AttachmentEnt[client] != -1 || !IsValidClient(client)) // limit to one at a time
 		return;
 
 	if (IsPlayerReallyAlive(client))
 	{
 		g_AttachmentEnt[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[0], 5);
 		MakeParent(client, g_AttachmentEnt[client]);
+		SDKHook(g_AttachmentEnt[client], SDKHook_SetTransmit, Hide_SetTransmit);
 		#if DEBUG
 		PrintToServer("[sm_props] DEBUG: Strapped prop index %d to client %L", g_AttachmentEnt[client], client);
 		#endif
@@ -1547,19 +1521,205 @@ public void SpawnAndStrapDongToSelf(int client)
 	else //spectator
 	{
 		#if DEBUG
-		PrintToServer("Client %N is a spectator. Strapping differently.", client);
+		PrintToServer("[sm_props] DEBUG: Client %N is a spectator. Strapping differently.", client);
 		#endif
 
-		g_AttachmentEnt[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[0], 5);
-		MakeParent_Spec(client, g_AttachmentEnt[client]);
+		g_AttachmentEnt[client] = Create_Dynamic_Prop_For_Attachment(client, gs_dongs[0], 5);
 		#if DEBUG
 		PrintToServer("[sm_props] DEBUG: Strapped prop index %d to client %L", g_AttachmentEnt[client], client);
 		#endif
+		if (gTimer == INVALID_HANDLE)
+		{
+			gTimer = CreateTimer(0.1, UpdateObjects, INVALID_HANDLE, TIMER_REPEAT);
+		}
 	}
 }
 
 
 
+stock int Create_Dynamic_Prop_For_Attachment(int client, const char[] modelname, int health)
+{
+	int EntIndex = CreateEntityByName("prop_dynamic_override");
+
+	if(!IsModelPrecached(modelname))
+		PrecacheModel(modelname);
+
+	MakeParent_Spec(client, EntIndex);
+
+	float VecOrigin[3], VecAngles[3], normal[3];
+
+	DispatchKeyValue(EntIndex, "model", modelname);
+	DispatchKeyValue(EntIndex, "Solid", "6");
+	//SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);
+	SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 11);
+	// SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);
+	// SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);
+	SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);
+	SetEntProp(EntIndex, Prop_Data, "m_iMaxHealth", health, 1);
+
+
+	GetClientEyePosition(client, VecOrigin);
+	GetClientEyeAngles(client, VecAngles);
+
+
+	AcceptEntityInput(EntIndex, "DisableShadow");
+	SetAlpha(EntIndex, 100);
+
+
+	// VecAngles[0] += 50.0;
+	// DispatchKeyValueVector(EntIndex, "Origin", VecOrigin); // works!
+	//DispatchKeyValueVector(EntIndex, "Angles", VecAngles);
+
+
+	TeleportEntity(EntIndex, VecOrigin, VecAngles, NULL_VECTOR);
+	DispatchSpawn(EntIndex);
+
+	new Float:degree = 180.0;  //rotating properly -glub
+	decl Float:angles[3];
+	//GetEntPropVector(EntIndex, Prop_Data, "m_angRotation", angles);
+	//RotateYaw(angles, degree);
+
+
+	//DispatchKeyValueVector(EntIndex, "Angles", angles );  // rotates 180 degrees! -glub
+
+	// #if DEBUG
+	// new String:name[130];
+	// GetClientName(client, name, sizeof(name));
+	// PrintToChatAll("%s spawned a %s.", name, GetEntityClassname(EntIndex));
+	// #endif
+
+	return EntIndex;
+}
+
+
+MakeParent_Spec(int client, int entity)
+{
+	char tName[128];
+	Format(tName, sizeof(tName), "Client%i", client);
+
+	Format(tName, sizeof(tName), "target%i", client);
+	DispatchKeyValue(client, "targetname", tName);
+
+	// set offset here if needed
+
+	DispatchKeyValue(entity, "parentname", tName);
+	SetVariantString(tName);
+	AcceptEntityInput(entity, "SetParent", entity, entity, 0);
+
+	SetVariantString("grenade2"); // TODO; maybe "rorward" would work with TeleportEntity?
+	AcceptEntityInput(entity, "SetParentAttachment");
+
+	// old method below:
+	#if DEBUG > 10
+	SetVariantString("!activator");
+	AcceptEntityInput(entity, "SetParent", client);
+
+	// SetVariantString("grenade2");
+	// AcceptEntityInput(entity, "SetParentAttachment");
+	SetVariantString("grenade2");
+	AcceptEntityInput(entity, "SetParentAttachmentMaintainOffset");
+
+	float origin[3];
+	float angle[3];
+	GetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin);
+	//GetEntPropVector(entity, Prop_Send, "m_angRotation", angle);
+
+	// origin[0] += 6.6; // 6.6 vetical axis
+	// origin[1] += 1.9; // 1.9 horizontal axis
+	// origin[2] += 2.5; // 2.5 z axis (+ is forward from origin)
+
+	//angle[0] = 20.0; // 20.0 vertical pitch (+ goes up)
+	//angle[1] -= 0.0; // 0.0 roll (- goes clockwise)
+	//angle[2] -= 15.0; // yaw
+	SetEntPropVector(entity, Prop_Send, "m_vecOrigin", origin); // these might not be working actually
+	SetEntPropVector(entity, Prop_Send, "m_angRotation", angle);
+
+	//DispatchKeyValueVector(entity, "Origin", origin);    //FIX testing offset coordinates, remove! -glub
+	//DispatchKeyValueVector(entity, "Angles", angle);
+	DispatchSpawn(entity);
+
+	#if DEBUG
+	PrintToConsole(client, "DEBUG: MakeParent_Spec() origin(%f %f %f) angles(%f %f %f) client(%N)", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2], client);
+	#endif
+	#endif //DEBUG >10
+}
+
+
+public Action UpdateObjects(Handle timer)
+{
+	bool activeprop; // we still have an active prop to update
+	for(int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsValidClient(i))
+			continue;
+		if (!IsPlayerReallyDead(i))
+			continue;
+		if (g_AttachmentEnt[i] != -1)
+		{
+			activeprop = true;
+			Update_Coordinates(i, g_AttachmentEnt[i]);
+		}
+
+	}
+	if (!activeprop)
+	{
+		if (gTimer != INVALID_HANDLE)
+		{
+			#if DEBUG
+			PrintToServer("DEBUG: no more active attachments, killing timer");
+			#endif
+			KillTimer(timer);
+			gTimer = INVALID_HANDLE;
+		}
+	}
+	return Plugin_Continue;
+}
+
+
+void Update_Coordinates(int client, int entity) // FIXME: coordinates are not updated properly on one axis
+{
+	if (!IsValidEdict(entity) || !IsValidEntity(entity))
+		return;
+
+	float vecDir[3], direction[3], normal[3], viewAng[3], vecPos[3], up[3], angle[3];
+
+	GetClientEyeAngles(client, viewAng);
+	//GetClientEyePosition(client, vecPos);
+    GetClientAbsAngles(client, vecDir);
+
+	GetAngleVectors(viewAng, direction, NULL_VECTOR, normal); // works
+	GetVectorAngles(viewAng, angle); //Returns angles from a vec.
+
+	viewAng[0] = - viewAng[0]; // works fine to invert pitch, don't change
+	viewAng[2] = viewAng[1];
+	// vecPos[0] = viewAng[0];
+	// vecPos[0] = viewAng[0];
+	// vecPos[1] = viewAng[0];
+
+	#if DEBUG
+	float v_angRotation[3];
+	GetEntPropVector(entity, Prop_Send, "m_angRotation", v_angRotation);
+	PrintToChatAll("Before: m_angRotation: %f %f %f", v_angRotation[0], v_angRotation[1], v_angRotation[2]);
+	#endif
+	vecPos[0] = viewAng[0];
+	vecPos[1] = viewAng[1];
+
+	vecPos[2] = viewAng[1]; // works for yaw, use to set m_angRotation, don't change
+	DispatchKeyValueVector(entity, "angles", viewAng); 	// seems to work for pitch
+
+	// SetEntPropVector(entity, Prop_Send, "m_angRotation", vecPos); // jerky?
+	ChangeEdictState(entity, GetEntSendPropOffs(entity, "m_vecAngles", true)); // ok
+	// ChangeEdictState(entity, GetEntSendPropOffs(entity, "m_vecRotation", true));
+	// ChangeEdictState(entity, GetEntSendPropOffs(entity, "m_angRotation", true)); // ok
+
+	// TeleportEntity(entity, NULL_VECTOR, viewAng, NULL_VECTOR);
+
+	#if DEBUG
+	PrintToChatAll("viewAng: %f %f %f, vecPos: %f %f %f", viewAng[0], viewAng[1], viewAng[2], vecPos[0], vecPos[1], vecPos[2]);
+	GetEntPropVector(entity, Prop_Send, "m_angRotation", v_angRotation);
+	PrintToChatAll("After: m_angRotation: %f %f %f, vecPos: %f %f %f", v_angRotation[0], v_angRotation[1], v_angRotation[2], vecPos[0], vecPos[1], vecPos[2]);
+	#endif
+}
 
 
 //==================================
@@ -1717,6 +1877,17 @@ bool WantsDong(int client)
 		return true;
 	return false;
 }
+
+
+public Action Hide_SetTransmit(int entity, int client)
+{
+	if(entity == g_AttachmentEnt[client])
+		return Plugin_Handled; // hide client's attached prop from himself
+	if (g_optedout[client])
+		return Plugin_Handled; // hide prop from opted out clients
+	return Plugin_Continue;
+}
+
 
 
 //==================================

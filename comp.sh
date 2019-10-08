@@ -2,7 +2,8 @@
 # call with $0 [one|all] [version] [script.sp}
 # or $0 all
 
-WORKSPACE="$HOME/Programming/neotokyo-sourcemod-plugins/scripting"
+#WORKSPACE="$HOME/Programming/neotokyo-sourcemod-plugins/scripting"
+WORKSPACE="$(pwd)"
 
 if [[ "$2" -eq "17" ]]; then
 	TARGETVER="1.7.3-git5334";
