@@ -6,7 +6,7 @@
 // #include <smlib> //for entity flags
 
 #pragma semicolon 1
-#define PLUGIN_VERSION "20190925"
+#define PLUGIN_VERSION "20191009"
 
 Handle g_cvar_props_enabled, g_cvar_restrict_alive, g_cvar_give_initial_credits, g_cvar_credits_replenish, g_cvar_score_as_credits= INVALID_HANDLE;
 Handle cvMaxPropsCreds = INVALID_HANDLE; // maximum credits given
@@ -40,13 +40,34 @@ new const String:gs_allowed_physics_models[][] = {
 	"models/nt/a_lil_tiger.mdl",
 	"models/nt/props_office/rubber_duck.mdl",
 	"models/logo/jinrai_logo.mdl",
-	"models/logo/nsf_logo.mdl" }; //physics version
+	"models/logo/nsf_logo.mdl", //physics version
+	"models/nt/props_street/rabbit_doll.mdl",
+	"models/nt/props_street/bass_guitar.mdl",
+	"models/nt/props_street/skateboard.mdl",
+	"models/nt/props_building/hanging_fish_sign.mdl",
+	"models/nt/props_office/spraybottle.mdl",
+	"models/nt/props_office/spraycan.mdl",
+	"models/nt/props_office/broom.mdl",
+	"models/nt/props_nature/crab.mdl",
+	"models/nt/props_debris/can01.mdl",
+	"models/nt/props_debris/can_crushed01.mdl",
+	"models/nt/props_tech/not_the_ghost.mdl",
+	"models/nt/props_tech/girlbot_body.mdl",
+	"models/nt/props_tech/robobody.mdl",
+	"models/nt/props_tech/girlbot_head.mdl",
+	"models/nt/props_tech/girlbot_body.mdl",
+	"models/nt/props_warehouse/tire.mdl"
+};
+
+
 
 new const String:gs_allowed_dynamic_models[][] = {
 	"models/nt/a_lil_tiger.mdl",
 	"models/nt/props_office/rubber_duck.mdl",
 	"models/logo/jinrai_logo.mdl",
-	"models/logo/nsf_logo.mdl" };
+	"models/logo/nsf_logo.mdl",
+	"models/nt/props_nature/koi_fisha.mdl"
+};
 
 new const String:gs_PropType[][] = {  // should be an enum?
 		"physicsprop", // TempEnt
@@ -60,7 +81,7 @@ enum FireworksPropType {
 	REGULAR_PHYSICS,
 };
 
-#define DEBUG 1
+#define DEBUG 0
 
 public Plugin:myinfo =
 {
@@ -77,14 +98,14 @@ public Plugin:myinfo =
 // → make menu to spawn props
 // → add sparks to props spawned and maybe a squishy sound for in range with TE_SendToAllInRange
 // → save credits in sqlite db for longer term?
+// → figure out how to make attached props changed their material to cloak
+// → use ProcessTargetString to target a player by name
 //
 // KNOWN ISSUES:
 // -> AFAIK the TE cannot be destroyed by timer, so client preference is very limited, ie. if someone asks for a big scale model that is supposed to be auto-removed
 //    we can't use a TE because they don't get affected by timers, so regular physics_prop take precedence. Same for dynamic props, cannot have them as TempEnts.
 //
 // FIXME: debug why player are not spawning TE when opted-out clients are around
-// FIXME: figure out how to make attached props changed their material to cloak
-// FIXME: use ProcessTargetString to target a player by name
 // FIXME: use SDKHook_SetTransmit instead of TE for filtering props
 
 public OnPluginStart()
@@ -770,6 +791,7 @@ public Action Command_Print_Help(int client, int args)
 }
 
 
+// wall of shame (not a very good idea)
 void Display_Why_Command_Is_Disabled(int client)
 {
 	ReplyToCommand(client, "Sorry, at least one player requested this command be disabled temporarily.");
@@ -806,11 +828,11 @@ public Action CommandPropSpawn(int client, int args)
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
-	if (HasAnyoneOptedOut())
-	{
-		Display_Why_Command_Is_Disabled(client);
-		return Plugin_Handled;
-	}
+	// if (HasAnyoneOptedOut())
+	// {
+	// 	Display_Why_Command_Is_Disabled(client);
+	// 	return Plugin_Handled;
+	// }
 
 	if (gb_PausePropSpawning)
 	{
@@ -1268,10 +1290,11 @@ void Set_Firework_PhysicsProp(int client, const char[] model_pathname, const flo
 	DispatchKeyValueVector(g_propindex_d[client], "Origin", origin);
 	//TeleportEntity(g_propindex_d[client], origin, NULL_VECTOR, NULL_VECTOR);
 
-	if (StrContains(model_pathname, "logo.mdl") != -1)
+	if (StrContains(model_pathname, "logo.mdl") != -1) // it's a logo
 	{
 		SetEntityRenderFx(g_propindex_d[client], RENDERFX_DISTORT); // works, only good for team logos
 		AcceptEntityInput(g_propindex_d[client], "DisableShadow");
+		// DispatchKeyValue(g_propindex_d[client], "Solid", "0");
 	}
 
 	DispatchSpawn(g_propindex_d[client]);
@@ -1513,8 +1536,10 @@ public void SpawnAndStrapDongToSelf(int client)
 	{
 		g_AttachmentEnt[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[0], 5);
 		MakeParent(client, g_AttachmentEnt[client]);
-		SDKHook(g_AttachmentEnt[client], SDKHook_SetTransmit, Hide_SetTransmit);
+		//SDKHook(g_AttachmentEnt[client], SDKHook_SetTransmit, Hide_SetTransmit);
+
 		#if DEBUG
+		// int prop = SetEntProp(g_AttachmentEnt[client], Prop_Send, "m_iThermoptic");
 		PrintToServer("[sm_props] DEBUG: Strapped prop index %d to client %L", g_AttachmentEnt[client], client);
 		#endif
 	}
@@ -1539,17 +1564,13 @@ public void SpawnAndStrapDongToSelf(int client)
 
 stock int Create_Dynamic_Prop_For_Attachment(int client, const char[] modelname, int health)
 {
-	int EntIndex = CreateEntityByName("prop_dynamic_override");
+	int EntIndex = CreateEntityByName("prop_physics_override"); // testing with physics
 
 	if(!IsModelPrecached(modelname))
 		PrecacheModel(modelname);
 
-	MakeParent_Spec(client, EntIndex);
-
-	float VecOrigin[3], VecAngles[3], normal[3];
-
 	DispatchKeyValue(EntIndex, "model", modelname);
-	DispatchKeyValue(EntIndex, "Solid", "6");
+	DispatchKeyValue(EntIndex, "Solid", "6"); // 6 should be "use VPhysics", 0 not solid?
 	//SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);
 	SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 11);
 	// SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);
@@ -1557,9 +1578,10 @@ stock int Create_Dynamic_Prop_For_Attachment(int client, const char[] modelname,
 	SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);
 	SetEntProp(EntIndex, Prop_Data, "m_iMaxHealth", health, 1);
 
-
+	float VecOrigin[3];
 	GetClientEyePosition(client, VecOrigin);
-	GetClientEyeAngles(client, VecAngles);
+	//float VecAngles[3];
+	// GetClientEyeAngles(client, VecAngles);
 
 
 	AcceptEntityInput(EntIndex, "DisableShadow");
@@ -1570,12 +1592,16 @@ stock int Create_Dynamic_Prop_For_Attachment(int client, const char[] modelname,
 	// DispatchKeyValueVector(EntIndex, "Origin", VecOrigin); // works!
 	//DispatchKeyValueVector(EntIndex, "Angles", VecAngles);
 
-
-	TeleportEntity(EntIndex, VecOrigin, VecAngles, NULL_VECTOR);
 	DispatchSpawn(EntIndex);
+	TeleportEntity(EntIndex, VecOrigin, NULL_VECTOR, NULL_VECTOR);
 
-	new Float:degree = 180.0;  //rotating properly -glub
-	decl Float:angles[3];
+	// attach to client
+	MakeParent_Spec(client, EntIndex);
+
+
+
+	// float degree = 180.0;  //rotating properly -glub
+	// float angles[3];
 	//GetEntPropVector(EntIndex, Prop_Data, "m_angRotation", angles);
 	//RotateYaw(angles, degree);
 
@@ -1600,14 +1626,24 @@ MakeParent_Spec(int client, int entity)
 	Format(tName, sizeof(tName), "target%i", client);
 	DispatchKeyValue(client, "targetname", tName);
 
-	// set offset here if needed
+	// set the position
+	float vOrigin[3], vAng[3];
+	GetClientEyePosition(client, vOrigin);
+	vOrigin[0] -= 20.0;
+	// vAng[0] += 0.0;
+	// vAng[1] += 0.0;
+	// vAng[2] += 120.0;
+	TeleportEntity(entity, vOrigin, vAng, NULL_VECTOR);
 
+	// parent to player
 	DispatchKeyValue(entity, "parentname", tName);
 	SetVariantString(tName);
 	AcceptEntityInput(entity, "SetParent", entity, entity, 0);
 
-	SetVariantString("grenade2"); // TODO; maybe "rorward" would work with TeleportEntity?
-	AcceptEntityInput(entity, "SetParentAttachment");
+	SetVariantString("grenade2"); // grenade2, eyes
+	// AcceptEntityInput(entity, "SetParentAttachment");
+	AcceptEntityInput(entity, "SetParentAttachmentMaintainOffset");
+
 
 	// old method below:
 	#if DEBUG > 10
@@ -1615,8 +1651,10 @@ MakeParent_Spec(int client, int entity)
 	AcceptEntityInput(entity, "SetParent", client);
 
 	// SetVariantString("grenade2");
+	// Change this entity to attach to a specific attachment point on its parent. The entity will teleport so that the position of its root bone matches that of the attachment. Entities must be parented before being sent this input.
 	// AcceptEntityInput(entity, "SetParentAttachment");
 	SetVariantString("grenade2");
+	//As above, but without teleporting. The entity retains its position relative to the attachment at the time of the input being received.
 	AcceptEntityInput(entity, "SetParentAttachmentMaintainOffset");
 
 	float origin[3];
@@ -1681,43 +1719,47 @@ void Update_Coordinates(int client, int entity) // FIXME: coordinates are not up
 	if (!IsValidEdict(entity) || !IsValidEntity(entity))
 		return;
 
-	float vecDir[3], direction[3], normal[3], viewAng[3], vecPos[3], up[3], angle[3];
+	float viewAng[3], vAngRot[3];
+	// float vPos[3];
 
 	GetClientEyeAngles(client, viewAng);
-	//GetClientEyePosition(client, vecPos);
-    GetClientAbsAngles(client, vecDir);
+	// GetClientEyePosition(client, vPos);
 
-	GetAngleVectors(viewAng, direction, NULL_VECTOR, normal); // works
-	GetVectorAngles(viewAng, angle); //Returns angles from a vec.
+	// float vecDir[3];
+	// GetClientAbsAngles(client, vecDir);
 
-	viewAng[0] = - viewAng[0]; // works fine to invert pitch, don't change
-	viewAng[2] = viewAng[1];
-	// vecPos[0] = viewAng[0];
-	// vecPos[0] = viewAng[0];
-	// vecPos[1] = viewAng[0];
+	// float direction[3], normal[3];
+	// GetAngleVectors(viewAng, direction, NULL_VECTOR, NULL_VECTOR);
+	// NormalizeVector(direction, direction);
+
+	// float angle[3];
+	// GetVectorAngles(viewAng, angle); // "Returns angles from a vec."
+
+	// viewAng[0] = - viewAng[0] - 150.0; // works fine to invert pitch with "angles" by itself
 
 	#if DEBUG
 	float v_angRotation[3];
 	GetEntPropVector(entity, Prop_Send, "m_angRotation", v_angRotation);
-	PrintToChatAll("Before: m_angRotation: %f %f %f", v_angRotation[0], v_angRotation[1], v_angRotation[2]);
+	//PrintToChatAll("Before: m_angRotation: %f %f %f vPos %f %f %f", v_angRotation[0], v_angRotation[1], v_angRotation[2], vPos[0], vPos[1], vPos[2]);
 	#endif
-	vecPos[0] = viewAng[0];
-	vecPos[1] = viewAng[1];
 
-	vecPos[2] = viewAng[1]; // works for yaw, use to set m_angRotation, don't change
-	DispatchKeyValueVector(entity, "angles", viewAng); 	// seems to work for pitch
+	// vAngRot[0] -= 100.0;
+	// vAngRot[1] += 50.0; // testing
+	vAngRot[2] = viewAng[1]; // works for yaw, use to set m_angRotation, don't change
 
-	// SetEntPropVector(entity, Prop_Send, "m_angRotation", vecPos); // jerky?
+	DispatchKeyValueVector(entity, "angles", viewAng); // seems to work for pitch
+	SetEntPropVector(entity, Prop_Send, "m_angRotation", vAngRot); // jerky?
+
 	ChangeEdictState(entity, GetEntSendPropOffs(entity, "m_vecAngles", true)); // ok
-	// ChangeEdictState(entity, GetEntSendPropOffs(entity, "m_vecRotation", true));
-	// ChangeEdictState(entity, GetEntSendPropOffs(entity, "m_angRotation", true)); // ok
+	ChangeEdictState(entity, GetEntSendPropOffs(entity, "m_vecRotation", true));
+	ChangeEdictState(entity, GetEntSendPropOffs(entity, "m_angRotation", true)); // ok
+	// TeleportEntity(entity, vPos, viewAng, NULL_VECTOR);
 
-	// TeleportEntity(entity, NULL_VECTOR, viewAng, NULL_VECTOR);
 
 	#if DEBUG
-	PrintToChatAll("viewAng: %f %f %f, vecPos: %f %f %f", viewAng[0], viewAng[1], viewAng[2], vecPos[0], vecPos[1], vecPos[2]);
+	PrintToChatAll("viewAng: %f %f %f, vAngRot: %f %f %f", viewAng[0], viewAng[1], viewAng[2], vAngRot[0], vAngRot[1], vAngRot[2]);
 	GetEntPropVector(entity, Prop_Send, "m_angRotation", v_angRotation);
-	PrintToChatAll("After: m_angRotation: %f %f %f, vecPos: %f %f %f", v_angRotation[0], v_angRotation[1], v_angRotation[2], vecPos[0], vecPos[1], vecPos[2]);
+	PrintToChatAll("After: m_angRotation: %f %f %f, vAngRot: %f %f %f", v_angRotation[0], v_angRotation[1], v_angRotation[2], vAngRot[0], vAngRot[1], vAngRot[2]);
 	#endif
 }
 
@@ -1746,11 +1788,11 @@ public Action KillEntity(prop)
 
 public Action OnTouchEntityRemove(int propindex, int client)
 {
-	if(client <= MaxClients && propindex > 0 && !IsFakeClient(client) && IsValidEntity(client) && IsClientInGame(client) && IsPlayerAlive(client) && IsValidEdict(propindex))
+	if(client <= MaxClients && propindex > 0 && !IsFakeClient(client) && IsValidEntity(client) && IsClientInGame(client) /*&& IsPlayerAlive(client)*/ && IsValidEdict(propindex))
 	{
 		AcceptEntityInput(propindex, "kill");
 	}
-	//return Plugin_Handled;
+	return Plugin_Continue;
 }
 
 
@@ -1833,6 +1875,12 @@ public Action Command_Spawn_TE_Prop(int client, int args)
 	int numClients = GetDongClients(dongclients, sizeof(dongclients));
 	int i_cached_model_index = PrecacheModel(s_model_pathname, false);
 
+	if (i_cached_model_index == 0)
+	{
+		PrintToServer("Error precaching model %s. Return value was: %d", s_model_pathname, i_cached_model_index);
+		return Plugin_Handled;
+	}
+
 	float origin[3];
 	GetClientEyePosition(client, origin);
 
@@ -1845,6 +1893,7 @@ public Action Command_Spawn_TE_Prop(int client, int args)
 }
 
 
+// not used anymore
 public Action Spawn_TE_Dong(int client, const char[] model_pathname, const char[] TE_type)
 {
 	if (!IsValidClient(client))
@@ -1870,6 +1919,7 @@ public Action Spawn_TE_Dong(int client, const char[] model_pathname, const char[
 	//PrintToConsole(client, "Spawned at: %f %f %f for model index: %d", origin[0], origin[1], origin[2], i_cached_model_index);
 	return Plugin_Handled;
 }
+
 
 bool WantsDong(int client)
 {
