@@ -81,7 +81,7 @@ enum FireworksPropType {
 	REGULAR_PHYSICS,
 };
 
-#define DEBUG 0
+#define DEBUG 1
 
 public Plugin:myinfo =
 {
@@ -211,16 +211,6 @@ public OnClientDisconnect(int client)
 public OnMapEnd()
 {
 	CloseHandle(gTimer);
-}
-
-bool HasAnyoneOptedOut()
-{
-	for (int i = 1; i <= MaxClients; i++)
-	{
-		if (g_optedout[i] && IsValidClient(i))
-			return true;
-	}
-	return false;
 }
 
 
@@ -984,7 +974,7 @@ public DongDispatch(int client, int scale, int bstatic)
 			//scale = 0 || scale > 5
 		}
 	}
-	if (Should_Hide_Props())
+	if (Has_Anyone_Opted_Out())
 		SDKHook(g_propindex_d[client], SDKHook_SetTransmit, Hide_SetTransmit);
 }
 
@@ -1064,17 +1054,14 @@ public Action Command_Dong_Spawn(int client, int args)
 }
 
 
-bool Should_Hide_Props()
+bool Has_Anyone_Opted_Out()
 {
-	for (int client=1; client <= MaxClients; client++)
+	for (int i = 1; i <= MaxClients; i++)
 	{
-		if (!IsValidClient(client))
-			continue;
-
-		if (g_optedout[client]) // at least one person doesn't want to see them
+		if (IsValidClient(i) && g_optedout[i]) // at least one person doesn't want to see the props
 		{
 			#if DEBUG
-			PrintToServer("[sm_props] DEBUG: Client %s has opted out of props, let's hide them!", GetClientOfUserId(client));
+			PrintToServer("[sm_props] DEBUG: Client %s has opted out of props, let's hide them!", GetClientOfUserId(i));
 			#endif
 			return true;
 		}
@@ -1089,7 +1076,7 @@ bool Should_Hide_Props()
 // sets the client as the entity's new parent and attach the entity to client
 MakeParent(int client, int entity)
 {
-	decl String:Buffer[64];
+	char Buffer[64];
 	Format(Buffer, sizeof(Buffer), "Client%d", client);
 
 	DispatchKeyValue(client, "targetname", Buffer);
@@ -1140,11 +1127,12 @@ stock SetAlpha (int target, int alpha)
 
 public void OnGhostPickUp(int client)
 {
-	if (GetConVarBool(g_cvar_props_onghostpickup) && !HasAnyoneOptedOut())
+	if (GetConVarBool(g_cvar_props_onghostpickup))
 	{
 		if (!IsValidClient(client))
 			return;
-
+		if (g_AttachmentEnt[client] != -1) // limit to one at a time
+			return;
 		SpawnAndStrapDongToSelf(client);
 	}
 }
@@ -1152,7 +1140,7 @@ public void OnGhostPickUp(int client)
 
 public void OnGhostCapture(int client)
 {
-	if (GetConVarBool(g_cvar_props_oncapture) && !HasAnyoneOptedOut())
+	if (GetConVarBool(g_cvar_props_oncapture))
 	{
 		FireWorksOnPlayer(client, GetConVarBool(g_cvar_props_oncapture_nodongs) ? GetRandomInt(1,3) : GetRandomInt(0,3));
 	}
@@ -1391,12 +1379,12 @@ public Action Command_Strap_Dong(int client, int args)
 				if (GetClientTeam(i) != team)
 					continue;
 
-			// we're dead, we don't add to price
-			if (client == i && !IsPlayerAlive(client) && GetCmdArgs() < 2)
+			// we're dead, we don't add to price; note: IsPlayerAlive() doesn't work in NT
+			if (client == i && GetCmdArgs() < 2 && !IsPlayerReallyAlive(client))
 				continue;
 
 			// didn't ask for specs to be affected
-			if (!IsPlayerReallyAlive(i) && GetCmdArgs() < 2)
+			if (GetCmdArgs() < 2 && !IsPlayerReallyAlive(i))
 				continue;
 
 			// don't add on top of another already attached
@@ -1469,6 +1457,12 @@ public Action Command_Strap_Dong(int client, int args)
 	}
 	else //i_case 0, only "me"
 	{
+		if (g_AttachmentEnt[client] != -1)
+		{
+			ReplyToCommand(client, "[sm_props] You already have a dong attached to yourself.");
+			return Plugin_Handled;
+		}
+
 		if (isadmin)
 		{
 			SpawnAndStrapDongToSelf(client);
@@ -1529,14 +1523,17 @@ public void SpawnAndStrapDongToSelf(int client)
 	PrintToConsole(client, "[sm_props] DEBUG: SpawnAndStrapDongToSelf() on %L", client);
 	#endif
 
-	if (g_AttachmentEnt[client] != -1 || !IsValidClient(client)) // limit to one at a time
-		return;
+	// if (g_AttachmentEnt[client] != -1 || !IsValidClient(client)) // moved up
+	// 	return;
 
 	if (IsPlayerReallyAlive(client))
 	{
 		g_AttachmentEnt[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[0], 5);
 		MakeParent(client, g_AttachmentEnt[client]);
-		//SDKHook(g_AttachmentEnt[client], SDKHook_SetTransmit, Hide_SetTransmit);
+
+		#if !DEBUG
+		SDKHook(g_AttachmentEnt[client], SDKHook_SetTransmit, Hide_SetTransmit);
+		#endif
 
 		#if DEBUG
 		// int prop = SetEntProp(g_AttachmentEnt[client], Prop_Send, "m_iThermoptic");
@@ -1549,10 +1546,12 @@ public void SpawnAndStrapDongToSelf(int client)
 		PrintToServer("[sm_props] DEBUG: Client %N is a spectator. Strapping differently.", client);
 		#endif
 
-		g_AttachmentEnt[client] = Create_Dynamic_Prop_For_Attachment(client, gs_dongs[0], 5);
+		g_AttachmentEnt[client] = Create_Prop_For_Attachment(client, gs_dongs[0], 5, true);
+
 		#if DEBUG
 		PrintToServer("[sm_props] DEBUG: Strapped prop index %d to client %L", g_AttachmentEnt[client], client);
 		#endif
+
 		if (gTimer == INVALID_HANDLE)
 		{
 			gTimer = CreateTimer(0.1, UpdateObjects, INVALID_HANDLE, TIMER_REPEAT);
@@ -1562,9 +1561,13 @@ public void SpawnAndStrapDongToSelf(int client)
 
 
 
-stock int Create_Dynamic_Prop_For_Attachment(int client, const char[] modelname, int health)
+stock int Create_Prop_For_Attachment(int client, const char[] modelname, int health, bool physics=false)
 {
-	int EntIndex = CreateEntityByName("prop_physics_override"); // testing with physics
+	int EntIndex;
+	if (physics)
+		EntIndex = CreateEntityByName("prop_physics_override");
+	else
+		EntIndex = CreateEntityByName("prop_dynamic_override");
 
 	if(!IsModelPrecached(modelname))
 		PrecacheModel(modelname);
@@ -1621,8 +1624,6 @@ stock int Create_Dynamic_Prop_For_Attachment(int client, const char[] modelname,
 MakeParent_Spec(int client, int entity)
 {
 	char tName[128];
-	Format(tName, sizeof(tName), "Client%i", client);
-
 	Format(tName, sizeof(tName), "target%i", client);
 	DispatchKeyValue(client, "targetname", tName);
 
@@ -1640,10 +1641,7 @@ MakeParent_Spec(int client, int entity)
 	SetVariantString(tName);
 	AcceptEntityInput(entity, "SetParent", entity, entity, 0);
 
-	SetVariantString("grenade2"); // grenade2, eyes
-	// AcceptEntityInput(entity, "SetParentAttachment");
-	AcceptEntityInput(entity, "SetParentAttachmentMaintainOffset");
-
+	CreateTimer(0.1, timer_SetParentAttachment, entity);
 
 	// old method below:
 	#if DEBUG > 10
@@ -1682,6 +1680,14 @@ MakeParent_Spec(int client, int entity)
 	#endif //DEBUG >10
 }
 
+
+public Action timer_SetParentAttachment(Handle timer, int entity)
+{
+	SetVariantString("grenade2"); // grenade2, eyes
+	// AcceptEntityInput(entity, "SetParentAttachment");
+	AcceptEntityInput(entity, "SetParentAttachmentMaintainOffset");
+
+}
 
 public Action UpdateObjects(Handle timer)
 {
@@ -1738,9 +1744,11 @@ void Update_Coordinates(int client, int entity) // FIXME: coordinates are not up
 	// viewAng[0] = - viewAng[0] - 150.0; // works fine to invert pitch with "angles" by itself
 
 	#if DEBUG
-	float v_angRotation[3];
+	float v_angRotation[3], v_angRotationClient[3];
 	GetEntPropVector(entity, Prop_Send, "m_angRotation", v_angRotation);
+	GetEntPropVector(client, Prop_Send, "m_angRotation", v_angRotationClient);
 	//PrintToChatAll("Before: m_angRotation: %f %f %f vPos %f %f %f", v_angRotation[0], v_angRotation[1], v_angRotation[2], vPos[0], vPos[1], vPos[2]);
+	PrintToChatAll("Client: m_angRotation: %f %f %f", v_angRotationClient[0], v_angRotationClient[1], v_angRotationClient[2]);
 	#endif
 
 	// vAngRot[0] -= 100.0;
@@ -1767,6 +1775,20 @@ void Update_Coordinates(int client, int entity) // FIXME: coordinates are not up
 //==================================
 //		Prop auto-removal
 //==================================
+
+public Action OnPlayerRunCmd(int client, int &buttons)
+{
+	// right now I have no idea how to cloak a parented prop, so we simply kill it :(
+	if((buttons & (1 << 27)) == (1 << 27))
+	{
+		if (IsPlayerReallyAlive(client) && (GetEntProp(client, Prop_Send, "m_iClassType") < 3)) // not a Support
+		{
+			DestroyAttachedPropForClient(client);
+			return Plugin_Continue;
+		}
+	}
+	return Plugin_Continue;
+}
 
 
 public Action TimerKillEntity(Handle:timer, prop)
