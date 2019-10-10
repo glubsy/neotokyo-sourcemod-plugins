@@ -15,6 +15,7 @@ Handle g_PropPrefCookie = INVALID_HANDLE; // handle to client preferences
 Handle g_cvar_props_oncapture, g_cvar_props_onghostpickup, g_cvar_props_oncapture_nodongs, gTimer = INVALID_HANDLE;
 bool gb_PausePropSpawning;
 int g_AttachmentEnt[MAXPLAYERS+1] = {-1,...}; // strapped on prop
+Handle gNoDrawTimer[MAXPLAYERS+1] = {INVALID_HANDLE,...};
 
 // [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
 new g_RemainingCreds[MAXPLAYERS+1][3];
@@ -98,7 +99,7 @@ public Plugin:myinfo =
 // → make menu to spawn props
 // → add sparks to props spawned and maybe a squishy sound for in range with TE_SendToAllInRange
 // → save credits in sqlite db for longer term?
-// → figure out how to make attached props changed their material to cloak
+// → figure out how to make attached props change their material to cloak (need prop_ornament? flags?)
 // → use ProcessTargetString to target a player by name
 //
 // KNOWN ISSUES:
@@ -496,13 +497,15 @@ public Action OnSpecCmd(int client, const char[] command, int args)
 void DestroyAttachedPropForClient(int client)
 {
 	#if DEBUG
-	PrintToServer("Checking if need to remove strapped entity %d on client %d.", g_AttachmentEnt[client], client);
+	PrintToServer("[sm_props] DEBUG: DestroyAttachedPropForClient() Checking if need to remove strapped entity %d on client %N.", g_AttachmentEnt[client], client);
 	#endif
+
 	if (g_AttachmentEnt[client] != -1 && IsValidEntity(g_AttachmentEnt[client]))
 	{
 		#if DEBUG
-		PrintToServer("Killing strapped entity %d of client %d.", g_AttachmentEnt[client], client);
+		PrintToServer("[sm_props] DEBUG: Yup, killing strapped entity %d of client %d.", g_AttachmentEnt[client], client);
 		#endif
+
 		AcceptEntityInput(g_AttachmentEnt[client], "ClearParent");
 		AcceptEntityInput(g_AttachmentEnt[client], "kill");
 		g_AttachmentEnt[client] = -1;
@@ -1501,13 +1504,14 @@ bool IsPlayerReallyAlive(int client)
 	if ((GetClientTeam(client) < 2)) // not in team, probably spectator
 		return false;
 
-	#if DEBUG
+	#if DEBUG > 1
 	PrintToServer("[sm_props] DEBUG: Client %N (%d) has %d health.", client, client, GetEntProp(client, Prop_Send, "m_iHealth"));
 	#endif
 
-	if (GetEntProp(client, Prop_Send, "m_iHealth") <= 1) // For some reason, 1 health point means dead.
+	// For some reason, 1 health point means dead, but checking deadflag is probably more reliable!
+	if (GetEntProp(client, Prop_Send, "m_iHealth") <= 1 || GetEntProp(client, Prop_Send, "deadflag"))
 	{
-		#if DEBUG
+		#if DEBUG > 1
 		PrintToServer("[sm_props] DEBUG: Determined that %N is not alive right now.", client);
 		#endif
 		return false;
@@ -1641,10 +1645,12 @@ MakeParent_Spec(int client, int entity)
 	SetVariantString(tName);
 	AcceptEntityInput(entity, "SetParent", entity, entity, 0);
 
+	// SetEntProp(entity, Prop_Send, "m_fEffects", 1 << 8); // EF_ITEM_BLINK blink effect, good for highlighting pick-ups
+
 	CreateTimer(0.1, timer_SetParentAttachment, entity);
 
 	// old method below:
-	#if DEBUG > 10
+	#if DEBUG > 9000
 	SetVariantString("!activator");
 	AcceptEntityInput(entity, "SetParent", client);
 
@@ -1776,22 +1782,81 @@ void Update_Coordinates(int client, int entity) // FIXME: coordinates are not up
 //		Prop auto-removal
 //==================================
 
+#if DEBUG
 public Action OnPlayerRunCmd(int client, int &buttons)
 {
-	// right now I have no idea how to cloak a parented prop, so we simply kill it :(
+	if (client < 1 || (g_AttachmentEnt[client] == -1))
+	return Plugin_Continue;
+
 	if((buttons & (1 << 27)) == (1 << 27))
 	{
 		if (IsPlayerReallyAlive(client) && (GetEntProp(client, Prop_Send, "m_iClassType") < 3)) // not a Support
 		{
-			DestroyAttachedPropForClient(client);
+			ToggleNoDrawForAttachmentOfClient(client);
+
+			// right now I have no idea how to cloak a parented prop, so we simply kill it :(
+			//DestroyAttachedPropForClient(client);
+
 			return Plugin_Continue;
 		}
 	}
 	return Plugin_Continue;
 }
+#endif
 
 
-public Action TimerKillEntity(Handle:timer, prop)
+// workaround since we don't know how to cloak props
+void ToggleNoDrawForAttachmentOfClient(int client)
+{
+	int flags = GetEntProp(g_AttachmentEnt[client], Prop_Send, "m_fEffects");
+
+	if ((flags & (1 << 5)) == (1 << 5)) // we already have the flag set
+		return;
+
+	#if DEBUG
+	// note: this function is called many times during one single key press
+	PrintToServer("[sm_props] DEBUG: flags for attached prop to %N are %d will be set to %d", client, flags, (flags |= (1 << 5)));
+	#endif
+
+	flags |= (1 << 5); // add EF_NODRAW
+	SetEntProp(g_AttachmentEnt[client], Prop_Send, "m_fEffects", flags);
+
+	if (gNoDrawTimer[client] == INVALID_HANDLE)
+		gNoDrawTimer[client] = CreateTimer(1.0, timer_CheckCloaked, client, TIMER_REPEAT);
+}
+
+
+// reset NODRAW flag on attached prop if we are not cloaked anymore
+public Action timer_CheckCloaked(Handle timer, int client)
+{
+	if (GetEntProp(client, Prop_Send, "m_iThermoptic")) // we are cloaked, keep nodraw
+		return Plugin_Handled;
+
+	if (g_AttachmentEnt[client] == -1)
+		return Plugin_Handled;
+
+	int flags = GetEntProp(g_AttachmentEnt[client], Prop_Send, "m_fEffects");
+
+	#if DEBUG
+	PrintToServer("[sm_props] DEBUG: effects are %d", flags);
+	#endif
+
+	if ((flags & (1 << 5)) == (1 << 5))
+		flags &= ~(1 << 5); // remove EF_NODRAW
+
+	#if DEBUG
+	PrintToServer("[sm_props] DEBUG: resetting effects flags to %d.", flags);
+	#endif
+
+	SetEntProp(g_AttachmentEnt[client], Prop_Send, "m_fEffects", flags);
+
+	KillTimer(gNoDrawTimer[client]);
+	gNoDrawTimer[client] = INVALID_HANDLE;
+	return Plugin_Handled;
+}
+
+
+public Action TimerKillEntity(Handle timer, prop)
 {
 	KillEntity(prop);
 	return Plugin_Handled;
