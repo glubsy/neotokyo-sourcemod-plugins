@@ -78,7 +78,8 @@ public Plugin myinfo =
 };
 
 //FIXME: ghost doesn't explode when carried AND not currently primary weapon AND neo_restart_this 1 (probably not really important)
-//TODO: make clientpref to disable
+//TODO: explode ghost on clock expiration, not 5 seconds after
+//FIXME: seems that a remnant timer is activated as soon as the ghost gets picked up, or it's just the game delaying the orignal alarm sound.
 
 public void OnPluginStart()
 {
@@ -606,7 +607,7 @@ public Action timer_EmmitPickupSound1(Handle timer, int timerindex) //fuzz
 
 	for(int client = 1; client < MaxClients; client++)
 	{
-		if(!IsClientInGame(client))
+		if(!IsClientInGame(client) || !IsClientConnected(client))
 			continue;
 
 		if(client == ghostCarrier)
@@ -636,6 +637,9 @@ public Action timer_EmmitPickupSound2(Handle timer, int timerindex) //warning
 
 	for(int client = 1; client < MaxClients; client++)
 	{
+		if(!IsClientConnected(client))
+			continue;
+
 		if(!IsClientInGame(client) || !IsPlayerAlive(client))
 			continue;
 
@@ -664,7 +668,7 @@ public Action timer_EmmitPickupSound3(Handle timer, int timerindex) //automatic 
 
 	for(int client = 1; client < MaxClients; client++)
 	{
-		if(!IsClientInGame(client) || !IsPlayerAlive(client))
+		if(!IsClientInGame(client) || !IsClientConnected(client) || !IsPlayerAlive(client))
 			continue;
 
 		if (g_optedout[client]) // no wants soundz
@@ -690,7 +694,7 @@ public Action timer_EmmitPickupSound4(Handle timer, int timerindex) //acquired
 
 	for(int client = 1; client < MaxClients; client++)
 	{
-		if(!IsClientInGame(client) || !IsPlayerAlive(client))
+		if(!IsClientInGame(client) || !IsClientConnected(client) || !IsPlayerAlive(client))
 			continue;
 
 		if (g_optedout[client]) // no wants soundz
@@ -715,7 +719,7 @@ public Action timer_DoSparks(Handle timer, int client)
 
 public void DoSparkleEffect(int client)
 {
-	if(!IsClientInGame(client))
+	if(!IsClientInGame(client) || !IsClientConnected(client))
 		return;
 
 	float vecOrigin[3], vecEyeAngles[3];
@@ -837,8 +841,8 @@ public void EmitExplosionSound(int entity, float position[3])
 
 public Action timer_EmitRadioChatterSound(Handle timer, int client)
 {
-	if(!IsValidEntity(client))
-		return;
+	if(!IsValidEntity(client) || !IsClientConnected(client))
+		return Plugin_Stop;
 
 	float vecOrigin[3];
 	GetEntPropVector(client, Prop_Send, "m_vecOrigin", vecOrigin);
@@ -849,12 +853,14 @@ public Action timer_EmitRadioChatterSound(Handle timer, int client)
 		EmitSoundToAll(g_sRadioChatterSoundEffect[GetRandomInt(0, sizeof(g_sRadioChatterSoundEffect) -1)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 130, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
 	else
 		EmitSound(g_soundsEnabledClient, g_numClients, g_sRadioChatterSoundEffect[GetRandomInt(0, sizeof(g_sRadioChatterSoundEffect) -1)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 130, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
+
+	return Plugin_Stop;
 }
 
 
 void EmmitCapSound(int client)
 {
-	if(!IsValidEntity(client))
+	if(!IsValidEntity(client) || !IsClientConnected(client))
 		return;
 
 	float vecOrigin[3];
