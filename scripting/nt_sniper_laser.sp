@@ -51,7 +51,7 @@ public Plugin:myinfo =
 
 public void OnPluginStart()
 {
-	CVAR_PluginEnabled = CreateConVar("sm_sniper_laser_enable", "1", "Enable (1) or disable (0) Sniper Laser.", _, true, 1.0, true, 0.0);
+	CVAR_PluginEnabled = CreateConVar("sm_sniper_laser_enable", "1", "Enable (1) or disable (0) Sniper Laser.", _, true, 0.0, true, 1.0);
 
 	// Make sure we will allocate enough size to hold our weapon names throughout the plugin.
 	for (int i = 0; i < sizeof(g_sLaserWeaponNames); i++)
@@ -520,20 +520,20 @@ public OnGameFrame()
 				origin[2] -= 28.0; 		// roughly starting from "center of mass"
 
 				#if METHOD == 0
-				float vecDir[3], vecPos[3], vecVel[3];
-				float viewang[3];
+				float vecForward[3], vecPos[3], vecVel[3];
+				float vecEyeAng[3];
 				if (iAffectedWeapons[client] != -1)
 				{
 					// GetEntPropVector(iAffectedWeapons[client], Prop_Send, "m_vecOrigin", origin);
 					// PrintToChatAll("origin: %f %f %f", origin[0], origin[1], origin[2]);
-					GetClientEyeAngles(client, viewang);
-					GetAngleVectors(viewang, vecDir, NULL_VECTOR, NULL_VECTOR);
+					GetClientEyeAngles(client, vecEyeAng);
+					GetAngleVectors(vecEyeAng, vecForward, NULL_VECTOR, NULL_VECTOR);
 					GetClientEyePosition(client, vecPos);
-					vecPos[0]+=vecDir[0]*20.0;
-					vecPos[1]+=vecDir[1]*20.0;
-					vecPos[2]+=vecDir[2]*10.0;
-					SubtractVectors(vecPos, vecDir, vecVel);
-					TeleportEntity(iAffectedWeapons[client], vecPos, viewang, NULL_VECTOR);
+					vecPos[0]+=vecForward[0]*20.0;
+					vecPos[1]+=vecForward[1]*20.0;
+					vecPos[2]+=vecForward[2]*10.0;
+					SubtractVectors(vecPos, vecForward, vecVel);
+					TeleportEntity(iAffectedWeapons[client], vecPos, vecEyeAng, NULL_VECTOR);
 
 					GetEntPropVector(iAffectedWeapons[client], Prop_Send, "m_vecOrigin", vecPos);
 				}
@@ -542,11 +542,12 @@ public OnGameFrame()
 
 				bool didhit = GetEndPositionFromClient(client, end);
 
-				#if METHOD == 0 // old method
-				TE_SetupBeamPoints(vecPos, GetEndPositionFromWeapon(iAffectedWeapons[client], vecPos, viewang), g_modelLaser, g_modelHalo, 0, 1, 0.1, 0.9, 0.1, 1, 0.1, laser_color, 0);
+				#if METHOD == 0 // using attached prop as origin
+				TE_SetupBeamPoints(vecPos, GetEndPositionFromWeapon(iAffectedWeapons[client], vecPos, vecEyeAng), g_modelLaser, g_modelHalo, 0, 1, 0.1, 0.9, 0.1, 1, 0.1, laser_color, 0);
 				#endif
 
-				#if METHOD == 1
+				#if METHOD == 1 // coming from crotch
+				// NOTE: Halo can be set to 0, needs testing
 				TE_SetupBeamPoints(origin, end, g_modelLaser, g_modelHalo, 0, 1, 0.1, 0.9, 0.1, 1, 0.1, laser_color, 0);
 				// add flags manually because sdktools forgot about them (see sdktools_tempents_stocks)
 				TE_WriteNum("m_nFlags", FBEAM_HALOBEAM|FBEAM_FADEOUT|FBEAM_SHADEOUT|FBEAM_FADEIN|FBEAM_SHADEIN);
@@ -562,6 +563,7 @@ public OnGameFrame()
 				TE_Send(iBeamClients, nBeamClients);
 
 				if (IsValidEntity(g_iLaserDot[client]))
+					// TODO: get velocity vector from somewhere?
 					TeleportEntity(g_iLaserDot[client], end, NULL_VECTOR, NULL_VECTOR);
 				
 			}

@@ -178,7 +178,7 @@ public OnPluginStart()
 	RegAdminCmd("sm_props_te", Command_Spawn_TE_Prop, ADMFLAG_SLAY, "DEBUG: Spawn TE dong");
 	RegAdminCmd("sm_props_fireworks", Command_Spawn_TEST_fireworks, ADMFLAG_SLAY, "DEBUG: test fireworks");
 
-	AutoExecConfig(true, "sm_nt_props");
+	AutoExecConfig(true, "nt_props");
 }
 
 /*==================================

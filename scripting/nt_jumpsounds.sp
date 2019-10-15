@@ -244,7 +244,8 @@ public Action timer_ClearSoundLock(Handle timer, int client)
 	g_bSoundLocked[client] = false;
 }
 
- 
+
+// avoid sending too many for bunny hoppers? Can't recall why I did this
 stock void StopSoundPerm(int client, char[] sound)
 {
 	if(IsClientConnected(client) && IsClientInGame(client))
