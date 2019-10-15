@@ -17,9 +17,9 @@ Handle g_CvarVIPModeCheck = INVALID_HANDLE;
 
 public Plugin:myinfo = 
 {
-	name = "NEOTOKYO: give knife to supports",
+	name = "NEOTOKYO give knife to supports",
 	author = "glub",
-	description = "Automatically gives a knife to supports and switch to it",
+	description = "Gives a knife to support class at the beginning of the round.",
 	version = "0.3",
 	url = "https://github.com/glubsy"
 }

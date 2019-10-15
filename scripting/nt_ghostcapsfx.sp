@@ -77,9 +77,13 @@ public Plugin myinfo =
 	url = "https://github.com/glubsy"
 };
 
-//FIXME: ghost doesn't explode when carried AND not currently primary weapon AND neo_restart_this 1 (probably not really important)
-//TODO: explode ghost on clock expiration, not 5 seconds after
+//FIXME: ghost doesn't explode when carried AND not currently primary weapon AND neo_disable_tie is 1 (probably not really important)
+// TODO: explode ghost on clock expiration, not 5 seconds after
 //FIXME: seems that a remnant timer is activated as soon as the ghost gets picked up, or it's just the game delaying the orignal alarm sound.
+// TODO: sound/gameplay/ghost_idle_loop.wav while being carried
+// TODO: use sound/player/CPcaptured.wav for ghost capture sound
+// TODO: redo all the emitgamesounds to use an array of affected clients instead
+
 
 public void OnPluginStart()
 {
@@ -567,6 +571,7 @@ public Action timer_CreateFuzzTimers(Handle timer, int timerindex)
 		}
 	}
 
+	// three beeps
 	FuzzTimer[0] = CreateTimer(1.0, timer_EmmitPickupSound1, 0, TIMER_FLAG_NO_MAPCHANGE);
 	FuzzTimer[1] = CreateTimer(1.5, timer_EmmitPickupSound1, 1, TIMER_FLAG_NO_MAPCHANGE);
 	FuzzTimer[2] = CreateTimer(2.0, timer_EmmitPickupSound1, 2, TIMER_FLAG_NO_MAPCHANGE);

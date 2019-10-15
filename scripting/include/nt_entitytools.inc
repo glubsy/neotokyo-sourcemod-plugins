@@ -180,8 +180,8 @@ stock int CreatePropDynamicOverride_AtClientPos(int client, const String:modelna
 	TeleportEntity(EntIndex, VecOrigin, normal, NULL_VECTOR);
 	DispatchSpawn(EntIndex);
 
-	new Float:degree = 180.0;  //rotating properly -glub
-	decl Float:angles[3];
+	float degree = 180.0;  //rotating properly -glub
+	float angles[3];
 	GetEntPropVector(EntIndex, Prop_Data, "m_angRotation", angles);
 	RotateYaw(angles, degree);
 

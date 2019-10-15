@@ -9,7 +9,7 @@
 
 public Plugin myinfo =
 {
-	name = "NEOTOKYO: non solid ghost trays",
+	name = "NEOTOKYO non solid ghost trays",
 	author = "glub, soft as HELL",
 	description = "Removes collisions for players with ghost trays to avoid being stuck",
 	version = "0.2",

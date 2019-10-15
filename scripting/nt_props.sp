@@ -1,30 +1,31 @@
 #include <sourcemod>
-#include <sdktools>
 #include <sdkhooks>
+#include <sdktools>
 #include <clientprefs>
 #include <nt_entitytools>
-// #include <smlib> //for entity flags
 
+#define DEBUG 0
 #pragma semicolon 1
-#define PLUGIN_VERSION "20191009"
+#define NEO_MAX_CLIENTS 32
+#define PLUGIN_VERSION "20191012"
 
-Handle g_cvar_props_enabled, g_cvar_restrict_alive, g_cvar_give_initial_credits, g_cvar_credits_replenish, g_cvar_score_as_credits= INVALID_HANDLE;
+Handle g_cvar_props_enabled, g_cvar_restrict_alive, g_cvar_give_initial_credits, g_cvar_credits_replenish, g_cvar_score_as_credits, g_cvar_opt_in_mode = INVALID_HANDLE;
 Handle cvMaxPropsCreds = INVALID_HANDLE; // maximum credits given
 Handle cvPropMaxTTL = INVALID_HANDLE; // maximum time to live before prop gets auto removed
 Handle g_PropPrefCookie = INVALID_HANDLE; // handle to client preferences
 Handle g_cvar_props_oncapture, g_cvar_props_onghostpickup, g_cvar_props_oncapture_nodongs, gTimer = INVALID_HANDLE;
 bool gb_PausePropSpawning;
-int g_AttachmentEnt[MAXPLAYERS+1] = {-1,...}; // strapped on prop
-Handle gNoDrawTimer[MAXPLAYERS+1] = {INVALID_HANDLE,...};
+int g_AttachmentEnt[NEO_MAX_CLIENTS+1] = {-1, ...}; // strapped on prop
+Handle gNoDrawTimer[NEO_MAX_CLIENTS+1] = {INVALID_HANDLE, ...};
 
 // [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
-new g_RemainingCreds[MAXPLAYERS+1][3];
+int g_RemainingCreds[NEO_MAX_CLIENTS+1][3];
 #define VIRT_CRED 0
 #define SCORE_CRED 1
 #define MAX_CRED 2
 
-new g_propindex_d[MAXPLAYERS+1]; // holds the last spawned entity by client
-new g_optedout[MAXPLAYERS+1];
+int g_propindex_d[NEO_MAX_CLIENTS+1]; // holds the last spawned entity by client
+bool g_optedout[NEO_MAX_CLIENTS+1];
 
 // WARNING: the custom files require the sm_downloader plugin to force clients to download them
 // otherwise, have to add all custom files to downloads table ourselves with AddFileToDownloadsTable()
@@ -57,9 +58,8 @@ new const String:gs_allowed_physics_models[][] = {
 	"models/nt/props_tech/robobody.mdl",
 	"models/nt/props_tech/girlbot_head.mdl",
 	"models/nt/props_tech/girlbot_body.mdl",
-	"models/nt/props_warehouse/tire.mdl"
+	"models/nt/props_warehouse/tire.mdl",
 };
-
 
 
 new const String:gs_allowed_dynamic_models[][] = {
@@ -67,7 +67,7 @@ new const String:gs_allowed_dynamic_models[][] = {
 	"models/nt/props_office/rubber_duck.mdl",
 	"models/logo/jinrai_logo.mdl",
 	"models/logo/nsf_logo.mdl",
-	"models/nt/props_nature/koi_fisha.mdl"
+	"models/nt/props_nature/koi_fisha.mdl",
 };
 
 new const String:gs_PropType[][] = {  // should be an enum?
@@ -82,8 +82,6 @@ enum FireworksPropType {
 	REGULAR_PHYSICS,
 };
 
-#define DEBUG 1
-
 public Plugin:myinfo =
 {
 	name = "NEOTOKYO props spawner.",
@@ -93,37 +91,49 @@ public Plugin:myinfo =
 	url = "https://github.com/glubsy"
 };
 
-// TODO:
-// → rework logic for credits, might be broken
-// → spawn props with random coords around a target (player) and velocity, towards their position
-// → make menu to spawn props
-// → add sparks to props spawned and maybe a squishy sound for in range with TE_SendToAllInRange
-// → save credits in sqlite db for longer term?
-// → figure out how to make attached props change their material to cloak (need prop_ornament? flags?)
-// → use ProcessTargetString to target a player by name
-//
-// KNOWN ISSUES:
-// -> AFAIK the TE cannot be destroyed by timer, so client preference is very limited, ie. if someone asks for a big scale model that is supposed to be auto-removed
-//    we can't use a TE because they don't get affected by timers, so regular physics_prop take precedence. Same for dynamic props, cannot have them as TempEnts.
-//
-// FIXME: debug why player are not spawning TE when opted-out clients are around
-// FIXME: use SDKHook_SetTransmit instead of TE for filtering props
+/*
+TODO:
+→ rework logic for credits, might be broken
+→ spawn props with random coords around a target (player) and velocity, towards their position
+→ make menu to spawn props
+→ add sparks to props spawned and maybe a squishy sound for in range with TE_SendToAllInRange
+→ save credits in sqlite db for longer term?
+→ figure out how to make attached props change their material to cloak (need prop_ornament? flags? DispatchEffect? m_hEffectEntity!? apparently CTEEffectDispatch is unrelated)
+→ use ProcessTargetString to target a player by name
+KNOWN ISSUES:
+-> AFAIK the TE cannot be destroyed by timer, so client preference is very limited, ie. if someone asks for a big scale model that is supposed to be auto-removed
+   we can't use a TE because they don't get affected by timers, so regular physics_prop take precedence. Same for dynamic props, cannot have them as TempEnts.
+FIXME: debug why player are not spawning TE when opted-out clients are around
+TODO: Trigger_multiple
+TODO: make opt-in rather than opt-out
+TODO: make sm_props / sm_noprops to opt-in and out
+TODO: make circular buffer to store clients props up to its limit, erase old ones when new ones get spawned
+TODO: use tempent Sprite Spray for (Marterzon)
+TODO: move from sm_downloader to downloadtables here
+*/
 
 public OnPluginStart()
 {
-	RegAdminCmd("sm_props_set_credits", Command_Set_Credits_For_Client, ADMFLAG_SLAY, "Gives target player virtual credits in order to spawn props.");
-	RegConsoleCmd("sm_props_credit_status", Command_Credit_Status, "List all player credits to spawn props.");
-
+	RegConsoleCmd("sm_props", CommandProps, "Opt-in custom props world.");
+	RegConsoleCmd("sm_noprops", CommandNoProps, "Opt-out custom props world.");
+	RegConsoleCmd("sm_spawn_prop", CommandPropSpawn, "Spawns a prop.");
 	RegConsoleCmd("sm_dick", Command_Dong_Spawn, "Spawns a dick [scale 1-5] [1 for static prop]");
-	RegConsoleCmd("sm_props", CommandPropSpawn, "Spawns a prop.");
-	RegConsoleCmd("sm_props_help", Command_Print_Help, "Prints all props-related commands.");
 	RegConsoleCmd("sm_strapdong", Command_Strap_Dong, "Strap a dong onto [me|team|all].");
 
+	RegConsoleCmd("sm_props_nothx", Command_Hate_Props_Toggle, "Toggle your preference to not see custom props wherever possible.");
+	g_PropPrefCookie = RegClientCookie("no-props-plz", "player doesn't like custom props", CookieAccess_Public);
+	g_PropPrefCookie = RegClientCookie("props-plz", "player opted to have fun with props", CookieAccess_Public);
+
+	RegConsoleCmd("sm_props_help", Command_Print_Help, "Prints all props-related commands.");
+	RegConsoleCmd("sm_props_pause", Command_Pause_Props_Spawning, "Prevent any further custom prop spawning until end of round.");
+
+
+	// conditions
 	g_cvar_props_onghostpickup = CreateConVar("sm_props_onghostpickup", "0", "Picking up the ghost is exciting,", FCVAR_NONE, true, 0.0, true, 1.0 );
 	g_cvar_props_oncapture = CreateConVar("sm_props_oncapture", "0", "Fireworks on ghost capture.", FCVAR_NONE, true, 0.0, true, 1.0 );
 	g_cvar_props_oncapture_nodongs = CreateConVar("sm_props_oncapture_nodongs", "1", "No dong firework on capture.", FCVAR_NONE, true, 0.0, true, 1.0 );
 
-
+	// general restrictions
 	g_cvar_props_enabled = CreateConVar( "sm_props_enabled", "1",
 										"0: disable custom props spawning, 1: enable custom props spawning",
 										FCVAR_NONE, true, 0.0, true, 1.0 );
@@ -131,6 +141,15 @@ public OnPluginStart()
 	g_cvar_restrict_alive = CreateConVar( "sm_props_restrict_alive", "0",
 										"0: spectators can spawn props too. 1: only living players can spawn props",
 										FCVAR_NONE, true, 0.0, true, 1.0 );
+
+	g_cvar_opt_in_mode = CreateConVar( "sm_props_opt_in_mode", "1",
+										"0: players have to opt-out to not see custom props. 1: players have to opt-in in order to see custom props",
+										FCVAR_NONE, true, 0.0, true, 1.0 );
+
+
+	// Credit system
+	RegAdminCmd("sm_props_set_credits", Command_Set_Credits_For_Client, ADMFLAG_SLAY, "Gives target player virtual credits in order to spawn props.");
+	RegConsoleCmd("sm_props_credit_status", Command_Credit_Status, "List all player credits to spawn props.");
 
 	g_cvar_give_initial_credits = CreateConVar( "sm_props_initial_credits", "0",
 												"0: players starts with zero credits 1: assign sm_max_props_credits to all players as soon as they connect",
@@ -147,11 +166,6 @@ public OnPluginStart()
 											"0: use virtual props credits only, 1: use score as props credits on top of virtual props credits",
 											FCVAR_NONE, true, 0.0, true, 1.0 );
 
-	RegConsoleCmd("sm_props_nothx", Command_Hate_Props_Toggle, "Toggle your preference to not see custom props wherever possible.");
-	g_PropPrefCookie = RegClientCookie("no-props-plz", "player doesn't like custom props", CookieAccess_Public);
-
-	RegConsoleCmd("sm_props_pause", Command_Pause_Props_Spawning, "Prevent any further custom prop spawning until end of round.");
-
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("player_death", OnPlayerDeath);
 	// AddCommandListener(OnSpecCmd, "spec_next"); // probably not needed
@@ -159,6 +173,7 @@ public OnPluginStart()
 	AddCommandListener(OnSpecCmd, "spec_mode");
 	HookEvent("game_round_start", event_RoundStart);
 
+	// Debug commands
 	RegAdminCmd("sm_props_givescore", Command_Give_Score, ADMFLAG_SLAY, "DEBUG: add 20 frags to score");
 	RegAdminCmd("sm_props_te", Command_Spawn_TE_Prop, ADMFLAG_SLAY, "DEBUG: Spawn TE dong");
 	RegAdminCmd("sm_props_fireworks", Command_Spawn_TEST_fireworks, ADMFLAG_SLAY, "DEBUG: test fireworks");
@@ -166,9 +181,9 @@ public OnPluginStart()
 	AutoExecConfig(true, "sm_nt_props");
 }
 
-//==================================
-//		Client preferences
-//==================================
+/*==================================
+		Client preferences
+==================================*/
 
 
 public OnClientCookiesCached(int client)
@@ -276,7 +291,7 @@ public Action Command_Hate_Props_Toggle(int client, int args)
 		return Plugin_Handled;
 	}
 
-	new String:cookie[10];
+	char cookie[10];
 	GetClientCookie(client, g_PropPrefCookie, cookie, sizeof(cookie));
 
 	if (StrEqual(cookie, "pdisabled"))
@@ -303,7 +318,7 @@ public Action Command_Pause_Props_Spawning(int client, int args)
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
-	new String:clientname[MAX_NAME_LENGTH];
+	char clientname[MAX_NAME_LENGTH];
 	GetClientName(client, clientname, sizeof(clientname));
 
 	if (!gb_PausePropSpawning)
@@ -545,7 +560,7 @@ bool hasEnoughCredits(int client, int asked)
 	{
 		if (g_RemainingCreds[client][SCORE_CRED] <= 0)
 		{
-			PrintToChat(client, "[] Your current score doesn't allow you to spawn props.");
+			PrintToChat(client, "[sm_props] Your current score doesn't allow you to spawn props.");
 			return false;
 		}
 	}
@@ -560,8 +575,8 @@ void Decrease_Credits_For_Client(int client, int amount, bool relaytoclient)
 	g_RemainingCreds[client][VIRT_CRED] -= amount;
 	if (relaytoclient)
 	{
-		PrintToChat(client, "[] brouzoufs remaining: %d.", g_RemainingCreds[client][VIRT_CRED]);
-		PrintToConsole(client, "[] brouzoufs remaining: %d.", g_RemainingCreds[client][VIRT_CRED]);
+		PrintToChat(client, "[sm_props] brouzoufs remaining: %d.", g_RemainingCreds[client][VIRT_CRED]);
+		PrintToConsole(client, "[sm_props] brouzoufs remaining: %d.", g_RemainingCreds[client][VIRT_CRED]);
 	}
 }
 
@@ -575,7 +590,7 @@ void Decrease_Score_For_Client(int client, int amount, bool relaytoclient)
 
 		if (relaytoclient)
 		{
-			PrintToChat(client, "[] WARNING: Your score has been decreased by 1 point for using that command!");
+			PrintToChat(client, "[sm_props] WARNING: Your score has been decreased by 1 point for using that command!");
 		}
 	}
 }
@@ -600,8 +615,8 @@ void DecrementScore(int client, int amount)
 
 void Client_Used_Credits(int client, int credits)
 {
-	PrintToChat(client, "[] You have just used %d brouzoufs.", credits);
-	PrintToConsole(client, "[] You have just used %d brouzoufs.", credits);
+	PrintToChat(client, "[sm_props] You have just used %d brouzoufs.", credits);
+	PrintToConsole(client, "[sm_props] You have just used %d brouzoufs.", credits);
 	Decrease_Credits_For_Client(client, credits, true);
 	Decrease_Score_For_Client(client, 1, true);
 }
@@ -706,14 +721,16 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 		float gravity;
 
 		#if SPVER > 17
+		// #if SOURCEMOD_V_MAJOR == 1
+		// #if SOURCEMOD_V_MINOR == 7
 		GetEntityClassname(g_propindex_d[client], clsname, sizeof(clsname));
 		GetEntityRenderColor(g_propindex_d[client], r, g, b, a);
 		rendfx = view_as<int>(GetEntityRenderFx(g_propindex_d[client]));
 		rendm = view_as<int>(GetEntityRenderMode(g_propindex_d[client]));
 		gravity = GetEntityGravity(g_propindex_d[client]);
 		PrintToConsole(client, "Rendered before: %s with colors: %d,%d,%d,%d rendermode %d fx %d gravity %f", clsname, r,g,b,a, rendm, rendfx, gravity );
-		#endif
-		#endif
+		#endif // SPVER
+		#endif // DEBUG
 
 		// SetEntityRenderMode(g_propindex_d[client], RENDER_NORMAL);
 		// SetEntityRenderColor(g_propindex_d[client], 255, 0, 0, 123); // works only on models supporting that, good for making ghosts (alpha)
@@ -739,10 +756,12 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 		gravity = GetEntityGravity(g_propindex_d[client]);
 
 		#if SPVER > 17
+		// #if SOURCEMOD_V_MAJOR == 1
+		// #if SOURCEMOD_V_MINOR == 7
 		GetEntityRenderColor(g_propindex_d[client], r, g, b, a);
-		#endif
+		#endif // SPVER
 		PrintToConsole(client, "Rendered after: %s with colors: %d,%d,%d,%d rendermode %d, fx %d gravity %f", clsname, r,g,b,a, rendm, rendfx, gravity);
-		#endif
+		#endif // DEBUG
 	}
 }
 
@@ -760,8 +779,8 @@ Print_Usage_For_Client(int client, int type=1)
 {
 	if (type == 1)
 	{
-		PrintToConsole(client, "Usage: sm_props [model|model path]\nAvailable models currently: duck, tiger");
-		PrintToChat(client, "Usage: !props [model | model path]\nAvailable models currently: duck, tiger");
+		PrintToConsole(client, "Usage: sm_spawn_prop [model|model path]\nAvailable models currently: duck, tiger");
+		PrintToChat(client, "Usage: !spawn_prop [model | model path]\nAvailable models currently: duck, tiger");
 	}
 	else //TODO write all commands
 	{
@@ -769,7 +788,7 @@ Print_Usage_For_Client(int client, int type=1)
 		PrintToConsole(client, "[sm_props] Some \"useful\" commands:");
 		PrintToConsole(client, "\nsm_props_nothx: disables props for you and everyone in the server.\n\
 sm_strapdong [me|team|all] [specs]: straps a dong on people (including spectators)\n\
-sm_props [model|model path]: spawns a model in the game\n\
+sm_spawn_prop [model|model path]: spawns a model in the game\n\
 sm_dick [1-5] [1 for static]: spawns a dong of scale 1 to 5 with optional static properties\n\
 sm_props_credit_status: check credits of other players and yourself\n\
 sm_props_pause: stops anyone from spawning props until the end of the current round\n");
@@ -813,6 +832,21 @@ void Display_Why_Command_Is_Disabled(int client)
 	}
 
 	PrintToChatAll("Sorry, these players asked not to be annoyed by props: %s.", buffer);
+}
+
+
+
+public Action CommandNoProps(int client, int args)
+{
+	// opt out of props
+}
+
+
+
+public Action CommandProps(int client, int args)
+{
+	// display info and opt-in
+
 }
 
 
@@ -1094,6 +1128,7 @@ MakeParent(int client, int entity)
 
 	AcceptEntityInput(entity, "DisableShadow");
 	// SetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity", client); // warning! do it right
+	// SetEntPropEnt(entity, Prop_Send, "m_hEffectEntity", client); // doesn't work.
 
 	float origin[3];
 	float angle[3];
@@ -1205,7 +1240,7 @@ Setup_Firework (int client, const char[] model_pathname, const FireworksPropType
 	if (!IsValidClient(client))
 		return;
 
-	int dongclients[MAXPLAYERS+1];
+	int dongclients[NEO_MAX_CLIENTS+1];
 	int numClients;
 	if (shocking)
 		numClients = GetDongClients(dongclients, sizeof(dongclients));
@@ -1370,7 +1405,7 @@ public Action Command_Strap_Dong(int client, int args)
 			team = GetClientTeam(client);
 
 		int price;
-		bool affected[MAXPLAYERS+1];
+		bool affected[NEO_MAX_CLIENTS+1];
 
 		// build the list of affected players
 		for (int i=1; i <= MaxClients; i++)
@@ -1388,6 +1423,8 @@ public Action Command_Strap_Dong(int client, int args)
 
 			// didn't ask for specs to be affected
 			if (GetCmdArgs() < 2 && !IsPlayerReallyAlive(i))
+				continue;
+			else if (!IsPlayerReallyAlive(i) && IsPlayerObserving(i)) // already observing someone
 				continue;
 
 			// don't add on top of another already attached
@@ -1536,11 +1573,10 @@ public void SpawnAndStrapDongToSelf(int client)
 		MakeParent(client, g_AttachmentEnt[client]);
 
 		#if !DEBUG
-		SDKHook(g_AttachmentEnt[client], SDKHook_SetTransmit, Hide_SetTransmit);
+		SDKHook(g_AttachmentEnt[client], SDKHook_SetTransmit, Hide_SetTransmit);SDKHook(g_AttachmentEnt[client], SDKHook_SetTransmit, Hide_SetTransmit);
 		#endif
 
 		#if DEBUG
-		// int prop = SetEntProp(g_AttachmentEnt[client], Prop_Send, "m_iThermoptic");
 		PrintToServer("[sm_props] DEBUG: Strapped prop index %d to client %L", g_AttachmentEnt[client], client);
 		#endif
 	}
@@ -1549,6 +1585,9 @@ public void SpawnAndStrapDongToSelf(int client)
 		#if DEBUG
 		PrintToServer("[sm_props] DEBUG: Client %N is a spectator. Strapping differently.", client);
 		#endif
+
+		if (IsPlayerObserving(client)) // don't attach if already spectating someone
+			return;
 
 		g_AttachmentEnt[client] = Create_Prop_For_Attachment(client, gs_dongs[0], 5, true);
 
@@ -1563,6 +1602,20 @@ public void SpawnAndStrapDongToSelf(int client)
 	}
 }
 
+
+bool IsPlayerObserving(int client)
+{
+	int mode = GetEntProp(client, Prop_Send, "m_iObserverMode");
+
+	#if DEBUG
+	// note movetype is most likely 10 too
+	PrintToServer("%N is observing target: mode %d", client, mode);
+	#endif
+
+	if(mode == 5) // 5 mean free fly
+		return false;
+	return true; // 4 means observing a target
+}
 
 
 stock int Create_Prop_For_Attachment(int client, const char[] modelname, int health, bool physics=false)
@@ -1594,6 +1647,7 @@ stock int Create_Prop_For_Attachment(int client, const char[] modelname, int hea
 	AcceptEntityInput(EntIndex, "DisableShadow");
 	SetAlpha(EntIndex, 100);
 
+	SetEntPropEnt(EntIndex, Prop_Send, "m_hEffectEntity", client);
 
 	// VecAngles[0] += 50.0;
 	// DispatchKeyValueVector(EntIndex, "Origin", VecOrigin); // works!
@@ -1698,9 +1752,9 @@ public Action timer_SetParentAttachment(Handle timer, int entity)
 public Action UpdateObjects(Handle timer)
 {
 	bool activeprop; // we still have an active prop to update
-	for(int i = 1; i <= MaxClients; i++)
+	for(int i = MaxClients; i > 0; i--)
 	{
-		if (!IsValidClient(i))
+		if (!IsValidClient(i) || !IsClientConnected(i))
 			continue;
 		if (!IsPlayerReallyDead(i))
 			continue;
@@ -1782,13 +1836,14 @@ void Update_Coordinates(int client, int entity) // FIXME: coordinates are not up
 //		Prop auto-removal
 //==================================
 
-#if DEBUG
+#if !DEBUG
+// public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:angles[3], &weapon)
 public Action OnPlayerRunCmd(int client, int &buttons)
 {
 	if (client < 1 || (g_AttachmentEnt[client] == -1))
-	return Plugin_Continue;
+		return Plugin_Continue;
 
-	if((buttons & (1 << 27)) == (1 << 27))
+	if((buttons & (1 << 27)) == (1 << 27)) // Cloak button
 	{
 		if (IsPlayerReallyAlive(client) && (GetEntProp(client, Prop_Send, "m_iClassType") < 3)) // not a Support
 		{
@@ -1802,7 +1857,7 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 	}
 	return Plugin_Continue;
 }
-#endif
+#endif // !DEBUG
 
 
 // workaround since we don't know how to cloak props
@@ -1810,9 +1865,13 @@ void ToggleNoDrawForAttachmentOfClient(int client)
 {
 	int flags = GetEntProp(g_AttachmentEnt[client], Prop_Send, "m_fEffects");
 
-	if ((flags & (1 << 5)) == (1 << 5)) // we already have the flag set
-		return;
-
+	if ((flags & (1 << 5)) == (1 << 5))
+	{
+		#if DEBUG
+		PrintToServer("[sm_props] DEBUG: Flags for %N are %d", client, flags);
+		return; // we already have the nodraw flag set, skip
+		#endif
+	}
 	#if DEBUG
 	// note: this function is called many times during one single key press
 	PrintToServer("[sm_props] DEBUG: flags for attached prop to %N are %d will be set to %d", client, flags, (flags |= (1 << 5)));
@@ -1822,37 +1881,43 @@ void ToggleNoDrawForAttachmentOfClient(int client)
 	SetEntProp(g_AttachmentEnt[client], Prop_Send, "m_fEffects", flags);
 
 	if (gNoDrawTimer[client] == INVALID_HANDLE)
-		gNoDrawTimer[client] = CreateTimer(1.0, timer_CheckCloaked, client, TIMER_REPEAT);
+		// we check if player is still cloaked every second from then on
+		gNoDrawTimer[client] = CreateTimer(1.0, timer_CheckIfCloaked, client, TIMER_REPEAT);
 }
 
 
 // reset NODRAW flag on attached prop if we are not cloaked anymore
-public Action timer_CheckCloaked(Handle timer, int client)
+public Action timer_CheckIfCloaked(Handle timer, int client)
 {
-	if (GetEntProp(client, Prop_Send, "m_iThermoptic")) // we are cloaked, keep nodraw
-		return Plugin_Handled;
+	if (GetEntProp(client, Prop_Send, "m_iThermoptic"))
+		return Plugin_Continue; // we are cloaked, keep nodraw, repeat timer
 
 	if (g_AttachmentEnt[client] == -1)
-		return Plugin_Handled;
+	{
+		// we assume the prop doesn't exist anymore (this might need testing and fixing)
+		gNoDrawTimer[client] = INVALID_HANDLE;
+		return Plugin_Stop; // kill timer
+	}
 
 	int flags = GetEntProp(g_AttachmentEnt[client], Prop_Send, "m_fEffects");
 
-	#if DEBUG
-	PrintToServer("[sm_props] DEBUG: effects are %d", flags);
-	#endif
+#if DEBUG
+	PrintToServer("[sm_props] DEBUG: effects for client %d are %d", client, flags);
+#endif
 
-	if ((flags & (1 << 5)) == (1 << 5))
+	if ((flags & (1 << 5)) == (1 << 5)) // if we have EF_NODRAW
 		flags &= ~(1 << 5); // remove EF_NODRAW
-
-	#if DEBUG
-	PrintToServer("[sm_props] DEBUG: resetting effects flags to %d.", flags);
-	#endif
+	else
+		return Plugin_Continue;
 
 	SetEntProp(g_AttachmentEnt[client], Prop_Send, "m_fEffects", flags);
 
-	KillTimer(gNoDrawTimer[client]);
+#if DEBUG
+	PrintToServer("[sm_props] DEBUG: reset effects flags to %d.", flags);
+#endif
+
 	gNoDrawTimer[client] = INVALID_HANDLE;
-	return Plugin_Handled;
+	return Plugin_Stop; // kill timer
 }
 
 
@@ -1920,7 +1985,7 @@ public trim_quotes(String:text[])
  */
 
 // Passes client array by ref, and returns num. of clients inserted in the array.- Rainyan
-int GetDongClients(int outClients[MAXPLAYERS+1], int arraySize)
+int GetDongClients(int outClients[NEO_MAX_CLIENTS+1], int arraySize)
 {
 	int index = 0;
 
@@ -1958,7 +2023,7 @@ public Action Command_Spawn_TE_Prop(int client, int args)
 	//GetCmdArg(2, s_tetype, sizeof(s_tetype));
 	strcopy(s_tetype, sizeof(s_tetype), gs_PropType[TE_PHYSICS]); // forcing physicsprop or breakmodel for testing
 
-	int dongclients[MAXPLAYERS+1];
+	int dongclients[NEO_MAX_CLIENTS+1];
 	int numClients = GetDongClients(dongclients, sizeof(dongclients));
 	int i_cached_model_index = PrecacheModel(s_model_pathname, false);
 
@@ -1992,7 +2057,7 @@ public Action Spawn_TE_Dong(int client, const char[] model_pathname, const char[
 		return Plugin_Handled;
 	}
 
-	int dongclients[MAXPLAYERS+1];
+	int dongclients[NEO_MAX_CLIENTS+1];
 	int numClients = GetDongClients(dongclients, sizeof(dongclients));
 	int i_cached_model_index = PrecacheModel(model_pathname, false);
 

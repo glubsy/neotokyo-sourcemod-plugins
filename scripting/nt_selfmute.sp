@@ -30,6 +30,9 @@ public Plugin myinfo =
 	url = ""
 }
 
+
+// TODO: prevent freshly spawned people from being heard by opposite team
+
 //====================================================================================================
 //	If voicefix is active, it will set sv_alltalk to 1 by default. 
 //	NOTICE: you need to change sv_alltalk to nt_alltalk in funvotes.sp for !votealltalk to redirect to the new convar. Not recommended currently.

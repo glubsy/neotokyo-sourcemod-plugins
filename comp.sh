@@ -25,9 +25,11 @@ SMPATH=/home_data/NEOTOKYO/ADMIN_2019/sourcemod-$TARGETVER
 cd $WORKSPACE;
 if [[ "${1}" == "all" ]]; then
 	for file in *.sp; do
+		echo "$SMPATH/scripting/spcomp ${SPVER} -o"$SMPATH/scripting/compiled/${file%.sp}.smx" "$WORKSPACE/${file}"";
 		$SMPATH/scripting/spcomp ${SPVER} -o"$SMPATH/scripting/compiled/${file%.sp}.smx" "$WORKSPACE/${file}";
 		echo "done with ${file}";
 	done
 else
+		echo "$SMPATH/scripting/spcomp ${SPVER} -o"$SMPATH/scripting/compiled/${3%.sp}.smx" "$WORKSPACE/${3}"";
 		$SMPATH/scripting/spcomp ${SPVER} -o"$SMPATH/scripting/compiled/${3%.sp}.smx" "$WORKSPACE/${3}";
 fi
