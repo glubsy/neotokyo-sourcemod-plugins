@@ -146,7 +146,7 @@ public Action timer_AdvertiseHelp(Handle timer, int client)
 {
 	if (!IsValidClient(client))
 		return Plugin_Handled;
-	PrintToChat(client, "[nt_ghostcapsfx] You can disable extra ghost warning sounds with !sm_sounds_nothx");
+	PrintToChat(client, "[nt_ghostcapsfx] You can disable extra ghost warning sounds with !sounds_nothx");
 	return Plugin_Handled;
 }
 

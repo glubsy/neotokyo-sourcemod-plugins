@@ -2,21 +2,31 @@
 #include <sdkhooks>
 #include <sdktools>
 #include <clientprefs>
+#include <adminmenu>
 #include <nt_entitytools>
 
-#define DEBUG 0
+#undef REQUIRE_PLUGIN
+#include <nt_menu>
+
+#define DEBUG 1
 #pragma semicolon 1
 #define NEO_MAX_CLIENTS 32
-#define PLUGIN_VERSION "20191012"
+#define PLUGIN_VERSION "20191018"
 
 Handle g_cvar_props_enabled, g_cvar_restrict_alive, g_cvar_give_initial_credits, g_cvar_credits_replenish, g_cvar_score_as_credits, g_cvar_opt_in_mode = INVALID_HANDLE;
 Handle cvMaxPropsCreds = INVALID_HANDLE; // maximum credits given
 Handle cvPropMaxTTL = INVALID_HANDLE; // maximum time to live before prop gets auto removed
-Handle g_PropPrefCookie = INVALID_HANDLE; // handle to client preferences
+Handle g_hPropPrefCookie = INVALID_HANDLE; // handle to client preferences
 Handle g_cvar_props_oncapture, g_cvar_props_onghostpickup, g_cvar_props_oncapture_nodongs, gTimer = INVALID_HANDLE;
 bool gb_PausePropSpawning;
 int g_AttachmentEnt[NEO_MAX_CLIENTS+1] = {-1, ...}; // strapped on prop
 Handle gNoDrawTimer[NEO_MAX_CLIENTS+1] = {INVALID_HANDLE, ...};
+
+// Menu crap such a pain
+TopMenuObject g_hTopPropsMainMenu_topmenuobj = INVALID_TOPMENUOBJECT;
+TopMenu g_hTopMenu; // handle to the nt_menu plugin topmenu
+Handle g_hPropsStaticMenu, g_hPropsPhysicsMenu, g_hSpawnDongMenu, g_hStrapDongMenu, g_hPrefsMenu; // our main props menu
+
 
 // [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
 int g_RemainingCreds[NEO_MAX_CLIENTS+1][3];
@@ -25,7 +35,7 @@ int g_RemainingCreds[NEO_MAX_CLIENTS+1][3];
 #define MAX_CRED 2
 
 int g_propindex_d[NEO_MAX_CLIENTS+1]; // holds the last spawned entity by client
-bool g_optedout[NEO_MAX_CLIENTS+1];
+bool g_bClientWantsProps[NEO_MAX_CLIENTS+1];
 
 // WARNING: the custom files require the sm_downloader plugin to force clients to download them
 // otherwise, have to add all custom files to downloads table ourselves with AddFileToDownloadsTable()
@@ -105,24 +115,24 @@ KNOWN ISSUES:
    we can't use a TE because they don't get affected by timers, so regular physics_prop take precedence. Same for dynamic props, cannot have them as TempEnts.
 FIXME: debug why player are not spawning TE when opted-out clients are around
 TODO: Trigger_multiple
-TODO: make opt-in rather than opt-out
 TODO: make sm_props / sm_noprops to opt-in and out
 TODO: make circular buffer to store clients props up to its limit, erase old ones when new ones get spawned
 TODO: use tempent Sprite Spray for (Marterzon)
 TODO: move from sm_downloader to downloadtables here
+TODO: parse available models from a text file
 */
 
 public OnPluginStart()
 {
-	RegConsoleCmd("sm_props", CommandProps, "Opt-in custom props world.");
-	RegConsoleCmd("sm_noprops", CommandNoProps, "Opt-out custom props world.");
+	RegConsoleCmd("sm_props", CommandProps, "Opt-in custom props.");
+	RegConsoleCmd("sm_noprops", CommandNoProps, "Opt-out of custom props.");
 	RegConsoleCmd("sm_spawn_prop", CommandPropSpawn, "Spawns a prop.");
 	RegConsoleCmd("sm_dick", Command_Dong_Spawn, "Spawns a dick [scale 1-5] [1 for static prop]");
 	RegConsoleCmd("sm_strapdong", Command_Strap_Dong, "Strap a dong onto [me|team|all].");
 
 	RegConsoleCmd("sm_props_nothx", Command_Hate_Props_Toggle, "Toggle your preference to not see custom props wherever possible.");
-	g_PropPrefCookie = RegClientCookie("no-props-plz", "player doesn't like custom props", CookieAccess_Public);
-	g_PropPrefCookie = RegClientCookie("props-plz", "player opted to have fun with props", CookieAccess_Public);
+
+	g_hPropPrefCookie = RegClientCookie("wants-props", "player opted to have fun with props", CookieAccess_Protected);
 
 	RegConsoleCmd("sm_props_help", Command_Print_Help, "Prints all props-related commands.");
 	RegConsoleCmd("sm_props_pause", Command_Pause_Props_Spawning, "Prevent any further custom prop spawning until end of round.");
@@ -179,11 +189,322 @@ public OnPluginStart()
 	RegAdminCmd("sm_props_fireworks", Command_Spawn_TEST_fireworks, ADMFLAG_SLAY, "DEBUG: test fireworks");
 
 	AutoExecConfig(true, "nt_props");
+
+	SetCookiePrefabMenu(g_hPropPrefCookie, CookieMenu_OnOff_Int, "Props Preferences", MyCookieMenuHandler);
+
+	// late loading
+	for (new i = MaxClients; i > 0; --i)
+	{
+		if (!AreClientCookiesCached(i))
+			continue;
+
+		OnClientCookiesCached(i);
+	}
+
+	// prebuild menus
+
+	g_hPropsStaticMenu = BuildMainPropsMenu(1);
+	g_hPropsPhysicsMenu = BuildMainPropsMenu(2);
+	g_hSpawnDongMenu = BuildMainPropsMenu(3);
+	g_hStrapDongMenu = BuildMainPropsMenu(4);
+	g_hPrefsMenu = BuildMainPropsMenu(5);
+
+	// Is our menu already loaded?
+	TopMenu topmenu;
+	if (LibraryExists("nt_menu") && ((topmenu = GetNTTopMenu()) != null))
+	{
+		OnNTMenuReady(topmenu);
+	}
+
+}
+
+
+public OnNTMenuReady(Handle aTopMenu)
+{
+	TopMenu topmenu = TopMenu.FromHandle(aTopMenu);
+
+	// Block us from being called twice
+	if (topmenu == g_hTopMenu)
+		return;
+
+	// Save the Handle
+	g_hTopMenu = topmenu;
+
+	BuildTopPropsMenu();
+}
+
+// object ids for our items added to categories
+TopMenuObject g_tmo_propsphys, g_tmo_propsdyn, g_tmo_dong, g_tmo_strap, g_tmo_prefs = INVALID_TOPMENUOBJECT;
+
+void BuildTopPropsMenu()
+{
+	// Build the "Voting Commands" category
+
+	g_hTopPropsMainMenu_topmenuobj = FindTopMenuCategory(g_hTopMenu, "Props"); // get the category
+
+	if (g_hTopPropsMainMenu_topmenuobj != INVALID_TOPMENUOBJECT)
+	{
+		// AddToTopMenu(g_hTopMenu, "nt_menu", TopMenuObject_Item, TopCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "nt_menu", 0);
+
+		// in our plugin can, we have one category for ourselves, so we can add all menus there
+		g_tmo_propsphys = g_hTopMenu.AddItem("sm_props_physics", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_props");
+		g_tmo_propsdyn = g_hTopMenu.AddItem("sm_props_dynamic", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_props");
+		g_tmo_dong = g_hTopMenu.AddItem("sm_dick", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_dick");
+		g_tmo_strap = g_hTopMenu.AddItem("sm_strapdong", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_strapdong");
+		g_tmo_prefs = g_hTopMenu.AddItem("sm_props_prefs", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_props_prefs");
+	}
+}
+
+public TopMenuCategory_Handler (Handle:topmenu, TopMenuAction:action, TopMenuObject:object_id, param, String:buffer[], maxlength)
+{
+	if ((action == TopMenuAction_DisplayOption) || (action == TopMenuAction_DisplayTitle))
+	{
+		if (object_id == g_tmo_propsdyn)
+			Format(buffer, maxlength, "%s", "Spawn Static Props", param);
+		if (object_id == g_tmo_propsphys)
+			Format(buffer, maxlength, "%s", "Spawn Physics Props", param);
+		if (object_id == g_tmo_dong)
+			Format(buffer, maxlength, "%s", "Spawn Dongs", param);
+		if (object_id == g_tmo_strap)
+			Format(buffer, maxlength, "%s", "Strap Dongs", param);
+		if (object_id == g_tmo_prefs)
+			Format(buffer, maxlength, "%s", "Preferences", param);
+	}
+	else if (action == TopMenuAction_SelectOption)
+	{
+		if (object_id == g_tmo_propsdyn)
+			DisplayMenu(g_hPropsStaticMenu, param, 20);
+		if (object_id == g_tmo_propsphys)
+			DisplayMenu(g_hPropsPhysicsMenu, param, 20);
+		if (object_id == g_tmo_dong)
+			DisplayMenu(g_hSpawnDongMenu, param, 20);
+		if (object_id == g_tmo_strap)
+			DisplayMenu(g_hStrapDongMenu, param, 20);
+		if (object_id == g_tmo_prefs)
+			DisplayMenu(g_hPrefsMenu, param, 20);
+	}
+}
+
+// obsolete
+public Menu BuildMainPropsMenu(int type)
+{
+	#if DEBUG
+	PrintToServer("BuildMainPropsMenu()");
+	#endif
+
+	Menu menu = new Menu(MainPropsMenuHandler, MENU_ACTIONS_ALL); //CreateMenu()
+
+	if (type == 5)
+	{
+		menu.SetTitle("Preferences");
+		// char buffer[255];
+		// Format(buffer, sizeof(buffer), "Props activated [%s]", (g_bClientWantsProps[client] ? 'x' : ' ' ));
+		// menu.AddItem("Sb", buffer);
+		menu.AddItem("Sb", "Choice pref");
+		menu.ExitButton = true;
+		menu.ExitBackButton = true;
+		return menu;
+	}
+	if (type == 1)
+	{
+		menu.SetTitle("Spawn Physics Props");
+		menu.AddItem("Sb", "phsyicq");
+		menu.ExitButton = true;
+		menu.ExitBackButton = true;
+		return menu;
+	}
+	if (type == 2)
+	{
+		menu.SetTitle("Spawn Static Props");
+		menu.AddItem("Sb", "static");
+		menu.ExitButton = true;
+		menu.ExitBackButton = true;
+		return menu;
+	}
+	if (type == 3)
+	{
+		menu.SetTitle("Spawn Dong");
+		menu.AddItem("Sb", "spawn dong");
+		menu.ExitButton = true;
+		menu.ExitBackButton = true;
+		return menu;
+	}
+	if (type == 4)
+	{
+		menu.SetTitle("Strap Dongs");
+		menu.AddItem("Sb", "strap dong");
+		menu.ExitButton = true;
+		menu.ExitBackButton = true;
+		return menu;
+	}
+	return menu;
+}
+
+
+
+public int MainPropsMenuHandler(Menu menu, MenuAction action, int param1, int param2)
+{
+	switch(action)
+	{
+		case MenuAction_End:
+		{
+			// CloseHandle(menu);
+			//delete menu; (should we here?)
+		}
+		case MenuAction_Cancel:
+		{
+			if (param2 == MenuCancel_ExitBack && g_hTopMenu != INVALID_HANDLE)
+			{
+				DisplayTopMenu(g_hTopMenu, param1, TopMenuPosition_LastCategory);
+			}
+		}
+		case MenuAction_Display:
+		{
+	 		char buffer[255];
+			Format(buffer, sizeof(buffer), "Props spawning menu", param1); // TODO: display credits here?
+
+			Panel panel = view_as<Panel>(param2);
+			panel.SetTitle(buffer);
+			PrintToServer("Client %d was sent menu with panel %x", param1, param2);
+		}
+		case MenuAction_Select:
+		{
+			decl String:info[3];
+			GetMenuItem(menu, param2, info, sizeof(info));
+			if (info[0] == 'S')
+			{
+				switch (info[1])
+				{
+					case 'a':
+					{
+						// enter submenu
+						DisplayMenu(g_hPrefsMenu, param1, 20);
+					}
+					case 'b':
+					{
+						// selected toggle
+						ToggleCookiePreference(param1);
+						DisplayMenu(g_hPrefsMenu, param1, 20);
+					}
+					default:
+					{
+						CloseHandle(g_hTopMenu);
+						return 0;
+					}
+				}
+			}
+			else if (info[0] == 'P')
+			{
+				switch (info[1])
+				{
+					case 'p': // display physics props sub menu
+					{
+						return 0;
+					}
+					case 's': // display dynamic props sub menu
+					{
+						return 0;
+					}
+					case 'd': // display dong props sub menu
+					{
+						return 0;
+					}
+					case 'c': // display strapdong sub menu
+					{
+						return 0;
+					}
+					default:
+					{
+						// CloseHandle(g_hTopMenu);
+						return 0;
+					}
+				}
+			}
+		}
+
+		case MenuAction_DisplayItem:
+		{
+			char info[32];
+			menu.GetItem(param2, info, sizeof(info));
+
+			char display[64];
+
+			if (StrEqual(info, "Sb"))
+			{
+				Format(display, sizeof(display), "%s ", param1);
+				return RedrawMenuItem(display);
+			}
+		}
+	}
+	return 0;
+}
+
+
+public int PropsDongSubMenuHandler(Menu menu, MenuAction action, int param1, int param2)
+{
+	if (action != MenuAction_Select)
+		return 0; // TESTING: should keep menu open?
+
+	switch (action)
+	{
+		case MenuAction_DrawItem:
+		{
+			char info[64];
+			menu.GetItem(param2, info, sizeof(info));
+
+			if ((strcmp(gs_dongs[0], info) == 0) && hasEnoughCredits(param1, 5))
+			{
+				return ITEMDRAW_DISABLED;
+			}
+
+
+			return ITEMDRAW_DEFAULT;
+		}
+	}
+	return 0;
+}
+
+// menu for regular props
+public int PropsPropSubMenuHandler(Menu menu, MenuAction action, int param1, int param2)
+{
+	if (action != MenuAction_Select)
+		return 0; // TESTING: should keep menu open?
+
+	switch (action)
+	{
+		case MenuAction_DrawItem:
+		{
+			char info[64];
+			menu.GetItem(param2, info, sizeof(info));
+
+			if (!hasEnoughCredits(param1, 5)) // hardcoded price, need lookup in array
+			{
+				return ITEMDRAW_DISABLED;
+			}
+			return ITEMDRAW_DEFAULT;
+		}
+	}
+	return 0;
 }
 
 /*==================================
 		Client preferences
 ==================================*/
+
+public MyCookieMenuHandler(client, CookieMenuAction:action, any:info, String:buffer[], maxlen)
+{
+	switch (action)
+	{
+		case CookieMenuAction_DisplayOption:
+		{
+		}
+
+		case CookieMenuAction_SelectOption:
+		{
+			OnClientCookiesCached(client);
+		}
+	}
+}
 
 
 public OnClientCookiesCached(int client)
@@ -192,18 +513,20 @@ public OnClientCookiesCached(int client)
 }
 
 
+//REMOVE ME: this might be redundant as OnClientCookiesCached is called on connect anyway
 public OnClientPostAdminCheck(int client)
 {
 	if(!GetConVarBool(g_cvar_props_enabled))
 	{
-		//g_optedout[client] = false;
+		//g_bClientWantsProps[client] = false;
 		return;
 	}
 
 	if (AreClientCookiesCached(client))
 	{
 		ProcessCookies(client);
-		//CreateTimer(120.0, DisplayNotification, client);
+		if (!GetConVarBool(g_cvar_opt_in_mode))
+			CreateTimer(120.0, DisplayNotification, client);
 		return;
 	}
 }
@@ -219,93 +542,143 @@ public Action timer_AdvertiseHelp(Handle timer, int client)
 
 public OnClientDisconnect(int client)
 {
-	//if(GetConVarBool(g_cvar_props_enabled)) // not worth checking
-		g_optedout[client] = false;
+	// might not be needed since we check and set on connect
+	g_bClientWantsProps[client] = false;
 }
 
 
-public OnMapEnd()
-{
-	CloseHandle(gTimer);
-}
-
-
-ProcessCookies(int client)
+// returns true only if previous cookies were found
+bool ProcessCookies(int client)
 {
 	if (!IsValidClient(client))
-		return;
+		return false;
 
-	if(!FindClientCookie("no-props-plz"))
+	if(!FindClientCookie("wants-props"))
 	{
-		g_optedout[client] = false;
+		if (!GetConVarBool(g_cvar_opt_in_mode))
+		{
+			g_bClientWantsProps[client] = true;
+			CreateTimer(10.0, DisplayNotification, client);
+			return false;
+		}
+
+		g_bClientWantsProps[client] = false;
 		CreateTimer(10.0, DisplayNotification, client);
-		return;
+		return false;
 	}
 
-	char cookie[10];
-	GetClientCookie(client, g_PropPrefCookie, cookie, sizeof(cookie));
-
-	if (StrEqual(cookie, "penabled"))
-	{
-		g_optedout[client] = false;
-		return;
-	}
-	else if (StrEqual(cookie, "pdisabled"))
-	{
-		g_optedout[client] = true;
-		return;
-	}
-	return;
+	char cookie[2];
+	GetClientCookie(client, g_hPropPrefCookie, cookie, sizeof(cookie));
+	g_bClientWantsProps[client] = (cookie[0] != '\0' && StringToInt(cookie));
+	return true;
 }
 
 
+// returns true if a previous cookie was found
+bool ToggleCookiePreference(int client)
+{
+	if (!IsValidClient(client))
+		return false;
+
+	if(!FindClientCookie("wants-props"))
+	{
+		SetClientCookie(client, g_hPropPrefCookie, "1");
+
+		if (!GetConVarBool(g_cvar_opt_in_mode)) // opt-out mode
+		{
+			if (g_bClientWantsProps[client])
+			{
+				g_bClientWantsProps[client] = false;
+				SetClientCookie(client, g_hPropPrefCookie, "0");
+				return false;
+			}
+			// this shouldn't happen since we should have cookies set already here
+			g_bClientWantsProps[client] = true;
+			SetClientCookie(client, g_hPropPrefCookie, "1");
+			return false;
+		}
+
+		// opt-in mode
+		if (g_bClientWantsProps[client])
+		{
+			g_bClientWantsProps[client] = false;
+			SetClientCookie(client, g_hPropPrefCookie, "0");
+			return false;
+		}
+		g_bClientWantsProps[client] = true;
+		SetClientCookie(client, g_hPropPrefCookie, "1");
+		return false;
+	}
+
+	char cookie[2];
+	GetClientCookie(client, g_hPropPrefCookie, cookie, sizeof(cookie));
+	g_bClientWantsProps[client] = (cookie[0] != '\0' && StringToInt(cookie));
+	return true;
+}
+
+
+// Obsolete command but kept in case of opt-in mode
 public Action DisplayNotification(Handle timer, int client)
 {
 	if(client > 0 && IsClientConnected(client) && IsClientInGame(client))
 	{
-		if(!g_optedout[client])
+		if(!g_bClientWantsProps[client] && !GetConVarBool(g_cvar_opt_in_mode))
 		{
 			PrintToChat(client, 	"[sm_props] You can toggle seeing custom props completely by typing !props_nothx");
 			PrintToConsole(client, 	"\n[sm_props] You can toggle seeing custom props completely by typing sm_props_nothx\n");
 			PrintToChat(client, 	"[sm_props] You can prevent people from spawning props until the end of the round by typing !props_pause");
 			PrintToConsole(client, 	"\n[sm_props] You can prevent people from spawning props until the end of the round by typing sm_props_pause\n");
+			return Plugin_Handled;
 		}
+		// opt-in mode
+		PrintToChat(client, 	"[sm_props] You can use !props to get props features.\n");
+		PrintToConsole(client, 	"\n[sm_props] You can use sm_props to get props features.\n");
+
 	}
 	return Plugin_Handled;
 }
 
 
+// Obsolete command but kept in case of opt-in mode
 public Action Command_Hate_Props_Toggle(int client, int args)
 {
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
-	if(!FindClientCookie("no-props-plz")) // this might not be working, REMOVE
+	if(!FindClientCookie("wants-props")) // this might not be working, REMOVE
 	{
-		g_optedout[client] = true;
-		SetClientCookie(client, g_PropPrefCookie, "pdisabled");
-		ReplyToCommand(client, "Your preference has been recorded. You do like props after all.");
 		#if DEBUG
-		PrintToConsole(client, "Cookie not found?");
+		PrintToServer("[sm_props] Cookie for %N not found?", client);
 		#endif
+
+		g_bClientWantsProps[client] = false;
+		SetClientCookie(client, g_hPropPrefCookie, "0");
+
+		ReplyToCommand(client, "Your preference has been recorded. You no like props.");
+
 		return Plugin_Handled;
 	}
 
-	char cookie[10];
-	GetClientCookie(client, g_PropPrefCookie, cookie, sizeof(cookie));
+	char cookie[2];
+	GetClientCookie(client, g_hPropPrefCookie, cookie, sizeof(cookie));
 
-	if (StrEqual(cookie, "pdisabled"))
+	if (StrEqual(cookie, "0"))
 	{
-		SetClientCookie(client, g_PropPrefCookie, "penabled");
-		g_optedout[client] = false;
+		SetClientCookie(client, g_hPropPrefCookie, "1");
+
+		g_bClientWantsProps[client] = true;
+
 		ReplyToCommand(client, "Your preference has been recorded. You do like props after all.");
 		return Plugin_Handled;
 	}
 	else // was enabled, or not yet set
 	{
-		SetClientCookie(client, g_PropPrefCookie, "pdisabled");
-		g_optedout[client] = true;
+		SetClientCookie(client, g_hPropPrefCookie, "0");
+
+		g_bClientWantsProps[client] = false;
+
 		ReplyToCommand(client, "Your preference has been recorded. You no like props.");
+
 		ShowActivity2(client, "[sm_props] ", "%N opted out of sm_props models.", client);
 		LogAction(client, -1, "[sm_props] \"%L\" opted out of sm_props models.", client);
 		return Plugin_Handled;
@@ -812,7 +1185,7 @@ void Display_Why_Command_Is_Disabled(int client)
 
 	for (int i=1, count=0; i <= MaxClients; i++)
 	{
-		if (g_optedout[i])
+		if (!g_bClientWantsProps[i])
 		{
 			GetClientName(i, name, sizeof(name));
 			if (count == 0)
@@ -836,17 +1209,23 @@ void Display_Why_Command_Is_Disabled(int client)
 
 
 
-public Action CommandNoProps(int client, int args)
-{
-	// opt out of props
-}
-
-
-
 public Action CommandProps(int client, int args)
 {
-	// display info and opt-in
+	// opt-in (if opt-in mode?) and draw menu
 
+	DisplayMenu(g_hPropsPhysicsMenu, client, 20);
+
+	// osbolete method
+	if (!GetConVarBool(g_cvar_opt_in_mode))
+		CommandPropSpawn(client, args);
+
+	return Plugin_Handled;
+}
+
+public Action CommandNoProps(int client, int args)
+{
+	// opt out of props?
+	return Plugin_Handled;
 }
 
 
@@ -1022,6 +1401,10 @@ public Action Command_Dong_Spawn(int client, int args)
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
+	// TODO: opt-in here
+	// TODO: if no arg given, display menu
+
+
 	if (gb_PausePropSpawning)
 	{
 		ReplyToCommand(client, "Prop spawning is currently paused.");
@@ -1095,7 +1478,7 @@ bool Has_Anyone_Opted_Out()
 {
 	for (int i = 1; i <= MaxClients; i++)
 	{
-		if (IsValidClient(i) && g_optedout[i]) // at least one person doesn't want to see the props
+		if (IsValidClient(i) && !g_bClientWantsProps[i]) // at least one person doesn't want to see the props
 		{
 			#if DEBUG
 			PrintToServer("[sm_props] DEBUG: Client %s has opted out of props, let's hide them!", GetClientOfUserId(i));
@@ -1597,9 +1980,15 @@ public void SpawnAndStrapDongToSelf(int client)
 
 		if (gTimer == INVALID_HANDLE)
 		{
-			gTimer = CreateTimer(0.1, UpdateObjects, INVALID_HANDLE, TIMER_REPEAT);
+			gTimer = CreateTimer(0.1, UpdateObjects, INVALID_HANDLE, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 		}
 	}
+}
+
+
+public OnMapEnd()
+{
+	KillTimer(gTimer);
 }
 
 
@@ -2075,7 +2464,7 @@ public Action Spawn_TE_Dong(int client, const char[] model_pathname, const char[
 
 bool WantsDong(int client)
 {
-	if (IsValidClient(client) && !g_optedout[client])
+	if (IsValidClient(client) && g_bClientWantsProps[client])
 		return true;
 	return false;
 }
@@ -2085,7 +2474,7 @@ public Action Hide_SetTransmit(int entity, int client)
 {
 	if(entity == g_AttachmentEnt[client])
 		return Plugin_Handled; // hide client's attached prop from himself
-	if (g_optedout[client])
+	if (!g_bClientWantsProps[client])
 		return Plugin_Handled; // hide prop from opted out clients
 	return Plugin_Continue;
 }

@@ -21,7 +21,8 @@ public Plugin:myinfo =
 // Objective: draw laser beam for every player_hurt event (see Mitchell's API) and show only to spectators
 // Draw a beam of color (GREEN/BLUE) when a player gets hit, use CTEBeamFollow
 // change thickness of beam depending on damage if possible
-
+// TODO: make opt-out
+// TODO: make cookie pref menu
 
 public void OnPluginStart()
 {

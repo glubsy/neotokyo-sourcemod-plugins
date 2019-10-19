@@ -13,14 +13,19 @@ Handle g_RefreshArrayTimer = INVALID_HANDLE;
 
 Handle CVAR_hurt_sounds, CVAR_team_only, CVAR_spec_only, CVAR_hurt_sounds_delay = INVALID_HANDLE;
 
-char g_sCustomHurtSound[][] = {
+char g_sCustomGirlHurtSound[][] = {
 	"custom/himitu09065b.mp3",
 	"custom/himitu09065.mp3",
 	"custom/himitu09066.mp3",
 	"custom/himitu09068.mp3",
 	"custom/himitu09071.mp3",
 	"custom/himitu09080.mp3",
-}
+};
+
+// TODO: assign a specific set of similar sounds for each player?
+// TODO: make opt-out
+// TODO: make cookie pref menu
+// TODO: use bitbuffer instead of arrays to keep track of affected players?
 
 public Plugin:myinfo =
 {
@@ -45,8 +50,6 @@ public void OnPluginStart()
 	CVAR_spec_only = CreateConVar("sm_hurt_sounds_spec_only", "0", 
 	"Enable (1) or disable (0) emitting custom sounds for alive players.", 0, true, 0.0, true, 1.0);
 
-	AutoExecConfig(true, "nt_hurt_sfx");
-
 	#if DEBUG > 1
 	AddNormalSoundHook(OnNormalSound);
 	#endif
@@ -57,6 +60,8 @@ public void OnPluginStart()
 
 public void OnConfigsExecuted()
 {
+	AutoExecConfig(true, "nt_hurt_sfx");
+
 	if (!GetConVarBool(CVAR_hurt_sounds))
 		return;
 
@@ -71,11 +76,11 @@ public void OnConfigsExecuted()
 	HookEvent("player_disconnect", Event_OnPlayerDisconnect);
 	#endif
 
-	for(int snd = 0; snd < sizeof(g_sCustomHurtSound); snd++)
+	for(int snd = 0; snd < sizeof(g_sCustomGirlHurtSound); snd++)
 	{
-		PrecacheSound(g_sCustomHurtSound[snd], true);
+		PrecacheSound(g_sCustomGirlHurtSound[snd], true);
 		decl String:buffer[120];
-		Format(buffer, sizeof(buffer), "sound/%s", g_sCustomHurtSound[snd]);
+		Format(buffer, sizeof(buffer), "sound/%s", g_sCustomGirlHurtSound[snd]);
 		AddFileToDownloadsTable(buffer);
 	}
 
@@ -311,7 +316,7 @@ public void UpdateAffectedArrayForAlivePlayers(int updated_client)
 
 void EmitHurtSoundFromClientPos(int client)
 {
-	int rand = GetRandomInt(0, sizeof(g_sCustomHurtSound) -1);
+	int rand = GetRandomInt(0, sizeof(g_sCustomGirlHurtSound) -1);
 	float vecEyeAngles[3], vecOrigin[3];
 	GetClientEyeAngles(client, vecEyeAngles);
 	GetEntPropVector(client, Prop_Send, "m_vecOrigin", vecOrigin);
@@ -320,23 +325,23 @@ void EmitHurtSoundFromClientPos(int client)
 	vecOrigin[2] -= 15;
 
 	#if DEBUG
-	PrintToServer("[nt_hurt_sfx] Emitting sound %s at %f %f %f.", g_sCustomHurtSound[rand], vecOrigin[0], vecOrigin[1], vecOrigin[2]);
+	PrintToServer("[nt_hurt_sfx] Emitting sound %s at %f %f %f.", g_sCustomGirlHurtSound[rand], vecOrigin[0], vecOrigin[1], vecOrigin[2]);
 	#endif
 
 	if (GetConVarBool(CVAR_spec_only) || GetConVarBool(CVAR_team_only))
 	{
 		EmitSound(g_iAffectedPlayers[client], g_iAffectedNumPlayers[client],
-				 g_sCustomHurtSound[rand], 
+				 g_sCustomGirlHurtSound[rand], 
 				 SOUND_FROM_WORLD, SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, SNDVOL_NORMAL, 
 				 GetRandomInt(95, 110), -1, vecOrigin, vecEyeAngles);
 	}
 	else
 	{
-		EmitSoundToAll(g_sCustomHurtSound[rand], 
+		EmitSoundToAll(g_sCustomGirlHurtSound[rand], 
 		SOUND_FROM_WORLD, SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, SNDVOL_NORMAL, 
 		GetRandomInt(95, 110), -1, vecOrigin, vecEyeAngles);
 	}
-	//StopSoundPerm(client, g_sCustomHurtSound[rand]);
+	//StopSoundPerm(client, g_sCustomGirlHurtSound[rand]);
 }
 
 

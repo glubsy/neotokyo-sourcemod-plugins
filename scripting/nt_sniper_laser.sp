@@ -43,7 +43,8 @@ public Plugin:myinfo =
 // OBJECTIVE: laser beam can only be seen with bare eyes (very thin and transparent), or night vision (thicker, more visible if possible)
 // but not with motion or thermal vsion (don't send to of those classes when vision active)
 // laser dot visible also only with bare eyes and night vision
-
+// TODO: make opt-out
+// TODO: make cookie pref menu
 
 #define METHOD 1
 // Method 0: teleport entity and get start of beam from it, no parenting needed (not ideal)
