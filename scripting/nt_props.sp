@@ -307,16 +307,16 @@ public Menu BuildMainPropsMenu(int type)
 	}
 	if (type == 1)
 	{
-		menu.SetTitle("Spawn Physics Props");
-		menu.AddItem("Sb", "phsyicq");
+		menu.SetTitle("Physics prop spawning");
+		menu.AddItem("Pp", "Spawn a physics");
 		menu.ExitButton = true;
 		menu.ExitBackButton = true;
 		return menu;
 	}
 	if (type == 2)
 	{
-		menu.SetTitle("Spawn Static Props");
-		menu.AddItem("Sb", "static");
+		menu.SetTitle("Static prop spawning");
+		menu.AddItem("Ps", "Spawn a static prop");
 		menu.ExitButton = true;
 		menu.ExitBackButton = true;
 		return menu;
@@ -324,7 +324,7 @@ public Menu BuildMainPropsMenu(int type)
 	if (type == 3)
 	{
 		menu.SetTitle("Spawn Dong");
-		menu.AddItem("Sb", "spawn dong");
+		menu.AddItem("Pd", "spawn dong");
 		menu.ExitButton = true;
 		menu.ExitBackButton = true;
 		return menu;
@@ -332,7 +332,7 @@ public Menu BuildMainPropsMenu(int type)
 	if (type == 4)
 	{
 		menu.SetTitle("Strap Dongs");
-		menu.AddItem("Sb", "strap dong");
+		menu.AddItem("Pc", "strap dong");
 		menu.ExitButton = true;
 		menu.ExitBackButton = true;
 		return menu;
@@ -375,11 +375,6 @@ public int MainPropsMenuHandler(Menu menu, MenuAction action, int param1, int pa
 			{
 				switch (info[1])
 				{
-					case 'a':
-					{
-						// enter submenu
-						DisplayMenu(g_hPrefsMenu, param1, 20);
-					}
 					case 'b':
 					{
 						// selected toggle
@@ -429,9 +424,9 @@ public int MainPropsMenuHandler(Menu menu, MenuAction action, int param1, int pa
 
 			char display[64];
 
-			if (StrEqual(info, "Sb"))
+			if (StrEqual(info, "Sb")) // prefernce item
 			{
-				Format(display, sizeof(display), "%s ", param1);
+				Format(display, sizeof(display), "Props are active [%s]", (g_bClientWantsProps[param1] ? 'x' : ' ' ));
 				return RedrawMenuItem(display);
 			}
 		}
@@ -509,7 +504,7 @@ public MyCookieMenuHandler(client, CookieMenuAction:action, any:info, String:buf
 
 public OnClientCookiesCached(int client)
 {
-	ProcessCookies(client);
+	ReadCookies(client);
 }
 
 
@@ -524,7 +519,7 @@ public OnClientPostAdminCheck(int client)
 
 	if (AreClientCookiesCached(client))
 	{
-		ProcessCookies(client);
+		ReadCookies(client);
 		if (!GetConVarBool(g_cvar_opt_in_mode))
 			CreateTimer(120.0, DisplayNotification, client);
 		return;
@@ -536,7 +531,7 @@ public Action timer_AdvertiseHelp(Handle timer, int client)
 {
 	if (!IsValidClient(client))
 		return;
-	PrintToChat(client, "[sm_props] You can print available commands with !props_help");
+	PrintToChat(client, "[nt_props] You can print available commands with !props_help");
 }
 
 
@@ -548,72 +543,40 @@ public OnClientDisconnect(int client)
 
 
 // returns true only if previous cookies were found
-bool ProcessCookies(int client)
+ReadCookies(int client)
 {
 	if (!IsValidClient(client))
-		return false;
-
-	if(!FindClientCookie("wants-props"))
-	{
-		if (!GetConVarBool(g_cvar_opt_in_mode))
-		{
-			g_bClientWantsProps[client] = true;
-			CreateTimer(10.0, DisplayNotification, client);
-			return false;
-		}
-
-		g_bClientWantsProps[client] = false;
-		CreateTimer(10.0, DisplayNotification, client);
-		return false;
-	}
+		return;
 
 	char cookie[2];
-	GetClientCookie(client, g_hPropPrefCookie, cookie, sizeof(cookie));
+
+	GetClientCookie(client, FindClientCookie("wants-props"), cookie, sizeof(cookie));
+
+	#if DEBUG
+	PrintToServer("[nt_props] DEBUG ReadCookies(%N) cookie is: \"%s\"", 
+	client, ((cookie[0] != '\0' && StringToInt(cookie)) ? "null" : cookie ));
+	#endif
+
 	g_bClientWantsProps[client] = (cookie[0] != '\0' && StringToInt(cookie));
-	return true;
+
+	if (!GetConVarBool(g_cvar_opt_in_mode))
+		CreateTimer(10.0, DisplayNotification, client);
 }
 
 
 // returns true if a previous cookie was found
-bool ToggleCookiePreference(int client)
+ToggleCookiePreference(int client)
 {
 	if (!IsValidClient(client))
-		return false;
+		return;
 
-	if(!FindClientCookie("wants-props"))
-	{
-		SetClientCookie(client, g_hPropPrefCookie, "1");
+	#if DEBUG
+	PrintToServer("[nt_props] DEBUG Pref for %N is currently %s, bool toggled.", client, (g_bClientWantsProps[client] ? "true" : "false"));
+	#endif
 
-		if (!GetConVarBool(g_cvar_opt_in_mode)) // opt-out mode
-		{
-			if (g_bClientWantsProps[client])
-			{
-				g_bClientWantsProps[client] = false;
-				SetClientCookie(client, g_hPropPrefCookie, "0");
-				return false;
-			}
-			// this shouldn't happen since we should have cookies set already here
-			g_bClientWantsProps[client] = true;
-			SetClientCookie(client, g_hPropPrefCookie, "1");
-			return false;
-		}
+	g_bClientWantsProps[client] = !g_bClientWantsProps[client];
 
-		// opt-in mode
-		if (g_bClientWantsProps[client])
-		{
-			g_bClientWantsProps[client] = false;
-			SetClientCookie(client, g_hPropPrefCookie, "0");
-			return false;
-		}
-		g_bClientWantsProps[client] = true;
-		SetClientCookie(client, g_hPropPrefCookie, "1");
-		return false;
-	}
-
-	char cookie[2];
-	GetClientCookie(client, g_hPropPrefCookie, cookie, sizeof(cookie));
-	g_bClientWantsProps[client] = (cookie[0] != '\0' && StringToInt(cookie));
-	return true;
+	SetClientCookie(client, FindClientCookie("wants-props"), (g_bClientWantsProps[client] ? "1" : "0"));
 }
 
 
@@ -624,15 +587,15 @@ public Action DisplayNotification(Handle timer, int client)
 	{
 		if(!g_bClientWantsProps[client] && !GetConVarBool(g_cvar_opt_in_mode))
 		{
-			PrintToChat(client, 	"[sm_props] You can toggle seeing custom props completely by typing !props_nothx");
-			PrintToConsole(client, 	"\n[sm_props] You can toggle seeing custom props completely by typing sm_props_nothx\n");
-			PrintToChat(client, 	"[sm_props] You can prevent people from spawning props until the end of the round by typing !props_pause");
-			PrintToConsole(client, 	"\n[sm_props] You can prevent people from spawning props until the end of the round by typing sm_props_pause\n");
+			PrintToChat(client, 	"[nt_props] You can toggle seeing custom props completely by typing !props_nothx");
+			PrintToConsole(client, 	"\n[nt_props] You can toggle seeing custom props completely by typing sm_props_nothx\n");
+			PrintToChat(client, 	"[nt_props] You can prevent people from spawning props until the end of the round by typing !props_pause");
+			PrintToConsole(client, 	"\n[nt_props] You can prevent people from spawning props until the end of the round by typing sm_props_pause\n");
 			return Plugin_Handled;
 		}
 		// opt-in mode
-		PrintToChat(client, 	"[sm_props] You can use !props to get props features.\n");
-		PrintToConsole(client, 	"\n[sm_props] You can use sm_props to get props features.\n");
+		PrintToChat(client, 	"[nt_props] You can use !props to get props features.\n");
+		PrintToConsole(client, 	"\n[nt_props] You can use sm_props to get props features.\n");
 
 	}
 	return Plugin_Handled;
@@ -645,44 +608,20 @@ public Action Command_Hate_Props_Toggle(int client, int args)
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
-	if(!FindClientCookie("wants-props")) // this might not be working, REMOVE
-	{
-		#if DEBUG
-		PrintToServer("[sm_props] Cookie for %N not found?", client);
-		#endif
+	ToggleCookiePreference(client);
 
-		g_bClientWantsProps[client] = false;
-		SetClientCookie(client, g_hPropPrefCookie, "0");
+	char buffer[255];
+	Format(buffer, sizeof(buffer), "Your preference has been recorded. %s", 
+	(g_bClientWantsProps[client] ? "You do like props after all." : "You no like props."));
 
-		ReplyToCommand(client, "Your preference has been recorded. You no like props.");
+	ReplyToCommand(client, buffer);
 
-		return Plugin_Handled;
-	}
+	ShowActivity2(client, "[nt_props] ", "%N opted %s nt_props models.", 
+	client, (g_bClientWantsProps[client] ? "back in" : "out of"));
+	LogAction(client, -1, "[nt_props] \"%L\" opted %s nt_props models.",
+	client, (g_bClientWantsProps[client] ? "back in" : "out of"));
 
-	char cookie[2];
-	GetClientCookie(client, g_hPropPrefCookie, cookie, sizeof(cookie));
-
-	if (StrEqual(cookie, "0"))
-	{
-		SetClientCookie(client, g_hPropPrefCookie, "1");
-
-		g_bClientWantsProps[client] = true;
-
-		ReplyToCommand(client, "Your preference has been recorded. You do like props after all.");
-		return Plugin_Handled;
-	}
-	else // was enabled, or not yet set
-	{
-		SetClientCookie(client, g_hPropPrefCookie, "0");
-
-		g_bClientWantsProps[client] = false;
-
-		ReplyToCommand(client, "Your preference has been recorded. You no like props.");
-
-		ShowActivity2(client, "[sm_props] ", "%N opted out of sm_props models.", client);
-		LogAction(client, -1, "[sm_props] \"%L\" opted out of sm_props models.", client);
-		return Plugin_Handled;
-	}
+	return Plugin_Handled;
 }
 
 
@@ -697,11 +636,11 @@ public Action Command_Pause_Props_Spawning(int client, int args)
 	if (!gb_PausePropSpawning)
 	{
 		gb_PausePropSpawning = true;
-		PrintToChatAll("[sm_props] Prop spawning has been disabled until the end of the round.");
+		PrintToChatAll("[nt_props] Prop spawning has been disabled until the end of the round.");
 		for (int i=1; i <= MaxClients; i++)
 		{
 			if (IsValidClient(i))
-				PrintToConsole(i, "[sm_props] Prop spawning has been disabled by \"%s\" until the end of the round.", clientname);
+				PrintToConsole(i, "[nt_props] Prop spawning has been disabled by \"%s\" until the end of the round.", clientname);
 		}
 	}
 	return Plugin_Handled;
@@ -734,7 +673,7 @@ public Action Command_Give_Score (int client, int args)
 		g_RemainingCreds[i_target][VIRT_CRED] = 60;
 		g_RemainingCreds[i_target][MAX_CRED] = 60;
 		Command_Set_Credits_For_Client(i_target, 60);
-		PrintToConsole(client, "[sm_props] DEBUG: %N gave score of 60 to %N.", client, i_target);
+		PrintToConsole(client, "[nt_props] DEBUG: %N gave score of 60 to %N.", client, i_target);
 
 		return Plugin_Handled;
 	}
@@ -744,8 +683,8 @@ public Action Command_Give_Score (int client, int args)
 	g_RemainingCreds[client][VIRT_CRED] = 60;
 	g_RemainingCreds[client][MAX_CRED] = 60;
 	Command_Set_Credits_For_Client(client, 60);
-	PrintToServer("[sm_props] DEBUG: %N gave score of 60 to himself.", client);
-	ReplyToCommand(client, "[sm_props] DEBUG: You gave score of 60 to yourself.");
+	PrintToServer("[nt_props] DEBUG: %N gave score of 60 to himself.", client);
+	ReplyToCommand(client, "[nt_props] DEBUG: You gave score of 60 to yourself.");
 	return Plugin_Handled;
 
 }
@@ -798,7 +737,7 @@ public OnSavedScoreLoaded(int client, int score)
 	if(client && !IsFakeClient(client))
 	{
 		#if DEBUG
-		PrintToServer("[sm_props] DEBUG: updating score of %d for player %N", score, client);
+		PrintToServer("[nt_props] DEBUG: updating score of %d for player %N", score, client);
 		#endif
 		// if we use score as credit, restore them
 		if ( GetConVarBool(g_cvar_score_as_credits) )
@@ -885,13 +824,13 @@ public Action OnSpecCmd(int client, const char[] command, int args)
 void DestroyAttachedPropForClient(int client)
 {
 	#if DEBUG
-	PrintToServer("[sm_props] DEBUG: DestroyAttachedPropForClient() Checking if need to remove strapped entity %d on client %N.", g_AttachmentEnt[client], client);
+	PrintToServer("[nt_props] DEBUG: DestroyAttachedPropForClient() Checking if need to remove strapped entity %d on client %N.", g_AttachmentEnt[client], client);
 	#endif
 
 	if (g_AttachmentEnt[client] != -1 && IsValidEntity(g_AttachmentEnt[client]))
 	{
 		#if DEBUG
-		PrintToServer("[sm_props] DEBUG: Yup, killing strapped entity %d of client %d.", g_AttachmentEnt[client], client);
+		PrintToServer("[nt_props] DEBUG: Yup, killing strapped entity %d of client %d.", g_AttachmentEnt[client], client);
 		#endif
 
 		AcceptEntityInput(g_AttachmentEnt[client], "ClearParent");
@@ -933,7 +872,7 @@ bool hasEnoughCredits(int client, int asked)
 	{
 		if (g_RemainingCreds[client][SCORE_CRED] <= 0)
 		{
-			PrintToChat(client, "[sm_props] Your current score doesn't allow you to spawn props.");
+			PrintToChat(client, "[nt_props] Your current score doesn't allow you to spawn props.");
 			return false;
 		}
 	}
@@ -948,8 +887,8 @@ void Decrease_Credits_For_Client(int client, int amount, bool relaytoclient)
 	g_RemainingCreds[client][VIRT_CRED] -= amount;
 	if (relaytoclient)
 	{
-		PrintToChat(client, "[sm_props] brouzoufs remaining: %d.", g_RemainingCreds[client][VIRT_CRED]);
-		PrintToConsole(client, "[sm_props] brouzoufs remaining: %d.", g_RemainingCreds[client][VIRT_CRED]);
+		PrintToChat(client, "[nt_props] brouzoufs remaining: %d.", g_RemainingCreds[client][VIRT_CRED]);
+		PrintToConsole(client, "[nt_props] brouzoufs remaining: %d.", g_RemainingCreds[client][VIRT_CRED]);
 	}
 }
 
@@ -963,7 +902,7 @@ void Decrease_Score_For_Client(int client, int amount, bool relaytoclient)
 
 		if (relaytoclient)
 		{
-			PrintToChat(client, "[sm_props] WARNING: Your score has been decreased by 1 point for using that command!");
+			PrintToChat(client, "[nt_props] WARNING: Your score has been decreased by 1 point for using that command!");
 		}
 	}
 }
@@ -988,8 +927,8 @@ void DecrementScore(int client, int amount)
 
 void Client_Used_Credits(int client, int credits)
 {
-	PrintToChat(client, "[sm_props] You have just used %d brouzoufs.", credits);
-	PrintToConsole(client, "[sm_props] You have just used %d brouzoufs.", credits);
+	PrintToChat(client, "[nt_props] You have just used %d brouzoufs.", credits);
+	PrintToConsole(client, "[nt_props] You have just used %d brouzoufs.", credits);
 	Decrease_Credits_For_Client(client, credits, true);
 	Decrease_Score_For_Client(client, 1, true);
 }
@@ -997,8 +936,8 @@ void Client_Used_Credits(int client, int credits)
 
 void DisplayActivity(int client, const char[] model)
 {
-	//ShowActivity2(client, "[sm_props] ", "%s spawned: %s.", client, model);
-	LogAction(client, -1, "[sm_props] \"%L\" spawned: %s", client, model);
+	//ShowActivity2(client, "[nt_props] ", "%s spawned: %s.", client, model);
+	LogAction(client, -1, "[nt_props] \"%L\" spawned: %s", client, model);
 }
 
 
@@ -1030,12 +969,12 @@ public Action Command_Set_Credits_For_Client(int client, int args)
 
 	SetCredits(i_target, StringToInt(s_amount));
 
-	PrintToChat(i_target, "[sm_props] Your brouzoufs have been set to %d.", g_RemainingCreds[i_target][VIRT_CRED]);
-	PrintToConsole(i_target, "[sm_props] Your brouzoufs have been set to %d.", g_RemainingCreds[i_target][VIRT_CRED]);
+	PrintToChat(i_target, "[nt_props] Your brouzoufs have been set to %d.", g_RemainingCreds[i_target][VIRT_CRED]);
+	PrintToConsole(i_target, "[nt_props] Your brouzoufs have been set to %d.", g_RemainingCreds[i_target][VIRT_CRED]);
 
 	if (GetClientName(i_target, s_targetname, sizeof(s_targetname)) && client != i_target)
 	{
-		ReplyToCommand(client, "[sm_props] The credits for player %s are now set to %d.", s_targetname, g_RemainingCreds[i_target][VIRT_CRED]);
+		ReplyToCommand(client, "[nt_props] The credits for player %s are now set to %d.", s_targetname, g_RemainingCreds[i_target][VIRT_CRED]);
 	}
 	return Plugin_Handled;
 }
@@ -1141,8 +1080,8 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 
 Print_Usage_For_Admins(int client)
 {
-	PrintToChat(client, "[sm_props] Admin, check console for useful commands and convars...");
-	PrintToConsole(client, "[sm_props] Admins, some useful commands:");
+	PrintToChat(client, "[nt_props] Admin, check console for useful commands and convars...");
+	PrintToConsole(client, "[nt_props] Admins, some useful commands:");
 	PrintToConsole(client, "\nsm_props_set_credits: sets credits for a clientID\nsm_props_credit_status: check credit status for all\nsm_props_restrict_alive: restrict to living players\nsm_props_initial_credits: initial amount given on player connection\nsm_props_max_credits: credits given on initial connection\nsm_props_replenish_credits: whether credits are replenished between rounds\nsm_props_score_as_credits: whether score should be counter as credits.\nsm_props_max_ttl: props get deleted after that time.\nsm_props_enabled: disable the command.");
 	PrintToConsole(client, "You may also do sm_props \"model_path\" \"renderfx\" \"movetype\" \"ignite\"");
 }
@@ -1157,8 +1096,8 @@ Print_Usage_For_Client(int client, int type=1)
 	}
 	else //TODO write all commands
 	{
-		PrintToChat(client, "[sm_props] check console for commands.");
-		PrintToConsole(client, "[sm_props] Some \"useful\" commands:");
+		PrintToChat(client, "[nt_props] check console for commands.");
+		PrintToConsole(client, "[nt_props] Some \"useful\" commands:");
 		PrintToConsole(client, "\nsm_props_nothx: disables props for you and everyone in the server.\n\
 sm_strapdong [me|team|all] [specs]: straps a dong on people (including spectators)\n\
 sm_spawn_prop [model|model path]: spawns a model in the game\n\
@@ -1309,9 +1248,9 @@ public Action CommandPropSpawn(int client, int args)
 			}
 			else
 			{
-				PrintToChat(client, "[sm_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+				PrintToChat(client, "[nt_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
 				5, g_RemainingCreds[client][VIRT_CRED]);
-				PrintToConsole(client, "[sm_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+				PrintToConsole(client, "[nt_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
 				5, g_RemainingCreds[client][VIRT_CRED]);
 				return Plugin_Handled;
 			}
@@ -1421,24 +1360,24 @@ public Action Command_Dong_Spawn(int client, int args)
 	{
 		if (g_RemainingCreds[client][SCORE_CRED] <= 0)
 		{
-			PrintToChat(client, "[sm_props] Your current score doesn't allow you to spawn props.");
-			PrintToConsole(client, "[sm_props] Your current score doesn't allow you to spawn props.");
+			PrintToChat(client, "[nt_props] Your current score doesn't allow you to spawn props.");
+			PrintToConsole(client, "[nt_props] Your current score doesn't allow you to spawn props.");
 			return Plugin_Handled;
 		}
 	}
 	if (g_RemainingCreds[client][VIRT_CRED] <= 0)
 	{
-		PrintToChat(client, "[sm_props] You don't have any remaining brouzoufs to spawn a prop.");
-		PrintToConsole(client, "[sm_props] You don't have any remaining brouzoufs to spawn a prop.");
+		PrintToChat(client, "[nt_props] You don't have any remaining brouzoufs to spawn a prop.");
+		PrintToConsole(client, "[nt_props] You don't have any remaining brouzoufs to spawn a prop.");
 		return Plugin_Handled;
 	}
 
 	if ((GetCmdArgs() > 2) || (GetCmdArgs() == 0))
 	{
-		PrintToChat(client, "[sm_props] Usage: !dick [scale 1-5] [1 for static]");
-		PrintToConsole(client, "[sm_props] Usage: sm_dick [scale 1-5] [1 for static]");
-		PrintToChat(client, "[sm_props] Type: !props_credit_status see brouzoufs for everyone.");
-		PrintToConsole(client, "[sm_props] Type sm_props_credit_status to see brouzoufs for everyone.");
+		PrintToChat(client, "[nt_props] Usage: !dick [scale 1-5] [1 for static]");
+		PrintToConsole(client, "[nt_props] Usage: sm_dick [scale 1-5] [1 for static]");
+		PrintToChat(client, "[nt_props] Type: !props_credit_status see brouzoufs for everyone.");
+		PrintToConsole(client, "[nt_props] Type sm_props_credit_status to see brouzoufs for everyone.");
 		return Plugin_Handled;
 	}
 
@@ -1465,9 +1404,9 @@ public Action Command_Dong_Spawn(int client, int args)
 	}
 	else
 	{
-		PrintToChat(client, "[sm_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+		PrintToChat(client, "[nt_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
 		g_DongPropPrice[iModelScale], g_RemainingCreds[client][VIRT_CRED]);
-		PrintToConsole(client, "[sm_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+		PrintToConsole(client, "[nt_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
 		g_DongPropPrice[iModelScale], g_RemainingCreds[client][VIRT_CRED]);
 		return Plugin_Handled;
 	}
@@ -1481,13 +1420,13 @@ bool Has_Anyone_Opted_Out()
 		if (IsValidClient(i) && !g_bClientWantsProps[i]) // at least one person doesn't want to see the props
 		{
 			#if DEBUG
-			PrintToServer("[sm_props] DEBUG: Client %s has opted out of props, let's hide them!", GetClientOfUserId(i));
+			PrintToServer("[nt_props] DEBUG: Client %s has opted out of props, let's hide them!", GetClientOfUserId(i));
 			#endif
 			return true;
 		}
 	}
 	#if DEBUG
-	PrintToServer("[sm_props] DEBUG: Nobody opted out of props.");
+	PrintToServer("[nt_props] DEBUG: Nobody opted out of props.");
 	#endif
 	return false;
 }
@@ -1631,7 +1570,7 @@ Setup_Firework (int client, const char[] model_pathname, const FireworksPropType
 	int i_cached_model_index = PrecacheModel(model_pathname, false);
 	if (i_cached_model_index == 0)
 	{
-		LogError("[sm_props] Couldn't find or precache model \"%s\".", model_pathname);
+		LogError("[nt_props] Couldn't find or precache model \"%s\".", model_pathname);
 		return;
 	}
 
@@ -1821,7 +1760,7 @@ public Action Command_Strap_Dong(int client, int args)
 		}
 
 		#if DEBUG
-		PrintToServer("[sm_props] DEBUG: affected clients (sizeof(affected) is %d):\n", sizeof(affected));
+		PrintToServer("[nt_props] DEBUG: affected clients (sizeof(affected) is %d):\n", sizeof(affected));
 		// this DEBUG has a performance hit on the server!
 		for (int i=1; i <= MaxClients; i++)
 		{
@@ -1856,24 +1795,24 @@ public Action Command_Strap_Dong(int client, int args)
 
 			if (i_case == 1)
 			{
-				ReplyToCommand(client, "[sm_props] Attached a dong to your team mates.");
+				ReplyToCommand(client, "[nt_props] Attached a dong to your team mates.");
 				DisplayActivity(client, "Dong on team.");
 			}
 			else if (i_case == 2)
 			{
-				ReplyToCommand(client, "[sm_props] Attached a dong to everyone.");
+				ReplyToCommand(client, "[nt_props] Attached a dong to everyone.");
 				DisplayActivity(client, "Dong on everyone.");
 			}
 			return Plugin_Handled;
 		}
 		else if (price == 0)
 		{
-			ReplyToCommand(client, "[sm_props] Nobody would be affected by your request.");
+			ReplyToCommand(client, "[nt_props] Nobody would be affected by your request.");
 			return Plugin_Handled;
 		}
 		else
 		{
-			ReplyToCommand(client, "[sm_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+			ReplyToCommand(client, "[nt_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
 			price, g_RemainingCreds[client][VIRT_CRED]);
 			return Plugin_Handled;
 		}
@@ -1882,14 +1821,14 @@ public Action Command_Strap_Dong(int client, int args)
 	{
 		if (g_AttachmentEnt[client] != -1)
 		{
-			ReplyToCommand(client, "[sm_props] You already have a dong attached to yourself.");
+			ReplyToCommand(client, "[nt_props] You already have a dong attached to yourself.");
 			return Plugin_Handled;
 		}
 
 		if (isadmin)
 		{
 			SpawnAndStrapDongToSelf(client);
-			ReplyToCommand(client, "[sm_props] Attached a dong to yourself.");
+			ReplyToCommand(client, "[nt_props] Attached a dong to yourself.");
 			DisplayActivity(client, "Dong on themselves.");
 			return Plugin_Handled;
 		}
@@ -1903,7 +1842,7 @@ public Action Command_Strap_Dong(int client, int args)
 		}
 		else
 		{
-			ReplyToCommand(client, "[sm_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+			ReplyToCommand(client, "[nt_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
 			g_DongPropPrice[0], g_RemainingCreds[client][VIRT_CRED]);
 			return Plugin_Handled;
 		}
@@ -1925,14 +1864,14 @@ bool IsPlayerReallyAlive(int client)
 		return false;
 
 	#if DEBUG > 1
-	PrintToServer("[sm_props] DEBUG: Client %N (%d) has %d health.", client, client, GetEntProp(client, Prop_Send, "m_iHealth"));
+	PrintToServer("[nt_props] DEBUG: Client %N (%d) has %d health.", client, client, GetEntProp(client, Prop_Send, "m_iHealth"));
 	#endif
 
 	// For some reason, 1 health point means dead, but checking deadflag is probably more reliable!
 	if (GetEntProp(client, Prop_Send, "m_iHealth") <= 1 || GetEntProp(client, Prop_Send, "deadflag"))
 	{
 		#if DEBUG > 1
-		PrintToServer("[sm_props] DEBUG: Determined that %N is not alive right now.", client);
+		PrintToServer("[nt_props] DEBUG: Determined that %N is not alive right now.", client);
 		#endif
 		return false;
 	}
@@ -1944,7 +1883,7 @@ bool IsPlayerReallyAlive(int client)
 public void SpawnAndStrapDongToSelf(int client)
 {
 	#if DEBUG
-	PrintToConsole(client, "[sm_props] DEBUG: SpawnAndStrapDongToSelf() on %L", client);
+	PrintToConsole(client, "[nt_props] DEBUG: SpawnAndStrapDongToSelf() on %L", client);
 	#endif
 
 	// if (g_AttachmentEnt[client] != -1 || !IsValidClient(client)) // moved up
@@ -1960,13 +1899,13 @@ public void SpawnAndStrapDongToSelf(int client)
 		#endif
 
 		#if DEBUG
-		PrintToServer("[sm_props] DEBUG: Strapped prop index %d to client %L", g_AttachmentEnt[client], client);
+		PrintToServer("[nt_props] DEBUG: Strapped prop index %d to client %L", g_AttachmentEnt[client], client);
 		#endif
 	}
 	else //spectator
 	{
 		#if DEBUG
-		PrintToServer("[sm_props] DEBUG: Client %N is a spectator. Strapping differently.", client);
+		PrintToServer("[nt_props] DEBUG: Client %N is a spectator. Strapping differently.", client);
 		#endif
 
 		if (IsPlayerObserving(client)) // don't attach if already spectating someone
@@ -1975,7 +1914,7 @@ public void SpawnAndStrapDongToSelf(int client)
 		g_AttachmentEnt[client] = Create_Prop_For_Attachment(client, gs_dongs[0], 5, true);
 
 		#if DEBUG
-		PrintToServer("[sm_props] DEBUG: Strapped prop index %d to client %L", g_AttachmentEnt[client], client);
+		PrintToServer("[nt_props] DEBUG: Strapped prop index %d to client %L", g_AttachmentEnt[client], client);
 		#endif
 
 		if (gTimer == INVALID_HANDLE)
@@ -2257,13 +2196,13 @@ void ToggleNoDrawForAttachmentOfClient(int client)
 	if ((flags & (1 << 5)) == (1 << 5))
 	{
 		#if DEBUG
-		PrintToServer("[sm_props] DEBUG: Flags for %N are %d", client, flags);
+		PrintToServer("[nt_props] DEBUG: Flags for %N are %d", client, flags);
 		return; // we already have the nodraw flag set, skip
 		#endif
 	}
 	#if DEBUG
 	// note: this function is called many times during one single key press
-	PrintToServer("[sm_props] DEBUG: flags for attached prop to %N are %d will be set to %d", client, flags, (flags |= (1 << 5)));
+	PrintToServer("[nt_props] DEBUG: flags for attached prop to %N are %d will be set to %d", client, flags, (flags |= (1 << 5)));
 	#endif
 
 	flags |= (1 << 5); // add EF_NODRAW
@@ -2291,7 +2230,7 @@ public Action timer_CheckIfCloaked(Handle timer, int client)
 	int flags = GetEntProp(g_AttachmentEnt[client], Prop_Send, "m_fEffects");
 
 #if DEBUG
-	PrintToServer("[sm_props] DEBUG: effects for client %d are %d", client, flags);
+	PrintToServer("[nt_props] DEBUG: effects for client %d are %d", client, flags);
 #endif
 
 	if ((flags & (1 << 5)) == (1 << 5)) // if we have EF_NODRAW
@@ -2302,7 +2241,7 @@ public Action timer_CheckIfCloaked(Handle timer, int client)
 	SetEntProp(g_AttachmentEnt[client], Prop_Send, "m_fEffects", flags);
 
 #if DEBUG
-	PrintToServer("[sm_props] DEBUG: reset effects flags to %d.", flags);
+	PrintToServer("[nt_props] DEBUG: reset effects flags to %d.", flags);
 #endif
 
 	gNoDrawTimer[client] = INVALID_HANDLE;
