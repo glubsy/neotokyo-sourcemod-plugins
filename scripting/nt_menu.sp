@@ -98,7 +98,7 @@ public DefaultCategoryHandler(Handle:topmenu,
 	{
 		if (object_id == INVALID_TOPMENUOBJECT)
 		{
-			Format(buffer, maxlength, "NT Menu", param);
+			Format(buffer, maxlength, "Neotokyo Menu", param);
 		}
 		else if (object_id == obj_preferencescmds)
 		{
@@ -159,10 +159,6 @@ public Action:Command_DisplayMenu(int client, int args)
 		ReplyToCommand(client, "[SM] Command is in-game only");
 		return Plugin_Handled;
 	}
-	
-	#if DEBUG
-	PrintToServer("Menu called by %N", client);
-	#endif
 
 	hTopMenu.Display(client, TopMenuPosition_Start);
 	return Plugin_Handled;

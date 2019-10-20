@@ -22,11 +22,10 @@ bool gb_PausePropSpawning;
 int g_AttachmentEnt[NEO_MAX_CLIENTS+1] = {-1, ...}; // strapped on prop
 Handle gNoDrawTimer[NEO_MAX_CLIENTS+1] = {INVALID_HANDLE, ...};
 
-// Menu crap such a pain
+// Menu setup
 TopMenuObject g_hTopPropsMainMenu_topmenuobj = INVALID_TOPMENUOBJECT;
 TopMenu g_hTopMenu; // handle to the nt_menu plugin topmenu
 Handle g_hPropsStaticMenu, g_hPropsPhysicsMenu, g_hSpawnDongMenu, g_hStrapDongMenu, g_hPrefsMenu; // our main props menu
-
 
 // [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
 int g_RemainingCreds[NEO_MAX_CLIENTS+1][3];
@@ -46,7 +45,7 @@ new const String:gs_dongs[][] = {
 	"models/d/d_g02.mdl", //gigantic
 	"models/d/d_mh02.mdl" }; //megahuge
 
-new const g_DongPropPrice[] = { 1, 6, 9, 13, 20 };
+new const g_DongPropPrice[] = { 1, 3, 6, 9, 15 };
 
 new const String:gs_allowed_physics_models[][] = {
 	"models/nt/a_lil_tiger.mdl",
@@ -117,16 +116,16 @@ FIXME: debug why player are not spawning TE when opted-out clients are around
 TODO: Trigger_multiple
 TODO: make sm_props / sm_noprops to opt-in and out
 TODO: make circular buffer to store clients props up to its limit, erase old ones when new ones get spawned
-TODO: use tempent Sprite Spray for (Marterzon)
+TODO: use tempent Sprite Spray (for Marterzon)
 TODO: move from sm_downloader to downloadtables here
 TODO: parse available models from a text file
 */
 
 public OnPluginStart()
 {
-	RegConsoleCmd("sm_props", CommandProps, "Opt-in custom props.");
-	RegConsoleCmd("sm_noprops", CommandNoProps, "Opt-out of custom props.");
-	RegConsoleCmd("sm_spawn_prop", CommandPropSpawn, "Spawns a prop.");
+	RegConsoleCmd("sm_props", ConCommand_Props, "Opt-in custom props.");
+	RegConsoleCmd("sm_noprops", Command_NoProps, "Opt-out of custom props.");
+	RegConsoleCmd("sm_prop_spawn", ConCommand_PropSpawn, "Spawns a prop.");
 	RegConsoleCmd("sm_dick", Command_Dong_Spawn, "Spawns a dick [scale 1-5] [1 for static prop]");
 	RegConsoleCmd("sm_strapdong", Command_Strap_Dong, "Strap a dong onto [me|team|all].");
 
@@ -158,7 +157,6 @@ public OnPluginStart()
 
 
 	// Credit system
-	RegAdminCmd("sm_props_set_credits", Command_Set_Credits_For_Client, ADMFLAG_SLAY, "Gives target player virtual credits in order to spawn props.");
 	RegConsoleCmd("sm_props_credit_status", Command_Credit_Status, "List all player credits to spawn props.");
 
 	g_cvar_give_initial_credits = CreateConVar( "sm_props_initial_credits", "0",
@@ -185,12 +183,13 @@ public OnPluginStart()
 
 	// Debug commands
 	RegAdminCmd("sm_props_givescore", Command_Give_Score, ADMFLAG_SLAY, "DEBUG: add 20 frags to score");
+	RegAdminCmd("sm_props_set_credits", Command_Set_Credits_For_Client, ADMFLAG_SLAY, "Gives target player virtual credits in order to spawn props.");
 	RegAdminCmd("sm_props_te", Command_Spawn_TE_Prop, ADMFLAG_SLAY, "DEBUG: Spawn TE dong");
 	RegAdminCmd("sm_props_fireworks", Command_Spawn_TEST_fireworks, ADMFLAG_SLAY, "DEBUG: test fireworks");
 
 	AutoExecConfig(true, "nt_props");
 
-	SetCookiePrefabMenu(g_hPropPrefCookie, CookieMenu_OnOff_Int, "Props Preferences", MyCookieMenuHandler);
+	// SetCookiePrefabMenu(g_hPropPrefCookie, CookieMenu_OnOff_Int, "Props Preferences", MyCookieMenuHandler);
 
 	// late loading
 	for (new i = MaxClients; i > 0; --i)
@@ -202,9 +201,8 @@ public OnPluginStart()
 	}
 
 	// prebuild menus
-
-	g_hPropsStaticMenu = BuildMainPropsMenu(1);
-	g_hPropsPhysicsMenu = BuildMainPropsMenu(2);
+	g_hPropsPhysicsMenu = BuildMainPropsMenu(1);
+	g_hPropsStaticMenu = BuildMainPropsMenu(2);
 	g_hSpawnDongMenu = BuildMainPropsMenu(3);
 	g_hStrapDongMenu = BuildMainPropsMenu(4);
 	g_hPrefsMenu = BuildMainPropsMenu(5);
@@ -214,6 +212,12 @@ public OnPluginStart()
 	if (LibraryExists("nt_menu") && ((topmenu = GetNTTopMenu()) != null))
 	{
 		OnNTMenuReady(topmenu);
+	}
+	else
+	{
+		// library missing, we build our own
+		g_hTopMenu = CreateTopMenu(TopMenuCategory_Handler);
+		BuildTopPropsMenu();
 	}
 
 }
@@ -238,9 +242,7 @@ TopMenuObject g_tmo_propsphys, g_tmo_propsdyn, g_tmo_dong, g_tmo_strap, g_tmo_pr
 
 void BuildTopPropsMenu()
 {
-	// Build the "Voting Commands" category
-
-	g_hTopPropsMainMenu_topmenuobj = FindTopMenuCategory(g_hTopMenu, "Props"); // get the category
+	g_hTopPropsMainMenu_topmenuobj = FindTopMenuCategory(g_hTopMenu, "Props"); // get the category provided by nt_menu plugin
 
 	if (g_hTopPropsMainMenu_topmenuobj != INVALID_TOPMENUOBJECT)
 	{
@@ -252,13 +254,30 @@ void BuildTopPropsMenu()
 		g_tmo_dong = g_hTopMenu.AddItem("sm_dick", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_dick");
 		g_tmo_strap = g_hTopMenu.AddItem("sm_strapdong", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_strapdong");
 		g_tmo_prefs = g_hTopMenu.AddItem("sm_props_prefs", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_props_prefs");
+		return;
 	}
+
+	// didn't find categories, must be missing nt_menu plugin, so build our own category and attach to it
+	g_hTopPropsMainMenu_topmenuobj = g_hTopMenu.AddCategory("Props", TopMenuCategory_Handler);
+
+	g_tmo_propsphys = AddToTopMenu(g_hTopMenu, "sm_props_physics", TopMenuObject_Item, TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_props");
+	g_tmo_propsdyn = AddToTopMenu(g_hTopMenu, "sm_props_dynamic", TopMenuObject_Item, TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_props");
+	g_tmo_dong = AddToTopMenu(g_hTopMenu, "sm_dick", TopMenuObject_Item, TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_dick");
+	g_tmo_strap = AddToTopMenu(g_hTopMenu, "sm_strapdong", TopMenuObject_Item, TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_strapdong");
+	g_tmo_prefs = AddToTopMenu(g_hTopMenu, "sm_props_prefs", TopMenuObject_Item, TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_props_prefs");
+	SetTopMenuTitleCaching(g_hTopMenu, false); // seems to fix "Preferences" being the de facto title on our "Props" category
 }
+
+
 
 public TopMenuCategory_Handler (Handle:topmenu, TopMenuAction:action, TopMenuObject:object_id, param, String:buffer[], maxlength)
 {
 	if ((action == TopMenuAction_DisplayOption) || (action == TopMenuAction_DisplayTitle))
 	{
+		// GetTopMenuObjName(topmenu, object_id, buffer, maxlength);
+
+		if (object_id == INVALID_TOPMENUOBJECT)
+			Format(buffer, maxlength, "Neotokyo Props Menu", param);
 		if (object_id == g_tmo_propsdyn)
 			Format(buffer, maxlength, "%s", "Spawn Static Props", param);
 		if (object_id == g_tmo_propsphys)
@@ -285,64 +304,111 @@ public TopMenuCategory_Handler (Handle:topmenu, TopMenuAction:action, TopMenuObj
 	}
 }
 
-// obsolete
 public Menu BuildMainPropsMenu(int type)
 {
-	#if DEBUG
-	PrintToServer("BuildMainPropsMenu()");
-	#endif
+	Menu menu;
 
-	Menu menu = new Menu(MainPropsMenuHandler, MENU_ACTIONS_ALL); //CreateMenu()
+	switch (type)
+	{
+		case 5:
+		{
+			menu = new Menu(PropsPrefsMenuHandler, MENU_ACTIONS_ALL);
+			menu.SetTitle("Preferences");
+			menu.AddItem("a", "Set preference");
+			menu.ExitButton = true;
+			menu.ExitBackButton = true;
+		}
+		case 1:
+		{
+			menu = new Menu(PhysicsPropsSpawningMenuHandler, MENU_ACTIONS_ALL);
+			menu.SetTitle("Spawn a physics prop:");
+			for (int i = 0; i < sizeof(gs_allowed_physics_models); i++)
+			{
+				char item_name[PLATFORM_MAX_PATH];
+				int index = FindCharInString(gs_allowed_physics_models[i], '/', true);
 
-	if (type == 5)
-	{
-		menu.SetTitle("Preferences");
-		// char buffer[255];
-		// Format(buffer, sizeof(buffer), "Props activated [%s]", (g_bClientWantsProps[client] ? 'x' : ' ' ));
-		// menu.AddItem("Sb", buffer);
-		menu.AddItem("Sb", "Choice pref");
-		menu.ExitButton = true;
-		menu.ExitBackButton = true;
-		return menu;
-	}
-	if (type == 1)
-	{
-		menu.SetTitle("Physics prop spawning");
-		menu.AddItem("Pp", "Spawn a physics");
-		menu.ExitButton = true;
-		menu.ExitBackButton = true;
-		return menu;
-	}
-	if (type == 2)
-	{
-		menu.SetTitle("Static prop spawning");
-		menu.AddItem("Ps", "Spawn a static prop");
-		menu.ExitButton = true;
-		menu.ExitBackButton = true;
-		return menu;
-	}
-	if (type == 3)
-	{
-		menu.SetTitle("Spawn Dong");
-		menu.AddItem("Pd", "spawn dong");
-		menu.ExitButton = true;
-		menu.ExitBackButton = true;
-		return menu;
-	}
-	if (type == 4)
-	{
-		menu.SetTitle("Strap Dongs");
-		menu.AddItem("Pc", "strap dong");
-		menu.ExitButton = true;
-		menu.ExitBackButton = true;
-		return menu;
+				do
+				{
+					++index;
+					StrCat(item_name, strlen(gs_allowed_physics_models[i]) - index + 1, gs_allowed_physics_models[i][index]);
+
+				}
+				while(index <= strlen(gs_allowed_physics_models[i]));
+
+				SplitString(item_name, ".mdl", item_name, sizeof(item_name));
+
+				#if DEBUG
+				PrintToServer("Adding phsysics %s", item_name);
+				#endif
+				menu.AddItem(gs_allowed_physics_models[i], item_name);
+			}
+			menu.ExitButton = true;
+			menu.ExitBackButton = true;
+		}
+		case 2:
+		{
+			menu = new Menu(DynamicPropsSpawningMenuHandler, MENU_ACTIONS_ALL);
+			menu.SetTitle("Spawn a static prop:");
+			for (int i = 0; i < sizeof(gs_allowed_dynamic_models); i++)
+			{
+				char item_name[PLATFORM_MAX_PATH];
+				int index = FindCharInString(gs_allowed_dynamic_models[i], '/', true);
+
+				do
+				{
+					index++;
+					StrCat(item_name, strlen(gs_allowed_dynamic_models[i]) - index + 1, gs_allowed_dynamic_models[i][index]);
+				}
+				while(index <= strlen(gs_allowed_dynamic_models[i]));
+
+				SplitString(item_name, ".mdl", item_name, sizeof(item_name));
+
+				#if DEBUG
+				PrintToServer("Adding dynamic %s", item_name);
+				#endif
+				menu.AddItem(gs_allowed_dynamic_models[i], item_name);
+			}
+			menu.ExitButton = true;
+			menu.ExitBackButton = true;
+		}
+		case 3:
+		{
+			menu = new Menu(DongSpawningMenuHandler, MENU_ACTIONS_ALL);
+			menu.SetTitle("Spawn a dong:");
+			menu.AddItem("0", "small dong");
+			menu.AddItem("1", "medium dong");
+			menu.AddItem("2", "big dong");
+			menu.AddItem("3", "huge dong");
+			menu.AddItem("4", "mega-huge dong");
+			menu.AddItem("5", "small dong (static)");
+			menu.AddItem("6", "medium dong (static)");
+			menu.AddItem("7", "big dong (static)");
+			menu.AddItem("8", "huge dong (static)");
+			menu.AddItem("9", "mega-huge dong (static)");
+			menu.ExitButton = true;
+			menu.ExitBackButton = true;
+		}
+		case 4:
+		{
+			menu = new Menu(StrapDongMenuHandler, MENU_ACTIONS_ALL);
+			menu.SetTitle("Strap dongs on:");
+			menu.AddItem("a", "Strap dong on yourself");
+			menu.AddItem("b", "strap dong on your team");
+			menu.AddItem("c", "strap dong on everybody");
+			menu.ExitButton = true;
+			menu.ExitBackButton = true;
+		}
+		default:
+		{
+			ThrowError("Wrong BuildMainPropsMenu() type called!");
+		}
 	}
 	return menu;
 }
 
 
 
-public int MainPropsMenuHandler(Menu menu, MenuAction action, int param1, int param2)
+public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int param2)
 {
 	switch(action)
 	{
@@ -360,59 +426,28 @@ public int MainPropsMenuHandler(Menu menu, MenuAction action, int param1, int pa
 		}
 		case MenuAction_Display:
 		{
-	 		char buffer[255];
-			Format(buffer, sizeof(buffer), "Props spawning menu", param1); // TODO: display credits here?
+			char title[255];
+			Format(title, sizeof(title), "Props spawning preferences:", param1);
 
 			Panel panel = view_as<Panel>(param2);
-			panel.SetTitle(buffer);
-			PrintToServer("Client %d was sent menu with panel %x", param1, param2);
+			panel.SetTitle(title);
 		}
 		case MenuAction_Select:
 		{
-			decl String:info[3];
+			decl String:info[2];
 			GetMenuItem(menu, param2, info, sizeof(info));
-			if (info[0] == 'S')
+
+			switch (info[0])
 			{
-				switch (info[1])
+				case 'a': // in case we add more fine grain control later
 				{
-					case 'b':
-					{
-						// selected toggle
-						ToggleCookiePreference(param1);
-						DisplayMenu(g_hPrefsMenu, param1, 20);
-					}
-					default:
-					{
-						CloseHandle(g_hTopMenu);
-						return 0;
-					}
+					ToggleCookiePreference(param1);
+					DisplayMenu(g_hPrefsMenu, param1, 20);
 				}
-			}
-			else if (info[0] == 'P')
-			{
-				switch (info[1])
+				default:
 				{
-					case 'p': // display physics props sub menu
-					{
-						return 0;
-					}
-					case 's': // display dynamic props sub menu
-					{
-						return 0;
-					}
-					case 'd': // display dong props sub menu
-					{
-						return 0;
-					}
-					case 'c': // display strapdong sub menu
-					{
-						return 0;
-					}
-					default:
-					{
-						// CloseHandle(g_hTopMenu);
-						return 0;
-					}
+					CloseHandle(g_hTopMenu);
+					return 0;
 				}
 			}
 		}
@@ -424,82 +459,319 @@ public int MainPropsMenuHandler(Menu menu, MenuAction action, int param1, int pa
 
 			char display[64];
 
-			if (StrEqual(info, "Sb")) // prefernce item
+			if (StrEqual(info, "a")) // toggle item
 			{
 				Format(display, sizeof(display), "Props are active [%s]", (g_bClientWantsProps[param1] ? 'x' : ' ' ));
 				return RedrawMenuItem(display);
 			}
+			return 0;
 		}
 	}
 	return 0;
 }
 
 
-public int PropsDongSubMenuHandler(Menu menu, MenuAction action, int param1, int param2)
+public int PhysicsPropsSpawningMenuHandler(Menu menu, MenuAction action, int param1, int param2)
 {
-	if (action != MenuAction_Select)
-		return 0; // TESTING: should keep menu open?
-
 	switch (action)
 	{
-		case MenuAction_DrawItem:
+		case MenuAction_Display:
 		{
-			char info[64];
-			menu.GetItem(param2, info, sizeof(info));
+			char title[255];
+			Format(title, sizeof(title), "Spawn physics props. Credits remaining %d", g_RemainingCreds[param1][VIRT_CRED]);
 
-			if ((strcmp(gs_dongs[0], info) == 0) && hasEnoughCredits(param1, 5))
+			Panel panel = view_as<Panel>(param2);
+			panel.SetTitle(title);
+		}
+		case MenuAction_Cancel:
+		{
+			if (param2 == MenuCancel_ExitBack && g_hTopMenu != INVALID_HANDLE)
 			{
-				return ITEMDRAW_DISABLED;
+				DisplayTopMenu(g_hTopMenu, param1, TopMenuPosition_LastCategory);
 			}
-
-
-			return ITEMDRAW_DEFAULT;
+		}
+		case MenuAction_Select:
+		{
+			decl String:info[PLATFORM_MAX_PATH];
+			GetMenuItem(menu, param2, info, sizeof(info));
+			FakeClientCommand(param1, "sm_prop_spawn %s", info);
+			DisplayMenu(menu, param1, 20);
 		}
 	}
 	return 0;
 }
 
-// menu for regular props
-public int PropsPropSubMenuHandler(Menu menu, MenuAction action, int param1, int param2)
-{
-	if (action != MenuAction_Select)
-		return 0; // TESTING: should keep menu open?
 
+public int DynamicPropsSpawningMenuHandler(Menu menu, MenuAction action, int param1, int param2)
+{
 	switch (action)
 	{
-		case MenuAction_DrawItem:
+		case MenuAction_Display:
 		{
-			char info[64];
-			menu.GetItem(param2, info, sizeof(info));
+			char title[255];
+			Format(title, sizeof(title), "Spawn dynamic props: Credits remaining: %d", g_RemainingCreds[param1][VIRT_CRED]);
 
-			if (!hasEnoughCredits(param1, 5)) // hardcoded price, need lookup in array
+			Panel panel = view_as<Panel>(param2);
+			panel.SetTitle(title);
+		}
+		case MenuAction_Cancel:
+		{
+			if (param2 == MenuCancel_ExitBack && g_hTopMenu != INVALID_HANDLE)
 			{
-				return ITEMDRAW_DISABLED;
+				DisplayTopMenu(g_hTopMenu, param1, TopMenuPosition_LastCategory);
 			}
-			return ITEMDRAW_DEFAULT;
+		}
+		case MenuAction_Select:
+		{
+			decl String:info[PLATFORM_MAX_PATH];
+			GetMenuItem(menu, param2, info, sizeof(info));
+			FakeClientCommand(param1, "sm_prop_spawn %s", info);
+			DisplayMenu(menu, param1, 20);
 		}
 	}
 	return 0;
 }
+
+
+public int DongSpawningMenuHandler(Menu menu, MenuAction action, int param1, int param2)
+{
+	switch (action)
+	{
+		case MenuAction_Display:
+		{
+			char buffer[255];
+			Format(buffer, sizeof(buffer), "Spawn dongs. Credits remaining: %d.", g_RemainingCreds[param1][VIRT_CRED]);
+
+			Panel panel = view_as<Panel>(param2);
+			panel.SetTitle(buffer);
+		}
+		case MenuAction_Cancel:
+		{
+			if (param2 == MenuCancel_ExitBack && g_hTopMenu != INVALID_HANDLE)
+			{
+				DisplayTopMenu(g_hTopMenu, param1, TopMenuPosition_LastCategory);
+			}
+		}
+		case MenuAction_Select:
+		{
+			decl String:info[2];
+			GetMenuItem(menu, param2, info, sizeof(info));
+			switch(info[0])
+			{
+				case '0':
+				{
+					FakeClientCommand(param1, "sm_dick 1");
+					DisplayMenu(menu, param1, 20);
+				}
+				case '1':
+				{
+					FakeClientCommand(param1, "sm_dick 2");
+					DisplayMenu(menu, param1, 20);
+				}
+				case '2':
+					FakeClientCommand(param1, "sm_dick 3");
+				case '3':
+					FakeClientCommand(param1, "sm_dick 4");
+				case '4':
+					FakeClientCommand(param1, "sm_dick 5");
+				case '5':
+				{
+					FakeClientCommand(param1, "sm_dick 1 1");
+					DisplayMenu(menu, param1, 20);
+				}
+				case '6':
+				{
+					FakeClientCommand(param1, "sm_dick 2 1");
+					DisplayMenu(menu, param1, 20);
+				}
+				case '7':
+					FakeClientCommand(param1, "sm_dick 3 1");
+				case '8':
+					FakeClientCommand(param1, "sm_dick 4 1");
+				case '9':
+					FakeClientCommand(param1, "sm_dick 5 1");
+				default:
+				{
+					// CloseHandle(g_hTopMenu);
+					return 0;
+				}
+			}
+		}
+
+		case MenuAction_DrawItem:
+		{
+			if (IsAdmin(param1)) // bypass credits system
+				return 0;
+
+			char info[2];
+			menu.GetItem(param2, info, sizeof(info));
+			int price = StringToInt(info[0]);
+
+			if (price > 4)
+				price -= 5;
+
+			if (!hasEnoughCredits(param1, g_DongPropPrice[price]))
+				return ITEMDRAW_DISABLED;
+			return ITEMDRAW_DEFAULT;
+		}
+
+		case MenuAction_DisplayItem:
+		{
+			if (IsAdmin(param1)) // bypass credits system
+				return 0;
+
+			char info[2], display[64];
+			menu.GetItem(param2, info, sizeof(info), _, display, sizeof(display));
+			int price = StringToInt(info[0]) + 1;
+
+			if (price > 4)
+				price -= 5;
+
+			Format(display, sizeof(display), "%s (need %d)", display, price);
+			return RedrawMenuItem(display);
+		}
+	}
+	return 0;
+}
+
+
+public int StrapDongMenuHandler(Menu menu, MenuAction action, int param1, int param2)
+{
+	switch (action)
+	{
+		case MenuAction_Display:
+		{
+			char buffer[255];
+			Format(buffer, sizeof(buffer), "Strap dongs. Credits remaining: %d", g_RemainingCreds[param1][VIRT_CRED]);
+
+			Panel panel = view_as<Panel>(param2);
+			panel.SetTitle(buffer);
+		}
+		case MenuAction_Cancel:
+		{
+			if (param2 == MenuCancel_ExitBack && g_hTopMenu != INVALID_HANDLE)
+			{
+				DisplayTopMenu(g_hTopMenu, param1, TopMenuPosition_LastCategory);
+			}
+		}
+		case MenuAction_Select:
+		{
+			decl String:info[2];
+			GetMenuItem(menu, param2, info, sizeof(info));
+			switch(info[0])
+			{
+				case 'a':
+					FakeClientCommand(param1, "sm_strapdong me");
+				case 'b':
+					FakeClientCommand(param1, "sm_strapdong team");
+				case 'c':
+					FakeClientCommand(param1, "sm_strapdong all");
+				default:
+				{
+					// CloseHandle(g_hTopMenu);
+					return 0;
+				}
+			}
+			return 0;
+		}
+		case MenuAction_DrawItem:
+		{
+			if (IsAdmin(param1)) // bypass credits system
+				return ITEMDRAW_DEFAULT;
+
+			char info[2];
+			menu.GetItem(param2, info, sizeof(info));
+
+			switch(info[0])
+			{
+				case 'a':
+				{
+					if (!hasEnoughCredits(param1, 1))
+						return ITEMDRAW_DISABLED;
+
+					return ITEMDRAW_DEFAULT;
+				}
+				case 'b':
+				{
+					int price;
+					int affected[NEO_MAX_CLIENTS+1];
+					ComputePriceForProp(param1, 1, price, affected, false); // kind of ugly, we recompute both for DrawItem and DisplayItem...
+
+					if (!hasEnoughCredits(param1, price))
+						return ITEMDRAW_DISABLED;
+
+					return ITEMDRAW_DEFAULT;
+				}
+				case 'c':
+				{
+					int price;
+					int affected[NEO_MAX_CLIENTS+1];
+					ComputePriceForProp(param1, 2, price, affected, false);
+
+					if (!hasEnoughCredits(param1, price))
+						return ITEMDRAW_DISABLED;
+
+					return ITEMDRAW_DEFAULT;
+				}
+			}
+		}
+		case MenuAction_DisplayItem:
+		{
+			char info[2], display[64];
+			menu.GetItem(param2, info, sizeof(info), _, display, sizeof(display));
+
+			switch(info[0])
+			{
+				case 'b':
+				{
+					if (IsAdmin(param1)) // bypass credits system
+						return 0;
+
+					int price;
+					int affected[NEO_MAX_CLIENTS+1];
+					ComputePriceForProp(param1, 1, price, affected, false); // called many times here :/
+
+					Format(display, sizeof(display), "%s (need %d)", display, price);
+
+					return RedrawMenuItem(display);
+				}
+				case 'c':
+				{
+					if (IsAdmin(param1)) // bypass credits system
+						return 0;
+
+					int price;
+					int affected[NEO_MAX_CLIENTS+1];
+					ComputePriceForProp(param1, 2, price, affected, false); // called many times here :/
+
+					Format(display, sizeof(display), "%s (need %d)", display, price);
+
+					return RedrawMenuItem(display);
+				}
+			}
+		}
+	}
+	return 0;
+}
+
 
 /*==================================
 		Client preferences
 ==================================*/
 
-public MyCookieMenuHandler(client, CookieMenuAction:action, any:info, String:buffer[], maxlen)
-{
-	switch (action)
-	{
-		case CookieMenuAction_DisplayOption:
-		{
-		}
-
-		case CookieMenuAction_SelectOption:
-		{
-			OnClientCookiesCached(client);
-		}
-	}
-}
+// public MyCookieMenuHandler(client, CookieMenuAction:action, any:info, String:buffer[], maxlen)
+// {
+// 	switch (action)
+// 	{
+// 		case CookieMenuAction_DisplayOption:
+// 		{
+// 		}
+// 		case CookieMenuAction_SelectOption:
+// 		{
+// 			OnClientCookiesCached(client);
+// 		}
+// 	}
+// }
 
 
 public OnClientCookiesCached(int client)
@@ -553,7 +825,7 @@ ReadCookies(int client)
 	GetClientCookie(client, FindClientCookie("wants-props"), cookie, sizeof(cookie));
 
 	#if DEBUG
-	PrintToServer("[nt_props] DEBUG ReadCookies(%N) cookie is: \"%s\"", 
+	PrintToServer("[nt_props] DEBUG ReadCookies(%N) cookie is: \"%s\"",
 	client, ((cookie[0] != '\0' && StringToInt(cookie)) ? "null" : cookie ));
 	#endif
 
@@ -611,12 +883,12 @@ public Action Command_Hate_Props_Toggle(int client, int args)
 	ToggleCookiePreference(client);
 
 	char buffer[255];
-	Format(buffer, sizeof(buffer), "Your preference has been recorded. %s", 
+	Format(buffer, sizeof(buffer), "Your preference has been recorded. %s",
 	(g_bClientWantsProps[client] ? "You do like props after all." : "You no like props."));
 
 	ReplyToCommand(client, buffer);
 
-	ShowActivity2(client, "[nt_props] ", "%N opted %s nt_props models.", 
+	ShowActivity2(client, "[nt_props] ", "%N opted %s nt_props models.",
 	client, (g_bClientWantsProps[client] ? "back in" : "out of"));
 	LogAction(client, -1, "[nt_props] \"%L\" opted %s nt_props models.",
 	client, (g_bClientWantsProps[client] ? "back in" : "out of"));
@@ -723,7 +995,7 @@ public OnClientPutInServer(int client)
 
 		// if we use score as credit, restore them
 		if ( GetConVarBool(g_cvar_score_as_credits) )
-			g_RemainingCreds[client][SCORE_CRED] = GetClientFrags(client); //NEEDS TESTING!
+			g_RemainingCreds[client][SCORE_CRED] = GetClientFrags(client); //NEEDS TESTING! might need a delay here
 		if ( GetConVarBool(g_cvar_give_initial_credits) )
 			g_RemainingCreds[client][VIRT_CRED] = g_RemainingCreds[client][MAX_CRED] = GetConVarInt(cvMaxPropsCreds);
 		else
@@ -741,7 +1013,7 @@ public OnSavedScoreLoaded(int client, int score)
 		#endif
 		// if we use score as credit, restore them
 		if ( GetConVarBool(g_cvar_score_as_credits) )
-			g_RemainingCreds[client][SCORE_CRED] = score; //NEEDS TESTING!
+			g_RemainingCreds[client][SCORE_CRED] = score;
 		if ( GetConVarBool(g_cvar_give_initial_credits) )
 			g_RemainingCreds[client][VIRT_CRED] = g_RemainingCreds[client][MAX_CRED] = GetConVarInt(cvMaxPropsCreds);
 		else
@@ -1148,41 +1420,32 @@ void Display_Why_Command_Is_Disabled(int client)
 
 
 
-public Action CommandProps(int client, int args)
+public Action ConCommand_Props(int client, int args)
 {
-	// opt-in (if opt-in mode?) and draw menu
-
-	DisplayMenu(g_hPropsPhysicsMenu, client, 20);
+	// Go straight to our category here
+	if (!DisplayTopMenuCategory(g_hTopMenu, FindTopMenuCategory(g_hTopMenu, "Props"), client))
+		g_hTopMenu.Display(client, TopMenuPosition_Start); // fall back to the top menu
 
 	// osbolete method
 	if (!GetConVarBool(g_cvar_opt_in_mode))
-		CommandPropSpawn(client, args);
+		ConCommand_PropSpawn(client, args);
 
 	return Plugin_Handled;
 }
 
-public Action CommandNoProps(int client, int args)
+public Action Command_NoProps(int client, int args)
 {
 	// opt out of props?
 	return Plugin_Handled;
 }
 
 
-public Action CommandPropSpawn(int client, int args)
+bool IsPropCommandAllowed(int client)
 {
-	if (!IsValidClient(client))
-		return Plugin_Handled;
-
-	// if (HasAnyoneOptedOut())
-	// {
-	// 	Display_Why_Command_Is_Disabled(client);
-	// 	return Plugin_Handled;
-	// }
-
 	if (gb_PausePropSpawning)
 	{
 		ReplyToCommand(client, "Prop spawning is currently paused.");
-		return Plugin_Handled;
+		return false;
 	}
 
 	if (GetConVarBool(g_cvar_restrict_alive) && GetClientTeam(client) <= 1)
@@ -1194,7 +1457,7 @@ public Action CommandPropSpawn(int client, int args)
 		{
 			Print_Usage_For_Admins(client);
 		}
-		return Plugin_Handled;
+		return false;
 	}
 
 	if( GetCmdArgs() != 1 )
@@ -1210,21 +1473,46 @@ public Action CommandPropSpawn(int client, int args)
 			//FIXME: bypass credit system for DEBUGGING ONLY
 			GetCmdArgString(s_args, sizeof(s_args));
 			Prop_Spawn_Dispatch_Admin(client, s_args);
-			return Plugin_Handled;
+			return false;
 		}
 
-		return Plugin_Handled;
+		return false;
 	}
 
 	if (!GetConVarBool(g_cvar_props_enabled))
 	{
 		PrintToConsole(client, "This command is currently disabled. Ask an admin to enable with sm_props_enabled");
 		PrintToChat(client, "This command is currently disabled. Ask an admin to enable with sm_props_enabled");
-		return Plugin_Handled;
+		return false;
 	}
+
+	return true;
+}
+
+
+
+public Action ConCommand_PropSpawn(int client, int args)  //FIXME physics only, need dynamic branch too
+{
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+
+	// if (HasAnyoneOptedOut())
+	// {
+	// 	Display_Why_Command_Is_Disabled(client);
+	// 	return Plugin_Handled;
+	// }
+
+	// opt-in here automatically (if opt-in mode?)
+
+	if (!IsPropCommandAllowed(client) && !IsAdmin(client))
+		return Plugin_Handled;
 
 	decl String:model_pathname[PLATFORM_MAX_PATH];
 	GetCmdArg(1, model_pathname, sizeof(model_pathname));
+
+	#if DEBUG
+	PrintToServer("Command props_spawn called with %s", model_pathname);
+	#endif
 
 	for (int index=0; index < sizeof(gs_allowed_physics_models); ++index)
 	{
@@ -1335,25 +1623,18 @@ public DongDispatch(int client, int scale, int bstatic)
 
 
 
-public Action Command_Dong_Spawn(int client, int args)
+bool IsCommandAllowed(int client)
 {
-	if (!IsValidClient(client))
-		return Plugin_Handled;
-
-	// TODO: opt-in here
-	// TODO: if no arg given, display menu
-
-
 	if (gb_PausePropSpawning)
 	{
 		ReplyToCommand(client, "Prop spawning is currently paused.");
-		return Plugin_Handled;
+		return false;
 	}
 	else if (!GetConVarBool(g_cvar_props_enabled))
 	{
 		PrintToConsole(client, "This command is currently disabled. Ask an admin to enable with sm_props_enabled");
 		PrintToChat(client, "This command is currently disabled. Ask an admin to enable with sm_props_enabled");
-		return Plugin_Handled;
+		return false;
 	}
 
 	if (GetConVarInt( g_cvar_score_as_credits ) > 0)
@@ -1362,15 +1643,30 @@ public Action Command_Dong_Spawn(int client, int args)
 		{
 			PrintToChat(client, "[nt_props] Your current score doesn't allow you to spawn props.");
 			PrintToConsole(client, "[nt_props] Your current score doesn't allow you to spawn props.");
-			return Plugin_Handled;
+			return false;
 		}
 	}
 	if (g_RemainingCreds[client][VIRT_CRED] <= 0)
 	{
 		PrintToChat(client, "[nt_props] You don't have any remaining brouzoufs to spawn a prop.");
 		PrintToConsole(client, "[nt_props] You don't have any remaining brouzoufs to spawn a prop.");
-		return Plugin_Handled;
+		return false;
 	}
+
+	return true;
+}
+
+
+public Action Command_Dong_Spawn(int client, int args)
+{
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+
+	// TODO: opt-in here
+	// TODO: if no arg given, display menu
+
+	if (!IsCommandAllowed(client) && !IsAdmin(client))
+		return Plugin_Handled;
 
 	if ((GetCmdArgs() > 2) || (GetCmdArgs() == 0))
 	{
@@ -1394,6 +1690,13 @@ public Action Command_Dong_Spawn(int client, int args)
 		iModelScale--;
 
 	int iModelProperty = (strlen(model_property) > 0) ? StringToInt(model_property) : 0;
+
+	if (IsAdmin(client))
+	{
+		DongDispatch(client, iModelScale, iModelProperty);
+		DisplayActivity(client, gs_dongs[iModelScale]);
+		return Plugin_Handled;
+	}
 
 	if (hasEnoughCredits(client, g_DongPropPrice[iModelScale]))
 	{
@@ -1722,42 +2025,10 @@ public Action Command_Strap_Dong(int client, int args)
 
 	if (i_case >= 1)
 	{
-		int team;
-		if (i_case == 1)
-			team = GetClientTeam(client);
-
 		int price;
 		bool affected[NEO_MAX_CLIENTS+1];
 
-		// build the list of affected players
-		for (int i=1; i <= MaxClients; i++)
-		{
-			if (!IsValidClient(i))
-				continue;
-
-			if (i_case == 1)
-				if (GetClientTeam(i) != team)
-					continue;
-
-			// we're dead, we don't add to price; note: IsPlayerAlive() doesn't work in NT
-			if (client == i && GetCmdArgs() < 2 && !IsPlayerReallyAlive(client))
-				continue;
-
-			// didn't ask for specs to be affected
-			if (GetCmdArgs() < 2 && !IsPlayerReallyAlive(i))
-				continue;
-			else if (!IsPlayerReallyAlive(i) && IsPlayerObserving(i)) // already observing someone
-				continue;
-
-			// don't add on top of another already attached
-			if (g_AttachmentEnt[i] != -1)
-				continue;
-
-			if (!isadmin)
-				price++;
-
-			affected[i] = true;
-		}
+		ComputePriceForProp(client, i_case, price, affected, isadmin);
 
 		#if DEBUG
 		PrintToServer("[nt_props] DEBUG: affected clients (sizeof(affected) is %d):\n", sizeof(affected));
@@ -1846,6 +2117,45 @@ public Action Command_Strap_Dong(int client, int args)
 			g_DongPropPrice[0], g_RemainingCreds[client][VIRT_CRED]);
 			return Plugin_Handled;
 		}
+	}
+}
+
+
+
+void ComputePriceForProp(int client, int i_case, int &price, int affected[NEO_MAX_CLIENTS+1], bool isadmin)
+{
+	int team;
+	if (i_case == 1)
+		team = GetClientTeam(client);
+
+	// build the list of affected players
+	for (int i=1; i <= MaxClients; i++)
+	{
+		if (!IsValidClient(i))
+			continue;
+
+		if (i_case == 1)
+			if (GetClientTeam(i) != team)
+				continue;
+
+		// we're dead, we don't add to price; note: IsPlayerAlive() doesn't work in NT
+		if (client == i && GetCmdArgs() < 2 && !IsPlayerReallyAlive(client))
+			continue;
+
+		// didn't ask for specs to be affected
+		if (GetCmdArgs() < 2 && !IsPlayerReallyAlive(i))
+			continue;
+		else if (!IsPlayerReallyAlive(i) && IsPlayerObserving(i)) // already observing someone
+			continue;
+
+		// don't add on top of another already attached
+		if (g_AttachmentEnt[i] != -1)
+			continue;
+
+		if (!isadmin)
+			price++;
+
+		affected[i] = true;
 	}
 }
 
