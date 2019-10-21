@@ -3,7 +3,7 @@
 #include <sdkhooks>
 #include <neotokyo>
 #define NEO_MAX_CLIENTS 32
-#define DEBUG 2
+#define DEBUG 0
 Handle g_hCurrentlyPlaying[NEO_MAX_CLIENTS] = {INVALID_HANDLE, ...};
 const int MAX_SND_INSTANCES = 5; // maximum concurent sounds allowed to be amitted over CVAR_hurt_sounds_delay period, for security
 int g_iSoundInstances = 0; 

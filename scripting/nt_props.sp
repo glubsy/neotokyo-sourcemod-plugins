@@ -3,6 +3,7 @@
 #include <sdktools>
 #include <clientprefs>
 #include <adminmenu>
+#include <entity_prop_stocks.inc>
 #include <nt_entitytools>
 
 #undef REQUIRE_PLUGIN
@@ -11,12 +12,13 @@
 #define DEBUG 1
 #pragma semicolon 1
 #define NEO_MAX_CLIENTS 32
-#define PLUGIN_VERSION "20191018"
+#define MAX_PROPS_PER_PLAYER 10
+#define PLUGIN_VERSION "20191020"
 
 Handle g_cvar_props_enabled, g_cvar_restrict_alive, g_cvar_give_initial_credits, g_cvar_credits_replenish, g_cvar_score_as_credits, g_cvar_opt_in_mode = INVALID_HANDLE;
 Handle cvMaxPropsCreds = INVALID_HANDLE; // maximum credits given
 Handle cvPropMaxTTL = INVALID_HANDLE; // maximum time to live before prop gets auto removed
-Handle g_hPropPrefCookie = INVALID_HANDLE; // handle to client preferences
+// Handle g_hPropPrefCookie = INVALID_HANDLE;
 Handle g_cvar_props_oncapture, g_cvar_props_onghostpickup, g_cvar_props_oncapture_nodongs, gTimer = INVALID_HANDLE;
 bool gb_PausePropSpawning;
 int g_AttachmentEnt[NEO_MAX_CLIENTS+1] = {-1, ...}; // strapped on prop
@@ -25,7 +27,7 @@ Handle gNoDrawTimer[NEO_MAX_CLIENTS+1] = {INVALID_HANDLE, ...};
 // Menu setup
 TopMenuObject g_hTopPropsMainMenu_topmenuobj = INVALID_TOPMENUOBJECT;
 TopMenu g_hTopMenu; // handle to the nt_menu plugin topmenu
-Handle g_hPropsStaticMenu, g_hPropsPhysicsMenu, g_hSpawnDongMenu, g_hStrapDongMenu, g_hPrefsMenu; // our main props menu
+Handle g_hPropsStaticMenu, g_hPropsPhysicsMenu, g_hSpawnDongMenu, g_hStrapDongMenu, g_hPrefsMenu, g_hPropertiesMenu; // our main props menus
 
 // [0] holds virtual credits, [2] current score credits, [3] maximum credits level reached
 int g_RemainingCreds[NEO_MAX_CLIENTS+1][3];
@@ -33,7 +35,8 @@ int g_RemainingCreds[NEO_MAX_CLIENTS+1][3];
 #define SCORE_CRED 1
 #define MAX_CRED 2
 
-int g_propindex_d[NEO_MAX_CLIENTS+1]; // holds the last spawned entity by client
+int g_PropHistory[NEO_MAX_CLIENTS+1][MAX_PROPS_PER_PLAYER]; // history of all props spawned per player
+int g_PropCursor[NEO_MAX_CLIENTS+1]; // holds the last spawned entity by client
 bool g_bClientWantsProps[NEO_MAX_CLIENTS+1];
 
 // WARNING: the custom files require the sm_downloader plugin to force clients to download them
@@ -45,7 +48,7 @@ new const String:gs_dongs[][] = {
 	"models/d/d_g02.mdl", //gigantic
 	"models/d/d_mh02.mdl" }; //megahuge
 
-new const g_DongPropPrice[] = { 1, 3, 6, 9, 15 };
+new const g_PropPrice[] = { 1, 3, 6, 9, 15 };
 
 new const String:gs_allowed_physics_models[][] = {
 	"models/nt/a_lil_tiger.mdl",
@@ -77,6 +80,7 @@ new const String:gs_allowed_dynamic_models[][] = {
 	"models/logo/jinrai_logo.mdl",
 	"models/logo/nsf_logo.mdl",
 	"models/nt/props_nature/koi_fisha.mdl",
+	"models/nt/props_vehicles/hachikoma_dynamic.mdl"
 };
 
 new const String:gs_PropType[][] = {  // should be an enum?
@@ -119,23 +123,28 @@ TODO: make circular buffer to store clients props up to its limit, erase old one
 TODO: use tempent Sprite Spray (for Marterzon)
 TODO: move from sm_downloader to downloadtables here
 TODO: parse available models from a text file
+TODO: make command to rotate skin on either last spawn prop or targeted prop
 */
 
 public OnPluginStart()
 {
 	RegConsoleCmd("sm_props", ConCommand_Props, "Opt-in custom props.");
 	RegConsoleCmd("sm_noprops", Command_NoProps, "Opt-out of custom props.");
-	RegConsoleCmd("sm_prop_spawn", ConCommand_PropSpawn, "Spawns a prop.");
+	RegConsoleCmd("sm_props_spawn", ConCommand_PropSpawn, "Spawns a prop.");
 	RegConsoleCmd("sm_dick", Command_Dong_Spawn, "Spawns a dick [scale 1-5] [1 for static prop]");
 	RegConsoleCmd("sm_strapdong", Command_Strap_Dong, "Strap a dong onto [me|team|all].");
 
-	RegConsoleCmd("sm_props_nothx", Command_Hate_Props_Toggle, "Toggle your preference to not see custom props wherever possible.");
+	RegConsoleCmd("sm_props_rotate_skin", ConCommand_Props_Rotate_Skin, "Change targeted prop's skin");
+	RegConsoleCmd("sm_props_rotate_color", ConCommand_Props_Rotate_Color, "Change targeted prop's colors");
+	RegConsoleCmd("sm_props_rotate_transparency", ConCommand_Props_Rotate_Transparency, "Change targeted prop's transparency");
+	RegConsoleCmd("sm_props_rotate_angles", ConCommand_Props_Rotate_Angles, "Change targeted prop's angles");
+	RegConsoleCmd("sm_props_rotate_position", ConCommand_Props_Rotate_Position, "Change targeted prop's position");
 
-	g_hPropPrefCookie = RegClientCookie("wants-props", "player opted to have fun with props", CookieAccess_Protected);
+	// g_hPropPrefCookie = RegClientCookie("wants-props", "player opted to have fun with props", CookieAccess_Protected);
 
 	RegConsoleCmd("sm_props_help", Command_Print_Help, "Prints all props-related commands.");
 	RegConsoleCmd("sm_props_pause", Command_Pause_Props_Spawning, "Prevent any further custom prop spawning until end of round.");
-
+	RegConsoleCmd("sm_props_nothx", Command_Hate_Props_Toggle, "Toggle your preference to not see custom props wherever possible.");
 
 	// conditions
 	g_cvar_props_onghostpickup = CreateConVar("sm_props_onghostpickup", "0", "Picking up the ghost is exciting,", FCVAR_NONE, true, 0.0, true, 1.0 );
@@ -206,6 +215,7 @@ public OnPluginStart()
 	g_hSpawnDongMenu = BuildMainPropsMenu(3);
 	g_hStrapDongMenu = BuildMainPropsMenu(4);
 	g_hPrefsMenu = BuildMainPropsMenu(5);
+	g_hPropertiesMenu = BuildMainPropsMenu(6);
 
 	// Is our menu already loaded?
 	TopMenu topmenu;
@@ -238,7 +248,7 @@ public OnNTMenuReady(Handle aTopMenu)
 }
 
 // object ids for our items added to categories
-TopMenuObject g_tmo_propsphys, g_tmo_propsdyn, g_tmo_dong, g_tmo_strap, g_tmo_prefs = INVALID_TOPMENUOBJECT;
+TopMenuObject g_tmo_propsphys, g_tmo_propsdyn, g_tmo_dong, g_tmo_strap, g_tmo_prefs, g_tmo_props_props = INVALID_TOPMENUOBJECT;
 
 void BuildTopPropsMenu()
 {
@@ -254,6 +264,7 @@ void BuildTopPropsMenu()
 		g_tmo_dong = g_hTopMenu.AddItem("sm_dick", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_dick");
 		g_tmo_strap = g_hTopMenu.AddItem("sm_strapdong", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_strapdong");
 		g_tmo_prefs = g_hTopMenu.AddItem("sm_props_prefs", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_props_prefs");
+		g_tmo_props_props = g_hTopMenu.AddItem("sm_props_properties", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_props_properties");
 		return;
 	}
 
@@ -265,6 +276,7 @@ void BuildTopPropsMenu()
 	g_tmo_dong = AddToTopMenu(g_hTopMenu, "sm_dick", TopMenuObject_Item, TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_dick");
 	g_tmo_strap = AddToTopMenu(g_hTopMenu, "sm_strapdong", TopMenuObject_Item, TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_strapdong");
 	g_tmo_prefs = AddToTopMenu(g_hTopMenu, "sm_props_prefs", TopMenuObject_Item, TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_props_prefs");
+	g_tmo_props_props = AddToTopMenu(g_hTopMenu, "sm_props_properties", TopMenuObject_Item, TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_props_properties");
 	SetTopMenuTitleCaching(g_hTopMenu, false); // seems to fix "Preferences" being the de facto title on our "Props" category
 }
 
@@ -288,6 +300,8 @@ public TopMenuCategory_Handler (Handle:topmenu, TopMenuAction:action, TopMenuObj
 			Format(buffer, maxlength, "%s", "Strap Dongs", param);
 		if (object_id == g_tmo_prefs)
 			Format(buffer, maxlength, "%s", "Preferences", param);
+		if (object_id == g_tmo_props_props)
+			Format(buffer, maxlength, "%s", "Change props properties", param);
 	}
 	else if (action == TopMenuAction_SelectOption)
 	{
@@ -301,6 +315,8 @@ public TopMenuCategory_Handler (Handle:topmenu, TopMenuAction:action, TopMenuObj
 			DisplayMenu(g_hStrapDongMenu, param, 20);
 		if (object_id == g_tmo_prefs)
 			DisplayMenu(g_hPrefsMenu, param, 20);
+		if (object_id == g_tmo_props_props)
+			DisplayMenu(g_hPropertiesMenu, param, 20);
 	}
 }
 
@@ -310,6 +326,18 @@ public Menu BuildMainPropsMenu(int type)
 
 	switch (type)
 	{
+		case 6:
+		{
+			menu = new Menu(PropsPrefsMenuHandler, MENU_ACTIONS_ALL);
+			menu.SetTitle("Prop properties");
+			menu.AddItem("b", "Change target prop skin");
+			menu.AddItem("c", "Change target prop colors");
+			menu.AddItem("d", "Change target prop transparency");
+			menu.AddItem("e", "Change target prop rotation");
+			menu.AddItem("f", "Change target prop position");
+			menu.ExitButton = true;
+			menu.ExitBackButton = true;
+		}
 		case 5:
 		{
 			menu = new Menu(PropsPrefsMenuHandler, MENU_ACTIONS_ALL);
@@ -331,11 +359,11 @@ public Menu BuildMainPropsMenu(int type)
 				{
 					++index;
 					StrCat(item_name, strlen(gs_allowed_physics_models[i]) - index + 1, gs_allowed_physics_models[i][index]);
-
 				}
 				while(index <= strlen(gs_allowed_physics_models[i]));
 
 				SplitString(item_name, ".mdl", item_name, sizeof(item_name));
+				ReplaceString(item_name, sizeof(item_name), "_", " ", false);
 
 				#if DEBUG
 				PrintToServer("Adding phsysics %s", item_name);
@@ -362,6 +390,7 @@ public Menu BuildMainPropsMenu(int type)
 				while(index <= strlen(gs_allowed_dynamic_models[i]));
 
 				SplitString(item_name, ".mdl", item_name, sizeof(item_name));
+				ReplaceString(item_name, sizeof(item_name), "_", " ", false);
 
 				#if DEBUG
 				PrintToServer("Adding dynamic %s", item_name);
@@ -444,6 +473,31 @@ public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int p
 					ToggleCookiePreference(param1);
 					DisplayMenu(g_hPrefsMenu, param1, 20);
 				}
+				case 'b': // a different menu is handled here!
+				{
+					FakeClientCommand(param1, "sm_props_rotate_skin");
+					DisplayMenu(g_hPropertiesMenu, param1, 20);
+				}
+				case 'c':
+				{
+					FakeClientCommand(param1, "sm_props_rotate_colors");
+					DisplayMenu(g_hPropertiesMenu, param1, 20);
+				}
+				case 'd':
+				{
+					FakeClientCommand(param1, "sm_props_rotate_transparency");
+					DisplayMenu(g_hPropertiesMenu, param1, 20);
+				}
+				case 'e':
+				{
+					FakeClientCommand(param1, "sm_props_rotate_angles");
+					DisplayMenu(g_hPropertiesMenu, param1, 20);
+				}
+				case 'f':
+				{
+					FakeClientCommand(param1, "sm_props_rotate_position");
+					DisplayMenu(g_hPropertiesMenu, param1, 20);
+				}
 				default:
 				{
 					CloseHandle(g_hTopMenu);
@@ -494,7 +548,7 @@ public int PhysicsPropsSpawningMenuHandler(Menu menu, MenuAction action, int par
 		{
 			decl String:info[PLATFORM_MAX_PATH];
 			GetMenuItem(menu, param2, info, sizeof(info));
-			FakeClientCommand(param1, "sm_prop_spawn %s", info);
+			FakeClientCommand(param1, "sm_props_spawn %s", info);
 			DisplayMenu(menu, param1, 20);
 		}
 	}
@@ -610,7 +664,7 @@ public int DongSpawningMenuHandler(Menu menu, MenuAction action, int param1, int
 			if (price > 4)
 				price -= 5;
 
-			if (!hasEnoughCredits(param1, g_DongPropPrice[price]))
+			if (!hasEnoughCredits(param1, g_PropPrice[price]))
 				return ITEMDRAW_DISABLED;
 			return ITEMDRAW_DEFAULT;
 		}
@@ -759,6 +813,25 @@ public int StrapDongMenuHandler(Menu menu, MenuAction action, int param1, int pa
 		Client preferences
 ==================================*/
 
+bool Has_Anyone_Opted_Out()
+{
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (IsValidClient(i) && !g_bClientWantsProps[i]) // at least one person doesn't want to see the props
+		{
+			#if DEBUG
+			PrintToServer("[nt_props] DEBUG: Client %s has opted out of props, let's hide them!", GetClientOfUserId(i));
+			#endif
+			return true;
+		}
+	}
+	#if DEBUG
+	PrintToServer("[nt_props] DEBUG: Nobody opted out of props.");
+	#endif
+	return false;
+}
+
+
 // public MyCookieMenuHandler(client, CookieMenuAction:action, any:info, String:buffer[], maxlen)
 // {
 // 	switch (action)
@@ -836,8 +909,8 @@ ReadCookies(int client)
 }
 
 
-// returns true if a previous cookie was found
-ToggleCookiePreference(int client)
+// Toggle bool + cookie
+void ToggleCookiePreference(int client)
 {
 	if (!IsValidClient(client))
 		return;
@@ -925,12 +998,12 @@ public Action Command_Pause_Props_Spawning(int client, int args)
 
 public Action Command_Give_Score (int client, int args)
 {
-	if (!client)
-	{
-		ReplyToCommand(client, "This command cannot be executed by the server.");
-		return Plugin_Stop;
-	}
-	if (GetCmdArgs() == 1)
+	// if (!client)
+	// {
+	// 	ReplyToCommand(client, "This command cannot be executed by the server.");
+	// 	return Plugin_Stop;
+	// }
+	if (GetCmdArgs() >= 1)
 	{
 		char arg[10];
 		GetCmdArg(1, arg, sizeof(arg));
@@ -992,6 +1065,11 @@ public OnClientPutInServer(int client)
 	if(client && !IsFakeClient(client))
 	{
 		CreateTimer(60.0, timer_AdvertiseHelp, client);
+
+		for (int i = 0; i < sizeof(g_PropHistory[]); i++)
+		{
+			g_PropHistory[client][i] = -1; // clear history from a previous player just in case 
+		}
 
 		// if we use score as credit, restore them
 		if ( GetConVarBool(g_cvar_score_as_credits) )
@@ -1199,8 +1277,8 @@ void DecrementScore(int client, int amount)
 
 void Client_Used_Credits(int client, int credits)
 {
-	PrintToChat(client, "[nt_props] You have just used %d brouzoufs.", credits);
-	PrintToConsole(client, "[nt_props] You have just used %d brouzoufs.", credits);
+	PrintToChat(client, "[nt_props] You have just used %d brouzouf%s", credits, (credits > 1 ? "s." : "."));
+	PrintToConsole(client, "[nt_props] You have just used %d brouzouf%s", credits, (credits > 1 ? "s." : "."));
 	Decrease_Credits_For_Client(client, credits, true);
 	Decrease_Score_For_Client(client, 1, true);
 }
@@ -1256,11 +1334,80 @@ public Action Command_Set_Credits_For_Client(int client, int args)
 //		Prop Spawning
 //==================================
 
-
-Prop_Dispatch_Allowed_Model_Index(int client, int model_index)
+// Add entity to history array, remove entity being replaced in history.
+void AddEntityToHistory(int entity, int client/*, bool remove=true*/)
 {
-	g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_allowed_physics_models[model_index], 50);
+	if (!IsValidEntity(entity))
+		return;
+
+	// Cycle around the array. Update cursor first to keep track of last spawned prop.
+	g_PropCursor[client]++;
+	g_PropCursor[client] %= sizeof(g_PropHistory[]);
+
+	// Remove any previous entity found.
+	//if (remove)
+	if ((g_PropHistory[client][g_PropCursor[client]] > 0) && (IsValidEntity(g_PropHistory[client][g_PropCursor[client]])))
+		AcceptEntityInput(g_PropHistory[client][g_PropCursor[client]], "kill");
+
+	g_PropHistory[client][g_PropCursor[client]] = entity;
+
+	#if DEBUG
+	PrintToChatAll("[nt_props] Cursor for client %N is now: %d / %d", client, g_PropCursor[client], sizeof(g_PropHistory[]));
+	#endif
 }
+
+
+int Prop_Dispatch_By_Model_Path(int client, char[] model_path, bool bdynamic=false)
+{
+
+	int entity = (bdynamic ? Create_Basic_DynamicProp(client, model_path, 50) : Create_Basic_PhysicsProp(client, model_path, 50));
+
+	if (bdynamic)
+	{
+		SetDynamicProperties(entity, model_path);
+	}
+	else
+	{
+		SetPhysicsProperties(entity, model_path);
+	}
+
+	return entity;
+}
+
+
+// compare model path name and set specific properties here
+void SetDynamicProperties(int entity, char[] model_path)
+{
+	if (StrContains("hachikoma_dynamic", model_path))
+	{
+		SetVariantString( (GetRandomInt(0,1) ? "idleA" : "idleB") );
+		AcceptEntityInput(entity, "SetAnimation");
+
+		char buffer[2];
+		IntToString(GetRandomInt(0,4), buffer, sizeof(buffer));
+		DispatchKeyValue(entity, "skin", buffer);
+	}
+
+	// SetVariantString("!self"); // !self, !activator
+	// AcceptEntityInput(entity, "DisableCollision");
+
+	DispatchKeyValue(entity, "solid", "0"); // works for dynamic, bullets don't collide
+}
+
+
+
+void SetPhysicsProperties(int entity, char[] model_path)
+{
+	// 0x8 CONTENTS_GRATE, works for physics_props, bullet don't collide, 
+	// but can't grab anymore because ray tracing doesn't collide either,
+	// 0x0 doesn't collide even with world (fall through!)
+	// Need more testing on solid type and groups
+	DispatchKeyValue(entity, "solid", "8");
+	// ChangeEdictState(entity); // probably not needed actually
+	return;
+}
+
+
 
 
 Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
@@ -1280,7 +1427,8 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 	//FIXME: unfinished business, check strings, use enums accordingly
 
 
-	g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, model_path, 50);
+	int entity = CreatePropPhysicsOverride_AtClientPos(client, model_path, 50);
+	AddEntityToHistory(entity, client);
 
 	// FIXME: find a way to make bullets go through physic_props
 	if (strcmp(model_path, gs_allowed_physics_models[2]) == 0 || strcmp(model_path, gs_allowed_physics_models[3]) == 0)
@@ -1289,13 +1437,13 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 		PrintToConsole(client, "Called CreatePhysicsOverride_AtclientPos for admin");
 		#endif
 
-		SetEntityRenderFx(g_propindex_d[client], RENDERFX_DISTORT); // works, only good for team logos
-		AcceptEntityInput(g_propindex_d[client], "DisableShadow"); // works
-		// SetEntProp(g_propindex_d[client], Prop_Send, "m_usSolidFlags", 136);
-		// SetEntProp(g_propindex_d[client], Prop_Send, "m_CollisionGroup", 13);
-		// SetEntProp(g_propindex_d[client], Prop_Send, "m_nSolidType", 0);
-		DispatchSpawn(g_propindex_d[client]); 		// without this line, prop will stay in place and not move, but will still block bullets
-		ActivateEntity(g_propindex_d[client]);
+		SetEntityRenderFx(entity, RENDERFX_DISTORT); // works, only good for team logos
+		AcceptEntityInput(entity, "DisableShadow"); // works
+		// SetEntProp(entity, Prop_Send, "m_usSolidFlags", 136);
+		// SetEntProp(entity, Prop_Send, "m_CollisionGroup", 13);
+		// SetEntProp(entity, Prop_Send, "m_nSolidType", 0);
+		DispatchSpawn(entity); 		// without this line, prop will stay in place and not move, but will still block bullets
+		ActivateEntity(entity);
 	}
 	else
 	{
@@ -1307,42 +1455,42 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 		#if SPVER > 17
 		// #if SOURCEMOD_V_MAJOR == 1
 		// #if SOURCEMOD_V_MINOR == 7
-		GetEntityClassname(g_propindex_d[client], clsname, sizeof(clsname));
-		GetEntityRenderColor(g_propindex_d[client], r, g, b, a);
-		rendfx = view_as<int>(GetEntityRenderFx(g_propindex_d[client]));
-		rendm = view_as<int>(GetEntityRenderMode(g_propindex_d[client]));
-		gravity = GetEntityGravity(g_propindex_d[client]);
+		GetEntityClassname(entity, clsname, sizeof(clsname));
+		GetEntityRenderColor(entity, r, g, b, a);
+		rendfx = view_as<int>(GetEntityRenderFx(entity);
+		rendm = view_as<int>(GetEntityRenderMode(entity);
+		gravity = GetEntityGravity(entity);
 		PrintToConsole(client, "Rendered before: %s with colors: %d,%d,%d,%d rendermode %d fx %d gravity %f", clsname, r,g,b,a, rendm, rendfx, gravity );
 		#endif // SPVER
 		#endif // DEBUG
 
-		// SetEntityRenderMode(g_propindex_d[client], RENDER_NORMAL);
-		// SetEntityRenderColor(g_propindex_d[client], 255, 0, 0, 123); // works only on models supporting that, good for making ghosts (alpha)
-		SetEntityRenderFx(g_propindex_d[client], RENDERFX_DISTORT); // works, only good for team logos
+		// SetEntityRenderMode(entity, RENDER_NORMAL);
+		// SetEntityRenderColor(entity, 255, 0, 0, 123); // works only on models supporting that, good for making ghosts (alpha)
+		SetEntityRenderFx(entity, RENDERFX_DISTORT); // works, only good for team logos
 
-		// SetEntityMoveType(g_propindex_d[client], MOVETYPE_OBSERVER);
-		// SetEntityMoveType(g_propindex_d[client], MOVETYPE_NOCLIP);
-		// SetEntityMoveType(g_propindex_d[client], MOVETYPE_PUSH);
+		// SetEntityMoveType(entity, MOVETYPE_OBSERVER);
+		// SetEntityMoveType(entity, MOVETYPE_NOCLIP);
+		// SetEntityMoveType(entity, MOVETYPE_PUSH);
 
-		// SetEntityGravity(g_propindex_d[client], 0.1); // doesn't seem to work
-		// DispatchKeyValue(g_propindex_d[client], "Gravity", "0.1"); // doesn't work
-		// DispatchKeyValue(g_propindex_d[client], "Color", "0 255 0"); // doesn't work
+		// SetEntityGravity(entity, 0.1); // doesn't seem to work
+		// DispatchKeyValue(entity, "Gravity", "0.1"); // doesn't work
+		// DispatchKeyValue(entity, "Color", "0 255 0"); // doesn't work
 
-		AcceptEntityInput(g_propindex_d[client], "DisableShadow"); // works
-		// AcceptEntityInput(g_propindex_d[client], "Ignite"); // works
+		AcceptEntityInput(entity, "DisableShadow"); // works
+		// AcceptEntityInput(entity, "Ignite"); // works
 
-		DispatchSpawn(g_propindex_d[client]); 		// without this lines, prop will stay in place and not move, but will block bullets
-		ActivateEntity(g_propindex_d[client]);
+		DispatchSpawn(entity); 		// without this lines, prop will stay in place and not move, but will block bullets
+		ActivateEntity(entity);
 
 		#if DEBUG
-		rendfx = view_as<int>(GetEntityRenderFx(g_propindex_d[client]));
-		rendm = view_as<int>(GetEntityRenderMode(g_propindex_d[client]));
-		gravity = GetEntityGravity(g_propindex_d[client]);
+		rendfx = view_as<int>(GetEntityRenderFx(entity));
+		rendm = view_as<int>(GetEntityRenderMode(entity));
+		gravity = GetEntityGravity(entity);
 
 		#if SPVER > 17
 		// #if SOURCEMOD_V_MAJOR == 1
 		// #if SOURCEMOD_V_MINOR == 7
-		GetEntityRenderColor(g_propindex_d[client], r, g, b, a);
+		GetEntityRenderColor(entity, r, g, b, a);
 		#endif // SPVER
 		PrintToConsole(client, "Rendered after: %s with colors: %d,%d,%d,%d rendermode %d, fx %d gravity %f", clsname, r,g,b,a, rendm, rendfx, gravity);
 		#endif // DEBUG
@@ -1387,37 +1535,32 @@ public Action Command_Print_Help(int client, int args)
 }
 
 
-// wall of shame (not a very good idea)
-void Display_Why_Command_Is_Disabled(int client)
-{
-	ReplyToCommand(client, "Sorry, at least one player requested this command be disabled temporarily.");
-
-	char buffer[255], name[MAX_NAME_LENGTH];
-
-	for (int i=1, count=0; i <= MaxClients; i++)
-	{
-		if (!g_bClientWantsProps[i])
-		{
-			GetClientName(i, name, sizeof(name));
-			if (count == 0)
-			{
-				Format(name, sizeof(name), "%s", name);
-				count++;
-			}
-			else
-			{
-				Format(name, sizeof(name), ", %s", name);
-			}
-			StrCat(buffer, sizeof(buffer), name);
-			#if DEBUG
-			PrintToServer("DEBUG: buffer \"%s\"\nname \"%s\"", buffer, name);
-			#endif
-		}
-	}
-
-	PrintToChatAll("Sorry, these players asked not to be annoyed by props: %s.", buffer);
-}
-
+// wall of shame (not a very good idea) OBSOLETE
+// void Display_Why_Command_Is_Disabled(int client)
+// {
+// 	char buffer[255], name[MAX_NAME_LENGTH];
+// 	for (int i=1, count=0; i <= MaxClients; i++)
+// 	{
+// 		if (!g_bClientWantsProps[i])
+// 		{
+// 			GetClientName(i, name, sizeof(name));
+// 			if (count == 0)
+// 			{
+// 				Format(name, sizeof(name), "%s", name);
+// 				count++;
+// 			}
+// 			else
+// 			{
+// 				Format(name, sizeof(name), ", %s", name);
+// 			}
+// 			StrCat(buffer, sizeof(buffer), name);
+// 			#if DEBUG
+// 			PrintToServer("DEBUG: buffer \"%s\"\nname \"%s\"", buffer, name);
+// 			#endif
+// 		}
+// 	}
+// 	PrintToChatAll("Sorry, this command is disabled as these players asked not to be annoyed by props: %s.", buffer);
+// }
 
 
 public Action ConCommand_Props(int client, int args)
@@ -1433,9 +1576,14 @@ public Action ConCommand_Props(int client, int args)
 	return Plugin_Handled;
 }
 
+
 public Action Command_NoProps(int client, int args)
 {
-	// opt out of props?
+	if (g_bClientWantsProps[client])
+	{
+		ToggleCookiePreference(client);
+		PrintToChat(client, "[nt_props] You have opted out of the custom props world. Use !menu to toggle it back on.");
+	}
 	return Plugin_Handled;
 }
 
@@ -1460,7 +1608,7 @@ bool IsPropCommandAllowed(int client)
 		return false;
 	}
 
-	if( GetCmdArgs() != 1 )
+	if(!GetCmdArgs())
 	{
 		Print_Usage_For_Client(client, 1);
 		PrintToChat(client, "You currently have %d brouzoufs to spawn props.", g_RemainingCreds[client][VIRT_CRED]);
@@ -1491,7 +1639,7 @@ bool IsPropCommandAllowed(int client)
 
 
 
-public Action ConCommand_PropSpawn(int client, int args)  //FIXME physics only, need dynamic branch too
+public Action ConCommand_PropSpawn(int client, int args)
 {
 	if (!IsValidClient(client))
 		return Plugin_Handled;
@@ -1504,50 +1652,59 @@ public Action ConCommand_PropSpawn(int client, int args)  //FIXME physics only, 
 
 	// opt-in here automatically (if opt-in mode?)
 
+	if (GetConVarBool(g_cvar_opt_in_mode) && !g_bClientWantsProps[client])
+	{
+		ToggleCookiePreference(client);
+		PrintToChat(client, "[nt_props] You have opted to see custom props. Use !menu to toggle it off.");
+	}
+
 	if (!IsPropCommandAllowed(client) && !IsAdmin(client))
 		return Plugin_Handled;
 
 	decl String:model_pathname[PLATFORM_MAX_PATH];
+	bool dynamic;
 	GetCmdArg(1, model_pathname, sizeof(model_pathname));
 
+	if (args > 1)
+		dynamic = true;
+
 	#if DEBUG
-	PrintToServer("Command props_spawn called with %s", model_pathname);
+	PrintToServer("Command props_spawn called with %s, %s", model_pathname, (dynamic ? "dynamic prop" : "physics prop"));
 	#endif
 
-	for (int index=0; index < sizeof(gs_allowed_physics_models); ++index)
+	//TODO: check the path, make more secure
+	// for (int index=0; index < sizeof(gs_allowed_physics_models); ++index)
+	// {
+	// 	if (StrContains(gs_allowed_physics_models[index], model_pathname, false) != -1)
+	// 	{
+
+	if (hasEnoughCredits(client, g_PropPrice[0])) //FIXME: for now everything costs 1!
 	{
-		//TODO: check the path
-		//TODO: make selection menu // Don't stop at first match
-		//if (strcmp(model_pathname, gs_allowed_physics_models[i]) == 0)
-		if (StrContains(gs_allowed_physics_models[index], model_pathname, false) != -1)
-		{
-			if (hasEnoughCredits(client, 5)) 								//FIXME: for now everything costs 5!
-			{
-				#if DEBUG
-				PrintToConsole(client, "Spawned: %s.", gs_allowed_physics_models[index]);
-				PrintToChat(client, "Spawning your %s.", model_pathname);
-				#endif
+		#if DEBUG
+		PrintToConsole(client, "Spawned: %s.", model_pathname);
+		PrintToChat(client, "Spawning your %s.", model_pathname);
+		#endif
 
-				Prop_Dispatch_Allowed_Model_Index(client, index);
+		int entity = Prop_Dispatch_By_Model_Path(client, model_pathname, dynamic);
+		AddEntityToHistory(entity, client);
 
-				Client_Used_Credits(client, 5);
-				DisplayActivity(client, gs_allowed_physics_models[index]);
-				return Plugin_Handled;
-			}
-			else
-			{
-				PrintToChat(client, "[nt_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
-				5, g_RemainingCreds[client][VIRT_CRED]);
-				PrintToConsole(client, "[nt_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
-				5, g_RemainingCreds[client][VIRT_CRED]);
-				return Plugin_Handled;
-			}
-		}
+		SDKHook(entity, SDKHook_SetTransmit, Hide_SetTransmit);
+
+		Client_Used_Credits(client, g_PropPrice[0]);
+		DisplayActivity(client, model_pathname);
 	}
-	PrintToConsole(client, "Did not find requested model \"%s\" among allowed models.", model_pathname);
-	PrintToChat(client, "Did not find requested model \"%s\" among allowed models.", model_pathname);
+	else
+	{
+		PrintToChat(client, "[nt_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+		g_PropPrice[0], g_RemainingCreds[client][VIRT_CRED]);
+		PrintToConsole(client, "[nt_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
+		g_PropPrice[0], g_RemainingCreds[client][VIRT_CRED]);
+	}
+
 	return Plugin_Handled;
 }
+
+
 
 
 
@@ -1563,62 +1720,62 @@ public DongDispatch(int client, int scale, int bstatic)
 		case 0:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 50);
+				AddEntityToHistory(CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 50), client);
 				//Spawn_TE_Dong(client, gs_dongs[scale], gs_PropType[TE_PHYSICS]); // use TempEnts to avoid showing to people who don't like it
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 50);
+				AddEntityToHistory(CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 50), client);
 		}
 		case 1:
 		{
 			if (!bstatic)
 			{
-				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 120);
-				CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
+				AddEntityToHistory(CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 120), client);
+				CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_PropHistory[client][g_PropCursor[client]]);
 			}
 			else
 			{
-				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 120);
-				CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
+				AddEntityToHistory(CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 120), client);
+				CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_PropHistory[client][g_PropCursor[client]]);
 			}
 		}
 		case 2:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 180);
+				AddEntityToHistory(CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 180), client);
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 180);
+				AddEntityToHistory(CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 180), client);
 
 			// remove the prop when it's touched by a player
-			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove); //FIXME
-			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
+			SDKHook(g_PropHistory[client][g_PropCursor[client]], SDKHook_Touch, OnTouchEntityRemove);
+			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_PropHistory[client][g_PropCursor[client]]);
 		}
 		case 3:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 200);
+				AddEntityToHistory(CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 200), client);
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 200);
+				AddEntityToHistory(CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 200), client);
 
-			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
-			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
+			SDKHook(g_PropHistory[client][g_PropCursor[client]], SDKHook_Touch, OnTouchEntityRemove);
+			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_PropHistory[client][g_PropCursor[client]]);
 		}
 		case 4:
 		{
 			if (!bstatic)
-				g_propindex_d[client] = CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 250);
+				AddEntityToHistory(CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 250), client);
 			else
-				g_propindex_d[client] = CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 250);
+				AddEntityToHistory(CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 250), client);
 
-			SDKHook(g_propindex_d[client], SDKHook_Touch, OnTouchEntityRemove);
-			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_propindex_d[client]);
-		}
-		default:
-		{
-			//scale = 0 || scale > 5
+			SDKHook(g_PropHistory[client][g_PropCursor[client]], SDKHook_Touch, OnTouchEntityRemove);
+			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_PropHistory[client][g_PropCursor[client]]);
 		}
 	}
-	if (Has_Anyone_Opted_Out())
-		SDKHook(g_propindex_d[client], SDKHook_SetTransmit, Hide_SetTransmit);
+	#if DEBUG
+	PrintToServer("Hooking SetTransmit for props %d. Cursor is %d", g_PropHistory[client][g_PropCursor[client]], g_PropCursor[client]);
+	#endif
+// if (Has_Anyone_Opted_Out())
+	SDKHook(g_PropHistory[client][g_PropCursor[client]], SDKHook_SetTransmit, Hide_SetTransmit);
+
 }
 
 
@@ -1698,45 +1855,190 @@ public Action Command_Dong_Spawn(int client, int args)
 		return Plugin_Handled;
 	}
 
-	if (hasEnoughCredits(client, g_DongPropPrice[iModelScale]))
+	if (hasEnoughCredits(client, g_PropPrice[iModelScale]))
 	{
 		DongDispatch(client, iModelScale, iModelProperty);
-		Client_Used_Credits(client, g_DongPropPrice[iModelScale]);
+		Client_Used_Credits(client, g_PropPrice[iModelScale]);
 		DisplayActivity(client, gs_dongs[iModelScale]);
 		return Plugin_Handled;
 	}
 	else
 	{
 		PrintToChat(client, "[nt_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
-		g_DongPropPrice[iModelScale], g_RemainingCreds[client][VIRT_CRED]);
+		g_PropPrice[iModelScale], g_RemainingCreds[client][VIRT_CRED]);
 		PrintToConsole(client, "[nt_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
-		g_DongPropPrice[iModelScale], g_RemainingCreds[client][VIRT_CRED]);
+		g_PropPrice[iModelScale], g_RemainingCreds[client][VIRT_CRED]);
 		return Plugin_Handled;
 	}
 }
 
 
-bool Has_Anyone_Opted_Out()
+bool Is_Entity_Owner(int entity, int client)
 {
-	for (int i = 1; i <= MaxClients; i++)
+	for (int i = sizeof(g_PropHistory[][]); i >= 0; i-- )
 	{
-		if (IsValidClient(i) && !g_bClientWantsProps[i]) // at least one person doesn't want to see the props
-		{
-			#if DEBUG
-			PrintToServer("[nt_props] DEBUG: Client %s has opted out of props, let's hide them!", GetClientOfUserId(i));
-			#endif
+		if (entity == g_PropHistory[client][i])
 			return true;
-		}
 	}
-	#if DEBUG
-	PrintToServer("[nt_props] DEBUG: Nobody opted out of props.");
-	#endif
+
 	return false;
 }
 
 
+public Action ConCommand_Props_Rotate_Skin(int client, int args)
+{
+	int entity = GetClientAimTarget(client, false);
+
+	if (!IsValidEdict(entity) || !IsValidEntity(entity) || entity <= MaxClients)
+		return Plugin_Handled;
+
+	if(!Is_Entity_Owner(entity, client))
+	{
+		PrintToChat(client, "[nt_props] This is not your prop!");
+
+		if (!IsAdmin(client))
+			return Plugin_Handled;
+	}
+
+	int skin = GetEntProp(entity, Prop_Data, "m_nSkin");
+
+	#if DEBUG
+	PrintToChatAll("[nt_props] m_nSkin is \"%d\"", skin);
+	PrintToServer("[nt_props] m_nSkin is \"%d\"", skin);
+	#endif
+	skin++;
+
+	if (skin > 6)
+		skin = 0;
+
+	char cskin[2];
+	IntToString(skin, cskin, sizeof(cskin));
+	bool success = DispatchKeyValue(entity, "skin", cskin);
+
+	char classname[255];
+	GetEdictClassname(entity, classname, sizeof(classname));
+	if (StrContains(classname, "props_physics", false))
+	{
+		#if DEBUG
+		PrintToServer("[nt_props] %s avoiding DispatchSpawn()", classname);
+		#endif
+		ChangeEdictState(entity);
+	}
+	else
+	{
+		// DispatchSpawn(entity);
+		ActivateEntity(entity);
+	}
+
+	#if DEBUG
+	PrintToServer("[nt_props] Dispatched skin value %s", (success ? "was successful" : "failed"));
+	#endif
+
+	return Plugin_Handled;
+}
+
+
+public Action ConCommand_Props_Rotate_Color(int client, int args)
+{
+	int entity = GetClientAimTarget(client, false);
+
+	if (!IsValidEdict(entity) || !IsValidEntity(entity) /*|| entity <= MaxClients*/)
+		return Plugin_Handled;
+
+	if(!Is_Entity_Owner(entity, client))
+	{
+		PrintToConsole(client, "[nt_props] This is not your prop!");
+
+		if (!IsAdmin(client))
+			return Plugin_Handled;
+	}
+
+	SetEntityRenderColor(entity, GetRandomInt(0,255), GetRandomInt(0,255), GetRandomInt(0,255), 255);
+
+	return Plugin_Handled;
+}
+
+
+public Action ConCommand_Props_Rotate_Transparency(int client, int args)
+{
+	int entity = GetClientAimTarget(client, false);
+
+	if (!IsValidEdict(entity) || !IsValidEntity(entity) || entity <= MaxClients)
+		return Plugin_Handled;
+
+	if(!Is_Entity_Owner(entity, client))
+	{
+		PrintToConsole(client, "[nt_props] This is not your prop!");
+
+		if (!IsAdmin(client))
+			return Plugin_Handled;
+	}
+
+	int r,g,b,a;
+	RenderMode mode = GetEntityRenderMode(entity);
+	GetEntityRenderColorFuture(entity, r, g, b, a);
+
+	a -= 30;
+	mode |= RENDER_TRANSCOLOR;
+
+	if (a <= 0)
+	{
+		// reset to full opacity
+		a = 255;
+		if ((mode & RENDER_TRANSCOLOR) == RENDER_TRANSCOLOR)
+			mode &= ~RENDER_TRANSCOLOR; // should go back to RENDER_NORMAL
+	}
+
+	SetEntityRenderMode(entity, mode);
+	SetEntityRenderColor(entity, r, g, b, a);
+
+	return Plugin_Handled;
+}
+
+
+public Action ConCommand_Props_Rotate_Angles(int client, int args)
+{
+	int entity = GetClientAimTarget(client, false);
+
+	if (!IsValidEdict(entity) || !IsValidEntity(entity) || entity <= MaxClients)
+		return Plugin_Handled;
+
+	if(!Is_Entity_Owner(entity, client))
+	{
+		PrintToConsole(client, "[nt_props] This is not your prop!");
+
+		if (!IsAdmin(client))
+			return Plugin_Handled;
+	}
+
+	//TODO not implemented
+
+	return Plugin_Handled;
+}
+
+public Action ConCommand_Props_Rotate_Position(int client, int args)
+{
+	int entity = GetClientAimTarget(client, false);
+
+	if (!IsValidEdict(entity) || !IsValidEntity(entity) || entity <= MaxClients)
+		return Plugin_Handled;
+
+	if(!Is_Entity_Owner(entity, client))
+	{
+		PrintToConsole(client, "[nt_props] This is not your prop!");
+
+		if (!IsAdmin(client))
+			return Plugin_Handled;
+	}
+
+	//TODO not implemented
+
+	return Plugin_Handled;
+}
+
+
 // sets the client as the entity's new parent and attach the entity to client
-MakeParent(int client, int entity)
+void MakeParent(int client, int entity)
 {
 	char Buffer[64];
 	Format(Buffer, sizeof(Buffer), "Client%d", client);
@@ -1781,13 +2083,6 @@ MakeParent(int client, int entity)
 }
 
 
-stock SetAlpha (int target, int alpha)
-{
-	// SetEntityRenderMode(target, RENDER_TRANSCOLOR);
-	SetEntityRenderColor(target, 255, 255, 255, alpha); //only works for some models :(
-}
-
-
 public void OnGhostPickUp(int client)
 {
 	if (GetConVarBool(g_cvar_props_onghostpickup))
@@ -1810,7 +2105,7 @@ public void OnGhostCapture(int client)
 }
 
 
-FireWorksOnPlayer(int client, int type)
+void FireWorksOnPlayer(int client, int type)
 {
 	if (!IsValidClient(client))
 		return;
@@ -1860,7 +2155,7 @@ public Action Command_Spawn_TEST_fireworks(int client, int args)
 }
 
 
-Setup_Firework (int client, const char[] model_pathname, const FireworksPropType PropEntClass, bool shocking)
+void Setup_Firework (int client, const char[] model_pathname, const FireworksPropType PropEntClass, bool shocking)
 {
 	if (!IsValidClient(client))
 		return;
@@ -1937,18 +2232,18 @@ void Set_Firework_TE_BreakModel(int i_cached_model_index, const float[3] origin)
 
 void Set_Firework_PhysicsProp(int client, const char[] model_pathname, const float[3] origin)
 {
-	g_propindex_d[client] = SimpleCreatePropPhysicsOverride(model_pathname, 50);
-	DispatchKeyValueVector(g_propindex_d[client], "Origin", origin);
-	//TeleportEntity(g_propindex_d[client], origin, NULL_VECTOR, NULL_VECTOR);
+	AddEntityToHistory(SimpleCreatePropPhysicsOverride(model_pathname, 50), client);
+	DispatchKeyValueVector(g_PropHistory[client][g_PropCursor[client]], "Origin", origin);
+	//TeleportEntity(g_PropCursor[client], origin, NULL_VECTOR, NULL_VECTOR);
 
 	if (StrContains(model_pathname, "logo.mdl") != -1) // it's a logo
 	{
-		SetEntityRenderFx(g_propindex_d[client], RENDERFX_DISTORT); // works, only good for team logos
-		AcceptEntityInput(g_propindex_d[client], "DisableShadow");
-		// DispatchKeyValue(g_propindex_d[client], "Solid", "0");
+		SetEntityRenderFx(g_PropHistory[client][g_PropCursor[client]], RENDERFX_DISTORT); // works, only good for team logos
+		AcceptEntityInput(g_PropHistory[client][g_PropCursor[client]], "DisableShadow");
+		// DispatchKeyValue(g_PropCursor[client], "Solid", "0");
 	}
 
-	DispatchSpawn(g_propindex_d[client]);
+	DispatchSpawn(g_PropHistory[client][g_PropCursor[client]]);
 	return;
 }
 
@@ -2004,6 +2299,12 @@ public Action Command_Strap_Dong(int client, int args)
 	// 	Display_Why_Command_Is_Disabled(client);
 	// 	return Plugin_Handled;
 	// }
+
+	if (GetConVarBool(g_cvar_opt_in_mode) && !g_bClientWantsProps[client])
+	{
+		ToggleCookiePreference(client);
+		PrintToChat(client, "[nt_props] You have opted to see custom props. Use !menu to toggle it off.");
+	}
 
 	if (gb_PausePropSpawning && !IsAdmin(client))
 	{
@@ -2104,17 +2405,17 @@ public Action Command_Strap_Dong(int client, int args)
 			return Plugin_Handled;
 		}
 
-		if (hasEnoughCredits(client, g_DongPropPrice[0]))
+		if (hasEnoughCredits(client, g_PropPrice[0]))
 		{
 			SpawnAndStrapDongToSelf(client);
-			Client_Used_Credits(client, g_DongPropPrice[0]);
+			Client_Used_Credits(client, g_PropPrice[0]);
 			DisplayActivity(client, "Dong on themselves."); //FIXME: format this to add detail about the exact command passed in that string
 			return Plugin_Handled;
 		}
 		else
 		{
 			ReplyToCommand(client, "[nt_props] You don't have enough brouzoufs to spawn a prop: brouzoufs needed: %d, brouzoufs remaining: %d.",
-			g_DongPropPrice[0], g_RemainingCreds[client][VIRT_CRED]);
+			g_PropPrice[0], g_RemainingCreds[client][VIRT_CRED]);
 			return Plugin_Handled;
 		}
 	}
@@ -2283,7 +2584,9 @@ stock int Create_Prop_For_Attachment(int client, const char[] modelname, int hea
 
 
 	AcceptEntityInput(EntIndex, "DisableShadow");
-	SetAlpha(EntIndex, 100);
+
+	// SetEntityRenderMode(target, RENDER_TRANSCOLOR);
+	// SetEntityRenderColor(target, 255, 255, 255, 100); //only works for some models :(
 
 	SetEntPropEnt(EntIndex, Prop_Send, "m_hEffectEntity", client);
 
@@ -2474,7 +2777,7 @@ void Update_Coordinates(int client, int entity) // FIXME: coordinates are not up
 //		Prop auto-removal
 //==================================
 
-#if !DEBUG
+// #if !DEBUG
 // public Action:OnPlayerRunCmd(client, &buttons, &impulse, Float:vel[3], Float:angles[3], &weapon)
 public Action OnPlayerRunCmd(int client, int &buttons)
 {
@@ -2495,7 +2798,7 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 	}
 	return Plugin_Continue;
 }
-#endif // !DEBUG
+// #endif // !DEBUG
 
 
 // workaround since we don't know how to cloak props
@@ -2841,4 +3144,188 @@ int SimpleCreatePropPhysicsOverride(const char[] model_pathname, int health)
 
 	}
 	return EntIndex;
+}
+
+
+
+stock int Create_Basic_PhysicsProp(int client, const String:modelname[], int health)
+{
+	new String:arg1[130];
+	GetCmdArg(1, arg1, sizeof(arg1));
+
+	new EntIndex = CreateEntityByName("prop_physics_override");
+
+//	if (GetCmdArgs() < 2){
+//	health=400;
+//	}
+
+	if (EntIndex != -1 && IsValidEntity(EntIndex))
+	{
+		if(!IsModelPrecached(arg1))
+		{
+			PrecacheModel(arg1);			// might have to restrict list of models to avoid crash (menu?)
+		}
+
+//		SetEntityModel(EntIndex, arg1);   <-- this doesn't work, it spawns at 0 0 0 no matter what!
+		//SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);   // 4 should be OK, but it's set to 0 instead? <-- 1073741824 now don't collide with players, but ignore collisions altogether
+		SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 11);   //2, changed to 11 so that they collide bewteen each other! 11 = weapon!
+		SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);   // Do I need to change this to 9218?????  <- doesn't work, we need to try with prop_multiplayer
+		SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);  //16 is suggested, ghost is 136!??     <- doesn't work, we need to try with prop_multiplayer
+
+		//int health=150
+		SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);  // Prop_Send didn't work but this works!
+		SetEntProp(EntIndex, Prop_Data, "m_iMaxHealth", health, 1);
+
+		SetEntPropFloat(EntIndex, Prop_Data, "m_flGravity", 1.0);  // doesn't seem to do anything?
+		SetEntityGravity(EntIndex, 0.5); 						// (default = 1.0, half = 0.5, double = 2.0)
+
+		SetEntPropFloat(EntIndex, Prop_Data, "m_massScale", 1.0);  //FIXME!
+		DispatchKeyValue(EntIndex, "massScale", "1.0");
+		DispatchKeyValue(EntIndex, "physdamagescale", "1.0");  // FIXME! not sure if it works
+
+
+//		DispatchKeyValue(EntIndex, "health", "100");    //not working
+//		DispatchKeyValue(EntIndex, "rendercolor", "20,50,80,255");  //not working
+//		SetEntityRenderColor(EntIndex, 255, 10, 255, 255); //not working
+
+/*		new g_offsCollisionGroup;
+		g_offsCollisionGroup = FindSendPropOffs("CBaseEntity", "m_CollisionGroup");
+		SetEntData(EntIndex, g_offsCollisionGroup, 2, 4, true);  //new!
+*/
+//		AcceptEntityInput(EntIndex, "DisableCollision", 0, 0)  // causes absolutely no collision at all?
+//		AcceptEntityInput(EntIndex, "kill", 0, 0)
+
+		DispatchKeyValue(EntIndex, "targetname", "test");
+		DispatchKeyValue(EntIndex, "model", modelname);     //does the same as SetEntityModel but works better! can teleport!?
+		//DispatchKeyValue(EntIndex, "CCollisionProperty", "2");
+		//DispatchKeyValueFloat(EntIndex, "solid", 2.0);  //remettre 2.0 !
+		//DispatchKeyValue(EntIndex, "Solid", "6");    // might need to disable this one (unnecessary?)
+		DispatchKeyValue(EntIndex, "inertiaScale", "1.0");
+
+		new Float:ClientOrigin[3];
+		new Float:clientabsangle[3];
+		new Float:propangles[3] = {0.0, 0.0, 0.0};
+		new Float:ClientEyeAngles[3];
+		new Float:clienteyeposition[3];
+		new Float:PropStartOrigin[3];
+		//new Float:eyes[3];
+
+
+		GetClientAbsOrigin(client, ClientOrigin);
+		GetClientAbsAngles(client, clientabsangle);
+		GetClientEyePosition(client, clienteyeposition);
+		GetClientEyeAngles(client, ClientEyeAngles);
+
+
+		propangles[1] = clientabsangle[1];
+		//ClientOrigin[2] += 20.0;
+		//clienteyeposition[1] += 20.0;
+		//ClientEyeAngles[1] += 20.0;
+
+		GetAngleVectors(ClientEyeAngles, propangles, NULL_VECTOR, NULL_VECTOR);
+		PropStartOrigin[0] = (ClientOrigin[0] + (100 * Cosine(DegToRad(ClientEyeAngles[1]))));
+		PropStartOrigin[1] = (ClientOrigin[1] + (100 * Sine(DegToRad(ClientEyeAngles[1]))));
+		PropStartOrigin[2] = (ClientOrigin[2] + 50);
+
+//		GetEntPropVector(EntIndex, Prop_Send, "m_vecOrigin", PropStartOrigin);
+		SetEntPropVector(EntIndex, Prop_Send, "m_vecOrigin", ClientEyeAngles);
+
+
+		SetEntityMoveType(EntIndex, MOVETYPE_VPHYSICS);   //MOVETYPE_VPHYSICS seems oK, doesn't seem to change anything
+
+		DispatchKeyValueVector(EntIndex, "Origin", PropStartOrigin); // works!
+		DispatchKeyValueVector(EntIndex, "Angles", ClientEyeAngles); // works!
+		//DispatchKeyValueVector(EntIndex, "basevelocity", clienteyeposition);
+		DispatchKeyValue(EntIndex, "physdamagescale", "0.1");   // works! positive value = breaks when falling
+		DispatchKeyValue(EntIndex, "friction", "1.0");
+		DispatchKeyValue(EntIndex, "gravity", "0.8");
+		//TeleportEntity(EntIndex, ClientOrigin, NULL_VECTOR, NULL_VECTOR);
+		DispatchSpawn(EntIndex);
+
+		//GetPropInfo(client, EntIndex);
+
+	}
+	return EntIndex;
+}
+
+
+stock int Create_Basic_DynamicProp(int client, const String:modelname[], int health)
+{
+	new EntIndex = CreateEntityByName("prop_dynamic_override");
+
+	if(!IsModelPrecached(modelname))
+	{
+		PrecacheModel(modelname);
+	}
+
+	float VecOrigin[3];
+	float VecAngles[3];
+	float normal[3];
+
+	DispatchKeyValue(EntIndex, "model", modelname);
+	DispatchKeyValue(EntIndex, "Solid", "6");
+	//SetEntProp(EntIndex, Prop_Data, "m_spawnflags", 1073741824);
+	SetEntProp(EntIndex, Prop_Send, "m_CollisionGroup", 11);
+	SetEntProp(EntIndex, Prop_Data, "m_nSolidType", 6);
+	SetEntProp(EntIndex, Prop_Data, "m_usSolidFlags", 136);
+
+	SetEntProp(EntIndex, Prop_Data, "m_iHealth", health, 1);
+	SetEntProp(EntIndex, Prop_Data, "m_iMaxHealth", health, 1);
+
+
+	GetClientEyePosition(client, VecOrigin);
+	GetClientEyeAngles(client, VecAngles);
+	TR_TraceRayFilter(VecOrigin, VecAngles, MASK_SOLID, RayType_Infinite, TraceEntityFilterPlayer, client);
+	TR_GetEndPosition(VecOrigin);
+	TR_GetPlaneNormal(INVALID_HANDLE, normal);
+	GetVectorAngles(normal, normal);
+	normal[0] += 90.0;
+	DispatchKeyValueVector(EntIndex, "Origin", VecOrigin); // works!
+	DispatchKeyValueVector(EntIndex, "Angles", normal); // works!
+
+
+	TeleportEntity(EntIndex, VecOrigin, normal, NULL_VECTOR);
+	DispatchSpawn(EntIndex);
+
+	float degree = 180.0;  //rotating properly -glub
+	float angles[3];
+	GetEntPropVector(EntIndex, Prop_Data, "m_angRotation", angles);
+	RotateYaw(angles, degree);
+
+	DispatchKeyValueVector(EntIndex, "Angles", angles );  // rotates 180 degrees! -glub
+
+	return EntIndex;
+}
+
+
+void GetEntityRenderColorFuture(int entity, int &r, int &g, int &b, int &a)
+{
+	static bool gotconfig = false;
+	static char prop[32];
+
+	if (!gotconfig)
+	{
+		Handle gc = LoadGameConfigFile("core.games");
+		bool exists = GameConfGetKeyValue(gc, "m_clrRender", prop, sizeof(prop));
+		CloseHandle(gc);
+
+		if (!exists)
+		{
+			strcopy(prop, sizeof(prop), "m_clrRender");
+		}
+
+		gotconfig = true;
+	}
+
+	int offset = GetEntSendPropOffs(entity, prop);
+
+	if (offset <= 0)
+	{
+		ThrowError("GetEntityRenderColor not supported by this mod");
+	}
+
+	r = GetEntData(entity, offset, 1);
+	g = GetEntData(entity, offset + 1, 1);
+	b = GetEntData(entity, offset + 2, 1);
+	a = GetEntData(entity, offset + 3, 1);
 }
