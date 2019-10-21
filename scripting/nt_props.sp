@@ -13,7 +13,7 @@
 #pragma semicolon 1
 #define NEO_MAX_CLIENTS 32
 #define MAX_PROPS_PER_PLAYER 10
-#define PLUGIN_VERSION "20191020"
+#define PLUGIN_VERSION "20191021"
 
 Handle g_cvar_props_enabled, g_cvar_restrict_alive, g_cvar_give_initial_credits, g_cvar_credits_replenish, g_cvar_score_as_credits, g_cvar_opt_in_mode = INVALID_HANDLE;
 Handle cvMaxPropsCreds = INVALID_HANDLE; // maximum credits given
@@ -38,6 +38,9 @@ int g_RemainingCreds[NEO_MAX_CLIENTS+1][3];
 int g_PropHistory[NEO_MAX_CLIENTS+1][MAX_PROPS_PER_PLAYER]; // history of all props spawned per player
 int g_PropCursor[NEO_MAX_CLIENTS+1]; // holds the last spawned entity by client
 bool g_bClientWantsProps[NEO_MAX_CLIENTS+1];
+int g_GrabbedProp[NEO_MAX_CLIENTS+1];
+Handle g_updTimer = INVALID_HANDLE;
+bool g_baPropIsBeingGrabbed;
 
 // WARNING: the custom files require the sm_downloader plugin to force clients to download them
 // otherwise, have to add all custom files to downloads table ourselves with AddFileToDownloadsTable()
@@ -108,7 +111,6 @@ public Plugin:myinfo =
 TODO:
 → rework logic for credits, might be broken
 → spawn props with random coords around a target (player) and velocity, towards their position
-→ make menu to spawn props
 → add sparks to props spawned and maybe a squishy sound for in range with TE_SendToAllInRange
 → save credits in sqlite db for longer term?
 → figure out how to make attached props change their material to cloak (need prop_ornament? flags? DispatchEffect? m_hEffectEntity!? apparently CTEEffectDispatch is unrelated)
@@ -118,12 +120,11 @@ KNOWN ISSUES:
    we can't use a TE because they don't get affected by timers, so regular physics_prop take precedence. Same for dynamic props, cannot have them as TempEnts.
 FIXME: debug why player are not spawning TE when opted-out clients are around
 TODO: Trigger_multiple
-TODO: make sm_props / sm_noprops to opt-in and out
-TODO: make circular buffer to store clients props up to its limit, erase old ones when new ones get spawned
 TODO: use tempent Sprite Spray (for Marterzon)
 TODO: move from sm_downloader to downloadtables here
 TODO: parse available models from a text file
-TODO: make command to rotate skin on either last spawn prop or targeted prop
+TODO: make sure props (d too) are not solid to avoid obstructing bullets -> use a refactored create_entity functions 
+also make sure they don't block line of fire while being grabbed
 */
 
 public OnPluginStart()
@@ -496,7 +497,7 @@ public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int p
 				case 'f':
 				{
 					FakeClientCommand(param1, "sm_props_rotate_position");
-					DisplayMenu(g_hPropertiesMenu, param1, 20);
+					DisplayMenu(g_hPropertiesMenu, param1, 0);
 				}
 				default:
 				{
@@ -884,6 +885,7 @@ public OnClientDisconnect(int client)
 {
 	// might not be needed since we check and set on connect
 	g_bClientWantsProps[client] = false;
+	g_GrabbedProp[client] = 0;
 }
 
 
@@ -1068,8 +1070,9 @@ public OnClientPutInServer(int client)
 
 		for (int i = 0; i < sizeof(g_PropHistory[]); i++)
 		{
-			g_PropHistory[client][i] = -1; // clear history from a previous player just in case 
+			g_PropHistory[client][i] = -1; // clear history from a previous player just in case
 		}
+		g_GrabbedProp[client] = 0;
 
 		// if we use score as credit, restore them
 		if ( GetConVarBool(g_cvar_score_as_credits) )
@@ -1104,6 +1107,9 @@ public Action OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
 {
 	// reinitialize the virtual credits to constant value
 	new client = GetClientOfUserId(GetEventInt(event, "userid"));
+
+	g_GrabbedProp[client] = 0;
+
 	if ( GetConVarBool(g_cvar_credits_replenish) )
 		g_RemainingCreds[client][VIRT_CRED] = GetConVarInt(cvMaxPropsCreds);
 	else
@@ -1117,6 +1123,9 @@ public void event_RoundStart(Handle event, const char[] name, bool dontBroadcast
 	for(int client = 1; client <= MaxClients; client++)
 	{
 		g_AttachmentEnt[client] = -1; // we assume attached prop has been removed by the game
+		g_GrabbedProp[client] = 0;
+
+		g_baPropIsBeingGrabbed = false;
 
 		if(!IsClientConnected(client) || !IsClientInGame(client) || IsFakeClient(client))
 			continue;
@@ -1136,6 +1145,7 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 	// attempt to remove entities that were attached to victim if any
 	int victim = GetClientOfUserId(GetEventInt(event, "userid"));
 	DestroyAttachedPropForClient(victim);
+	g_GrabbedProp[victim] = 0;
 
 	// keep track of the player score in our credits array
 	new attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
@@ -1352,7 +1362,8 @@ void AddEntityToHistory(int entity, int client/*, bool remove=true*/)
 	g_PropHistory[client][g_PropCursor[client]] = entity;
 
 	#if DEBUG
-	PrintToChatAll("[nt_props] Cursor for client %N is now: %d / %d", client, g_PropCursor[client], sizeof(g_PropHistory[]));
+	PrintToServer("[nt_props] Added %d. Cursor for client %N is now: %d / %d",
+	entity, client, g_PropCursor[client], sizeof(g_PropHistory[]));
 	#endif
 }
 
@@ -1398,7 +1409,7 @@ void SetDynamicProperties(int entity, char[] model_path)
 
 void SetPhysicsProperties(int entity, char[] model_path)
 {
-	// 0x8 CONTENTS_GRATE, works for physics_props, bullet don't collide, 
+	// 0x8 CONTENTS_GRATE, works for physics_props, bullet don't collide,
 	// but can't grab anymore because ray tracing doesn't collide either,
 	// 0x0 doesn't collide even with world (fall through!)
 	// Need more testing on solid type and groups
@@ -1498,7 +1509,7 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 }
 
 
-Print_Usage_For_Admins(int client)
+void Print_Usage_For_Admins(int client)
 {
 	PrintToChat(client, "[nt_props] Admin, check console for useful commands and convars...");
 	PrintToConsole(client, "[nt_props] Admins, some useful commands:");
@@ -1507,12 +1518,12 @@ Print_Usage_For_Admins(int client)
 }
 
 
-Print_Usage_For_Client(int client, int type=1)
+void Print_Usage_For_Client(int client, int type=1)
 {
 	if (type == 1)
 	{
-		PrintToConsole(client, "Usage: sm_spawn_prop [model|model path]\nAvailable models currently: duck, tiger");
-		PrintToChat(client, "Usage: !spawn_prop [model | model path]\nAvailable models currently: duck, tiger");
+		PrintToConsole(client, "Usage: sm_props_spawn [model path]");
+		PrintToChat(client, "Usage: !props_spawn [model path]");
 	}
 	else //TODO write all commands
 	{
@@ -1520,8 +1531,8 @@ Print_Usage_For_Client(int client, int type=1)
 		PrintToConsole(client, "[nt_props] Some \"useful\" commands:");
 		PrintToConsole(client, "\nsm_props_nothx: disables props for you and everyone in the server.\n\
 sm_strapdong [me|team|all] [specs]: straps a dong on people (including spectators)\n\
-sm_spawn_prop [model|model path]: spawns a model in the game\n\
-sm_dick [1-5] [1 for static]: spawns a dong of scale 1 to 5 with optional static properties\n\
+sm_props: spawns a model in the game\n\
+sm_dick [1-5] [s]: spawns a dong of scale 1 to 5 with optional static properties\n\
 sm_props_credit_status: check credits of other players and yourself\n\
 sm_props_pause: stops anyone from spawning props until the end of the current round\n");
 		ClientCommand(client, "toggleconsole");
@@ -1875,7 +1886,7 @@ public Action Command_Dong_Spawn(int client, int args)
 
 bool Is_Entity_Owner(int entity, int client)
 {
-	for (int i = sizeof(g_PropHistory[][]); i >= 0; i-- )
+	for (int i; i < sizeof(g_PropHistory[]); i++ )
 	{
 		if (entity == g_PropHistory[client][i])
 			return true;
@@ -1894,7 +1905,7 @@ public Action ConCommand_Props_Rotate_Skin(int client, int args)
 
 	if(!Is_Entity_Owner(entity, client))
 	{
-		PrintToChat(client, "[nt_props] This is not your prop!");
+		PrintCenterText(client, "This is not your prop!");
 
 		if (!IsAdmin(client))
 			return Plugin_Handled;
@@ -1947,13 +1958,18 @@ public Action ConCommand_Props_Rotate_Color(int client, int args)
 
 	if(!Is_Entity_Owner(entity, client))
 	{
-		PrintToConsole(client, "[nt_props] This is not your prop!");
+		PrintCenterText(client, "This is not your prop!");
 
 		if (!IsAdmin(client))
 			return Plugin_Handled;
 	}
 
-	SetEntityRenderColor(entity, GetRandomInt(0,255), GetRandomInt(0,255), GetRandomInt(0,255), 255);
+	int r = GetRandomInt(0,255);
+	int g = GetRandomInt(0,255);
+	int b = GetRandomInt(0,255);
+	SetEntityRenderColor(entity,r,g,b, 255);
+
+	PrintCenterText(client, "Colors set to [%d %d %d]", r,g,b);
 
 	return Plugin_Handled;
 }
@@ -1968,7 +1984,7 @@ public Action ConCommand_Props_Rotate_Transparency(int client, int args)
 
 	if(!Is_Entity_Owner(entity, client))
 	{
-		PrintToConsole(client, "[nt_props] This is not your prop!");
+		PrintCenterText(client, "This is not your prop!");
 
 		if (!IsAdmin(client))
 			return Plugin_Handled;
@@ -1992,6 +2008,8 @@ public Action ConCommand_Props_Rotate_Transparency(int client, int args)
 	SetEntityRenderMode(entity, mode);
 	SetEntityRenderColor(entity, r, g, b, a);
 
+	PrintCenterText(client, "Transparency set to [%f]", a);
+
 	return Plugin_Handled;
 }
 
@@ -2005,35 +2023,151 @@ public Action ConCommand_Props_Rotate_Angles(int client, int args)
 
 	if(!Is_Entity_Owner(entity, client))
 	{
-		PrintToConsole(client, "[nt_props] This is not your prop!");
+		PrintCenterText(client, "This is not your prop!");
 
 		if (!IsAdmin(client))
 			return Plugin_Handled;
 	}
 
-	//TODO not implemented
+	new Float:Angles[3];
+	GetEntPropVector(entity, Prop_Data, "m_angRotation", Angles);
+
+	Angles[0] += 0;
+	Angles[1] += GetRandomInt(0,360);
+	Angles[2] += 0;
+
+	TeleportEntity(entity, NULL_VECTOR, Angles, NULL_VECTOR);
+
+	PrintCenterText(client, "Angles set to [%f %f %f]", Angles[0], Angles[1], Angles[2]);
+	return Plugin_Handled;
+}
+
+
+public Action ConCommand_Props_Rotate_Position(int client, int args)
+{
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+
+	int entity = GetClientAimTarget(client, false);
+
+	if (!IsValidEdict(entity) || !IsValidEntity(entity) || entity <= MaxClients)
+	{
+		g_GrabbedProp[client] = 0;
+
+		if (!AnObjectIsBeingGrabbed())
+			g_baPropIsBeingGrabbed = false;
+
+		return Plugin_Handled;
+	}
+
+	if(!Is_Entity_Owner(entity, client))
+	{
+		PrintCenterText(client, "This is not your prop!");
+
+		if (!IsAdmin(client))
+		{
+			g_GrabbedProp[client] = 0;
+
+			if (!AnObjectIsBeingGrabbed())
+				g_baPropIsBeingGrabbed = false;
+
+			return Plugin_Handled;
+		}
+	}
+
+	if (g_GrabbedProp[client] > 0)
+	{
+		g_GrabbedProp[client] = 0;
+
+		if (!AnObjectIsBeingGrabbed())
+			// we were the last one grabbing
+			g_baPropIsBeingGrabbed = false;
+
+		return Plugin_Handled;
+	}
+
+	#if DEBUG
+	PrintToServer("[nt_props] prop %d has been targeted and grabbed.", entity);
+	#endif
+
+	g_GrabbedProp[client] = entity;
+
+	if (g_updTimer == INVALID_HANDLE)
+	{
+		g_baPropIsBeingGrabbed = true;
+		g_updTimer = CreateTimer(0.1, UpdateGrabbedObjects, INVALID_HANDLE, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+		#if DEBUG
+		PrintToServer("[nt_props] Timer UpdateGrabbedObjects has been started!");
+		#endif
+	}
 
 	return Plugin_Handled;
 }
 
-public Action ConCommand_Props_Rotate_Position(int client, int args)
+
+public Action UpdateGrabbedObjects(Handle timer)
 {
-	int entity = GetClientAimTarget(client, false);
-
-	if (!IsValidEdict(entity) || !IsValidEntity(entity) || entity <= MaxClients)
-		return Plugin_Handled;
-
-	if(!Is_Entity_Owner(entity, client))
+	if (!g_baPropIsBeingGrabbed)
 	{
-		PrintToConsole(client, "[nt_props] This is not your prop!");
-
-		if (!IsAdmin(client))
-			return Plugin_Handled;
+		KillTimer(timer);
+		g_updTimer = INVALID_HANDLE; // not sure if really needed
+		#if DEBUG
+		PrintToServer("[nt_props] Timer UpdateGrabbedObjects has been stopped!");
+		#endif
+		return Plugin_Stop;
 	}
 
-	//TODO not implemented
+	for (int client = 1; client <= MaxClients; client++)
+	{
+		if (g_GrabbedProp[client] <= 0)
+			continue;
 
+		float viewAng[3], vecPos[3], vecDir[3], vecVel[3];
+		GetClientEyeAngles(client, viewAng);
+		GetAngleVectors(viewAng, vecDir, NULL_VECTOR, NULL_VECTOR);
+
+		GetClientAbsOrigin(client, vecPos);
+
+		// update object
+		vecPos[0] += vecDir[0] * 120.0;
+		vecPos[1] += vecDir[1] * 120.0;
+		vecPos[2] += vecDir[2] * 120.0;
+
+		GetEntPropVector(g_GrabbedProp[client], Prop_Send, "m_vecOrigin", vecDir);
+
+		SubtractVectors(vecPos, vecDir, vecVel);
+
+		ScaleVector(vecVel, 10.0);
+		vecVel[2] = 20.0;
+
+		new String:classname[20];
+		GetEdictClassname(g_GrabbedProp[client], classname, sizeof(classname));
+		if(StrContains(classname, "_dynamic", false) > -1)
+		{
+			DispatchKeyValueVector(g_GrabbedProp[client], "Origin", vecPos);
+			DispatchKeyValueVector(g_GrabbedProp[client], "Angles", viewAng);
+			//DispatchKeyValueVector(gObj[i], "avelocity", vecVel); // not sure
+			ChangeEdictState(g_GrabbedProp[client], GetEntSendPropOffs(g_GrabbedProp[client], "m_vecOrigin", true));
+		}
+		else
+			TeleportEntity(g_GrabbedProp[client], vecPos, NULL_VECTOR, NULL_VECTOR);
+
+		#if DEBUG
+		PrintCenterText(client, "Upd: prop %d, %f %f %f", g_GrabbedProp[client], vecPos[0], vecPos[1], vecPos[2]);
+		#endif
+	}
 	return Plugin_Handled;
+}
+
+
+bool AnObjectIsBeingGrabbed()
+{
+	for (int i = MaxClients; i > 0; i--)
+	{
+		if (g_GrabbedProp[i] > 0)
+			return true;
+	}
+	return false;
 }
 
 
@@ -2539,6 +2673,7 @@ public void SpawnAndStrapDongToSelf(int client)
 public OnMapEnd()
 {
 	KillTimer(gTimer);
+	KillTimer(g_updTimer);
 }
 
 
@@ -2702,7 +2837,7 @@ public Action UpdateObjects(Handle timer)
 		if (g_AttachmentEnt[i] != -1)
 		{
 			activeprop = true;
-			Update_Coordinates(i, g_AttachmentEnt[i]);
+			UpdateSpecAttachedCoordinates(i, g_AttachmentEnt[i]);
 		}
 
 	}
@@ -2721,7 +2856,7 @@ public Action UpdateObjects(Handle timer)
 }
 
 
-void Update_Coordinates(int client, int entity) // FIXME: coordinates are not updated properly on one axis
+void UpdateSpecAttachedCoordinates(int client, int entity) // FIXME: coordinates are not updated properly on one axis
 {
 	if (!IsValidEdict(entity) || !IsValidEntity(entity))
 		return;

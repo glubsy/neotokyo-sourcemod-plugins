@@ -59,8 +59,8 @@ public void OnPluginStart()
 	{
 		if (strlen(g_sLaserWeaponNames[i]) > LONGEST_WEP_NAME)
 		{
-			SetFailState("LONGEST_PENALIZABLE_WEP_NAME %i is too short to hold \
-g_sPenalizableWeaponNames \"%s\" (length: %i) in index %i.", LONGEST_WEP_NAME,
+			SetFailState("LaserWeaponNames %i is too short to hold \
+g_sLaserWeaponNames \"%s\" (length: %i) in index %i.", LONGEST_WEP_NAME,
 				g_sLaserWeaponNames[i], strlen(g_sLaserWeaponNames[i]), i);
 		}
 	}
@@ -99,7 +99,7 @@ public void OnConfigsExecuted()
 			if (StrEqual(g_sLaserWeaponNames[i], classname))
 			{
 				#if DEBUG > 0
-				PrintToServer("DEBUG: OnConfigsExecuted() %N currently has weapon %d %s.", client, weapon, classname);
+				PrintToServer("[nt_sniper_laser] DEBUG: OnConfigsExecuted() %N currently has weapon %d %s.", client, weapon, classname);
 				#endif
 
 				#if METHOD == 0
@@ -195,14 +195,14 @@ public Action Timer_TestForWeapons(Handle timer, int userid)
 		return Plugin_Stop;
 
 	#if DEBUG
-	PrintToServer("TestForWeapons: %N", client);
+	PrintToServer("[nt_sniper_laser] TestForWeapons: %N", client);
 	#endif
 	int weapon = GetPlayerWeaponSlot(client, SLOT_PRIMARY);
 	
 	if (!IsValidEdict(weapon))
 	{
 		#if DEBUG
-		PrintToServer("!IsValidEdict: %i", weapon);
+		PrintToServer("[nt_sniper_laser] !IsValidEdict: %i", weapon);
 		#endif
 		return Plugin_Stop;
 	}
@@ -211,7 +211,7 @@ public Action Timer_TestForWeapons(Handle timer, int userid)
 	if (!GetEdictClassname(weapon, classname, sizeof(classname)))
 	{
 		#if DEBUG
-		PrintToServer("!GetEdictClassname: %i", weapon);
+		PrintToServer("[nt_sniper_laser] !GetEdictClassname: %i", weapon);
 		#endif
 		return Plugin_Stop;
 	}
@@ -221,7 +221,7 @@ public Action Timer_TestForWeapons(Handle timer, int userid)
 		if (StrEqual(classname, g_sLaserWeaponNames[i]))
 		{
 			#if DEBUG
-			PrintToServer("Store OK: %s is %s. Hooking %s %d", classname, g_sLaserWeaponNames[i], classname, weapon);
+			PrintToServer("[nt_sniper_laser] Store OK: %s is %s. Hooking %s %d", classname, g_sLaserWeaponNames[i], classname, weapon);
 			#endif
 
 			StoreWeapon(weapon);
@@ -230,7 +230,7 @@ public Action Timer_TestForWeapons(Handle timer, int userid)
 		else
 		{
 			#if DEBUG
-			PrintToServer("Store fail: %s is not %s", classname, g_sLaserWeaponNames[i]);
+			PrintToServer("[nt_sniper_laser] Store fail: %s is not %s", classname, g_sLaserWeaponNames[i]);
 			#endif
 		}
 	}
@@ -248,7 +248,7 @@ void StoreWeapon(int weapon)
 	// mod cycle the array index. Therefore only checking in debug.
 	if (iAffectedWeapons_Head >= sizeof(iAffectedWeapons))
 	{
-		ThrowError("iAffectedWeapons_Head %i >= sizeof(iAffectedWeapons) %i",
+		ThrowError("[nt_sniper_laser] iAffectedWeapons_Head %i >= sizeof(iAffectedWeapons) %i",
 			iAffectedWeapons_Head, sizeof(iAffectedWeapons));
 	}
 #endif
@@ -265,7 +265,7 @@ void StoreWeapon(int weapon)
 bool IsAttachableWeapon(int weapon)
 {
 	#if DEBUG
-	PrintToServer("IsAttachableWeapon: %i", weapon);
+	PrintToServer("[nt_sniper_laser] IsAttachableWeapon: %i", weapon);
 	if (weapon == 0)
 	{
 		// This should never happen; only checking in debug.
@@ -286,7 +286,7 @@ bool IsAttachableWeapon(int weapon)
 		}
 
 		#if DEBUG > 1
-		PrintToServer("%i -- not attachable for: %i vs %i", i, weapon, iAffectedWeapons[i]);
+		PrintToServer("[nt_sniper_laser] %i -- not attachable for: %i vs %i", i, weapon, iAffectedWeapons[i]);
 		#endif
 	}
 	
@@ -296,7 +296,7 @@ bool IsAttachableWeapon(int weapon)
 public void OnWeaponSwitch_Post(int client, int weapon)
 {
 	#if DEBUG
-	PrintToChatAll("OnWeaponEquip %N, weapon %d", client, weapon);
+	PrintToServer("[nt_sniper_laser] OnWeaponEquip %N, weapon %d", client, weapon);
 	#endif
 	CheckForUpdateOnWeapon(client, weapon);
 }
@@ -323,7 +323,7 @@ void NeedUpdateLoop()
 public void OnWeaponEquip(int client, int weapon)
 {
 	#if DEBUG
-	PrintToChatAll("OnWeaponEquip %N, weapon %d", client, weapon);
+	PrintToServer("[nt_sniper_laser] OnWeaponEquip %N, weapon %d", client, weapon);
 	#endif
 	CheckForUpdateOnWeapon(client, weapon);
 }
@@ -332,7 +332,7 @@ public void OnWeaponEquip(int client, int weapon)
 int CreateFakeAttachedProp(int weapon, int client)
 {
 	#if DEBUG
-	PrintToChatAll("Creating attached prop on %N", client);
+	PrintToChatAll("[nt_sniper_laser] Creating attached prop on %N", client);
 	#endif
 	
 	int entity = CreateEntityByName("info_target");
@@ -362,7 +362,7 @@ int CreateLaserDotEnt(int client)
 		return -1;
 
 	#if DEBUG
-	PrintToChatAll("Created laser dot %d for client %N", ent, client);
+	PrintToChatAll("[nt_sniper_laser] Created laser dot %d for client %N", ent, client);
 	#endif
 
 	DispatchKeyValue(ent, "model", "materials/sprites/laserdot.vmt");
@@ -405,7 +405,7 @@ void MakeParent(int entity, int weapon)
 public Action timer_SetAttachment(Handle timer, int entity)
 {
 	#if DEBUG
-	PrintToServer("Setting attachement point for entity %d.", entity);
+	PrintToServer("[nt_sniper_laser] Setting attachement point for entity %d.", entity);
 	#endif
 
 	SetVariantString("muzzle"); //"muzzle" works for when attaching to weapon
@@ -488,10 +488,10 @@ public void OnEntityCreated(int entity, const char[] classname)
 		int state = GetEntPropEnt(entity, Prop_Data, "m_hOwner");
 		if (owner < 0)
 		{
-			PrintToServer("[sniper_laser] Weapon SRS %d created, but owner invalid. State: %d", entity, state);
+			PrintToServer("[nt_sniper_laser] Weapon SRS %d created, but owner invalid. State: %d", entity, state);
 			return;
 		}
-		PrintToServer("[sniper_laser] Entity SRS created! index: %d, owner %N", entity, owner);
+		PrintToServer("[nt_sniper_laser] Entity SRS created! index: %d, owner %N", entity, owner);
 	}
 }
 #endif //DEBUG
