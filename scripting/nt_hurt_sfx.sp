@@ -7,7 +7,11 @@
 #include <nt_menu>
 
 #define NEO_MAX_CLIENTS 32
+
+#if !defined DEBUG
 #define DEBUG 0
+#endif
+
 Handle g_hCurrentlyPlaying[NEO_MAX_CLIENTS] = {INVALID_HANDLE, ...};
 const int MAX_SND_INSTANCES = 5; // maximum concurent sounds allowed to be amitted over CVAR_hurt_sounds_delay period, for security
 int g_iSoundInstances = 0;
@@ -222,7 +226,7 @@ public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int p
 	{
 		case MenuAction_End:
 		{
-			// CloseHandle(menu);
+			CloseHandle(menu);
 			//delete menu; (should we here?)
 		}
 		case MenuAction_Cancel:
@@ -286,27 +290,28 @@ public Action ConCommand_Prefs(int client, int args)
 }
 
 
+// not sure when this is called
 public OnClientCookiesCached(int client)
 {
 	ReadCookies(client);
 }
 
 
-//REMOVE ME: this might be redundant as OnClientCookiesCached is called on connect anyway
-// public OnClientPostAdminCheck(int client)
-// {
-// 	if (AreClientCookiesCached(client))
-// 	{
-// 		ReadCookies(client);
-// 	}
-// }
+public OnClientPostAdminCheck(int client)
+{
+	if (AreClientCookiesCached(client))
+	{
+		ReadCookies(client);
+	}
+}
 
 
 public Action timer_AdvertiseHelp(Handle timer, int client)
 {
 	if (!IsValidClient(client) || !IsClientConnected(client))
-		return;
+		return Plugin_Stop;
 	PrintToChat(client, "[nt_hurt_sfx] You can activate hurt sound effect with !hurt_sfx_prefs");
+	return Plugin_Stop;
 }
 
 
@@ -456,6 +461,7 @@ public void OnClientPutInServer(int client)
 	// need some delay perhaps?
 	g_bClientWantsSFX[client] = false; // by default, we need to opt-in to be affected
 	UpdateAffectedArrayForAlivePlayers(client);
+	CreateTimer(160.0, timer_AdvertiseHelp, client, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 
@@ -491,12 +497,6 @@ public void UpdateAffectedArrayForAlivePlayers(int updated_client)
 			continue;
 		}
 
-		#if DEBUG > 1
-		if (updated_client > 0)
-			PrintToServer("[nt_hurt_sfx] during refresh for \"%N\" updated_client \"%N\"'s pref was %s.",
-			client, updated_client, (g_bClientWantsSFX[updated_client] ? "true" : "false"));
-		#endif
-
 		if (client == updated_client) // don't emit for ourselves
 			continue;
 
@@ -506,7 +506,7 @@ public void UpdateAffectedArrayForAlivePlayers(int updated_client)
 		if (!IsValidClient(updated_client) || !IsClientConnected(updated_client) || (updated_client > 0 && !g_bClientWantsSFX[updated_client]))
 		{
 			#if DEBUG
-			PrintToServer("[nt_hurt_sfx] A player has to be removed, rebuilding array for %N.", updated_client, client);
+			PrintToServer("[nt_hurt_sfx] A player has to be removed, rebuilding array for %N.", client);
 			#endif
 
 			// CAVEAT: whenever an affected player is to be taken out of the emitting player's array
@@ -549,11 +549,24 @@ public void UpdateAffectedArrayForAlivePlayers(int updated_client)
 			continue;
 		}
 
-		#if DEBUG > 1
-		PrintToServer("[nt_hurt_sfx] Adding \"%N\" to array for %N.", updated_client, updated_client, client);
-		#endif
-		g_iAffectedPlayers[client][g_iAffectedNumPlayers[client]++] = updated_client;
+		// avoid duplicates
+		bool found;
+		for (int k = 1; k <= MaxClients; k++)
+		{
+			if (g_iAffectedPlayers[client][k] == updated_client)
+			{
+				found = true;
+				break;
+			}
+		}
 
+		if (!found) 
+		{
+			#if DEBUG > 1
+			PrintToServer("[nt_hurt_sfx] Adding \"%N\" to array for %N.", updated_client, client);
+			#endif
+			g_iAffectedPlayers[client][g_iAffectedNumPlayers[client]++] = updated_client;
+		}
 	}
 }
 

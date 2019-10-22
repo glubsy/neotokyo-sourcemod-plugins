@@ -444,7 +444,7 @@ public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int p
 	{
 		case MenuAction_End:
 		{
-			// CloseHandle(menu);
+			CloseHandle(menu);
 			//delete menu; (should we here?)
 		}
 		case MenuAction_Cancel:
@@ -854,7 +854,7 @@ public OnClientCookiesCached(int client)
 }
 
 
-//REMOVE ME: this might be redundant as OnClientCookiesCached is called on connect anyway
+// This might be redundant as OnClientCookiesCached is called on connect anyway?
 public OnClientPostAdminCheck(int client)
 {
 	if(!GetConVarBool(g_cvar_props_enabled))
