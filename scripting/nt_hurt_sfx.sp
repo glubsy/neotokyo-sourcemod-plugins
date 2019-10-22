@@ -1,18 +1,20 @@
 #include <sourcemod>
 #include <sdktools>
 #include <sdkhooks>
+#include <clientprefs>
 #include <neotokyo>
+#undef REQUIRE_PLUGIN
+#include <nt_menu>
+
 #define NEO_MAX_CLIENTS 32
 #define DEBUG 0
 Handle g_hCurrentlyPlaying[NEO_MAX_CLIENTS] = {INVALID_HANDLE, ...};
 const int MAX_SND_INSTANCES = 5; // maximum concurent sounds allowed to be amitted over CVAR_hurt_sounds_delay period, for security
-int g_iSoundInstances = 0; 
+int g_iSoundInstances = 0;
 int g_iAffectedPlayers[NEO_MAX_CLIENTS+1][NEO_MAX_CLIENTS+1]; // arrays of affected players
 int g_iAffectedNumPlayers[NEO_MAX_CLIENTS+1] = { 0, ...}; // number of affected players in the array above
 Handle g_RefreshArrayTimer = INVALID_HANDLE;
-
 Handle CVAR_hurt_sounds, CVAR_team_only, CVAR_spec_only, CVAR_hurt_sounds_delay = INVALID_HANDLE;
-
 char g_sCustomGirlHurtSound[][] = {
 	"custom/himitu09065b.mp3",
 	"custom/himitu09065.mp3",
@@ -22,10 +24,16 @@ char g_sCustomGirlHurtSound[][] = {
 	"custom/himitu09080.mp3",
 };
 
+// Menu setup
+TopMenuObject g_hTopMainMenu_topmenuobj = INVALID_TOPMENUOBJECT;
+TopMenuObject g_tmo_prefs = INVALID_TOPMENUOBJECT;
+TopMenu g_hTopMenu; // handle to the nt_menu plugin topmenu
+Handle g_hPrefsMenu;
+bool g_bClientWantsSFX[NEO_MAX_CLIENTS+1];
+
 // TODO: assign a specific set of similar sounds for each player?
-// TODO: make opt-out
-// TODO: make cookie pref menu
 // TODO: use bitbuffer instead of arrays to keep track of affected players?
+// TODO: let users select the type of sounds they want
 
 public Plugin:myinfo =
 {
@@ -38,23 +46,58 @@ public Plugin:myinfo =
 
 public void OnPluginStart()
 {
-	CVAR_hurt_sounds = CreateConVar("sm_hurt_sounds", "1", 
+	CVAR_hurt_sounds = CreateConVar("sm_hurt_sounds", "1",
 	"Enable (1) or disable (0) emitting custom sounds when players are hurt.", 0, true, 0.0, true, 1.0);
 
-	CVAR_hurt_sounds_delay = CreateConVar("sm_hurt_sounds_delay", "8.5", 
+	CVAR_hurt_sounds_delay = CreateConVar("sm_hurt_sounds_delay", "8.5",
 	"Delay until more hurt sounds may be emitted by a player.", 0, true, 0.0, true, 500.0);
 
-	CVAR_team_only = CreateConVar("sm_hurt_sounds_team_only", "1", 
+	CVAR_team_only = CreateConVar("sm_hurt_sounds_team_only", "1",
 	"Enable (1) or disable (0) emitting custom sounds from team mates only.", 0, true, 0.0, true, 1.0);
 
-	CVAR_spec_only = CreateConVar("sm_hurt_sounds_spec_only", "0", 
+	CVAR_spec_only = CreateConVar("sm_hurt_sounds_spec_only", "0",
 	"Enable (1) or disable (0) emitting custom sounds for alive players.", 0, true, 0.0, true, 1.0);
+
+	RegConsoleCmd("sm_hurt_sounds_prefs", ConCommand_Prefs, "Hurt players emit moaning sound effects when active.");
 
 	#if DEBUG > 1
 	AddNormalSoundHook(OnNormalSound);
 	#endif
 
 	HookConVarChange(CVAR_hurt_sounds, OnConVarChanged);
+
+	RegClientCookie("wants-hurt-sfx", "player opted to have fun with props", CookieAccess_Protected);
+
+	// prebuild menus
+	g_hPrefsMenu = BuildSubMenu(1);
+
+	// Is our menu already loaded?
+	TopMenu topmenu;
+	if (LibraryExists("nt_menu") && ((topmenu = GetNTTopMenu()) != null))
+	{
+		OnNTMenuReady(topmenu);
+	}
+	else
+	{
+		// library missing, we build our own
+		g_hTopMenu = CreateTopMenu(TopMenuCategory_Handler);
+		BuildTopMenu();
+	}
+}
+
+
+public OnNTMenuReady(Handle aTopMenu)
+{
+	TopMenu topmenu = TopMenu.FromHandle(aTopMenu);
+
+	// Block us from being called twice
+	if (topmenu == g_hTopMenu)
+		return;
+
+	// Save the Handle
+	g_hTopMenu = topmenu;
+
+	BuildTopMenu();
 }
 
 
@@ -117,6 +160,199 @@ public void OnConVarChanged(ConVar convar, const char[] oldValue, const char[] n
 }
 
 
+void BuildTopMenu()
+{
+	g_hTopMainMenu_topmenuobj = FindTopMenuCategory(g_hTopMenu, "Various effects"); // get the category provided by nt_menu plugin
+
+	if (g_hTopMainMenu_topmenuobj != INVALID_TOPMENUOBJECT)
+	{
+		// AddToTopMenu(g_hTopMenu, "nt_menu", TopMenuObject_Item, TopCategory_Handler, g_hTopMainMenu_topmenuobj, "nt_menu", 0);
+		g_tmo_prefs = g_hTopMenu.AddItem("sm_hurt_sfx_prefs", TopMenuCategory_Handler, g_hTopMainMenu_topmenuobj, "sm_hurt_sfx_prefs");
+		return;
+	}
+
+	// didn't find categories, must be missing nt_menu plugin, so build our own category and attach to it
+	g_hTopMainMenu_topmenuobj = g_hTopMenu.AddCategory("Various effects", TopMenuCategory_Handler);
+
+	g_tmo_prefs = AddToTopMenu(g_hTopMenu, "sm_hurt_sfx_prefs", TopMenuObject_Item, TopMenuCategory_Handler, g_hTopMainMenu_topmenuobj, "sm_hurt_sfx_prefs");
+}
+
+
+
+public TopMenuCategory_Handler (Handle:topmenu, TopMenuAction:action, TopMenuObject:object_id, param, String:buffer[], maxlength)
+{
+	if ((action == TopMenuAction_DisplayOption) || (action == TopMenuAction_DisplayTitle))
+	{
+		// GetTopMenuObjName(topmenu, object_id, buffer, maxlength);
+
+		if (object_id == INVALID_TOPMENUOBJECT)
+			Format(buffer, maxlength, "Neotokyo Menu", param);
+		if (object_id == g_tmo_prefs)
+			Format(buffer, maxlength, "%s", "Hurt sound effects", param);
+	}
+	else if (action == TopMenuAction_SelectOption)
+	{
+		if (object_id == g_tmo_prefs)
+			DisplayMenu(g_hPrefsMenu, param, 20);
+	}
+}
+
+
+public Menu BuildSubMenu(int type)
+{
+	Menu menu;
+
+	switch (type)
+	{
+		case 0: // in case we need more later
+		{
+			menu = new Menu(PropsPrefsMenuHandler, MENU_ACTIONS_ALL);
+			menu.SetTitle("Hurt sound effects preference:");
+			menu.AddItem("a", "Set preference");
+			menu.ExitButton = true;
+			menu.ExitBackButton = true;
+		}
+	}
+	return menu;
+}
+
+public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int param2)
+{
+	switch(action)
+	{
+		case MenuAction_End:
+		{
+			// CloseHandle(menu);
+			//delete menu; (should we here?)
+		}
+		case MenuAction_Cancel:
+		{
+			if (param2 == MenuCancel_ExitBack && g_hTopMenu != INVALID_HANDLE)
+			{
+				DisplayTopMenu(g_hTopMenu, param1, TopMenuPosition_LastCategory);
+			}
+		}
+		// case MenuAction_Display:
+		// {
+		// 	char title[255];
+		// 	Format(title, sizeof(title), "Hurt sfx preferences:", param1);
+
+		// 	Panel panel = view_as<Panel>(param2);
+		// 	panel.SetTitle(title);
+		// }
+		case MenuAction_Select:
+		{
+			decl String:info[2];
+			GetMenuItem(menu, param2, info, sizeof(info));
+
+			switch (info[0])
+			{
+				case 'a': // in case we add more fine grain control later
+				{
+					ToggleCookiePreference(param1);
+					DisplayMenu(g_hPrefsMenu, param1, 20);
+				}
+				default:
+				{
+					CloseHandle(g_hTopMenu);
+					return 0;
+				}
+			}
+		}
+
+		case MenuAction_DisplayItem:
+		{
+			char info[2];
+			menu.GetItem(param2, info, sizeof(info));
+
+			char display[25];
+
+			if (StrEqual(info, "a")) // toggle item
+			{
+				Format(display, sizeof(display), "Hurt sounds are active [%s]", (g_bClientWantsSFX[param1] ? 'x' : ' ' ));
+				return RedrawMenuItem(display);
+			}
+			return 0;
+		}
+	}
+	return 0;
+}
+
+
+public Action ConCommand_Prefs(int client, int args)
+{
+	ToggleCookiePreference(client);
+	PrintToChat(client, "[nt_hurt_sfx] You have %s hear sound effects when players get hurt.", (g_bClientWantsSFX[client] ? "opted to" : "opted not to"));
+}
+
+
+public OnClientCookiesCached(int client)
+{
+	ReadCookies(client);
+}
+
+
+//REMOVE ME: this might be redundant as OnClientCookiesCached is called on connect anyway
+// public OnClientPostAdminCheck(int client)
+// {
+// 	if (AreClientCookiesCached(client))
+// 	{
+// 		ReadCookies(client);
+// 	}
+// }
+
+
+public Action timer_AdvertiseHelp(Handle timer, int client)
+{
+	if (!IsValidClient(client) || !IsClientConnected(client))
+		return;
+	PrintToChat(client, "[nt_hurt_sfx] You can activate hurt sound effect with !hurt_sfx_prefs");
+}
+
+
+public OnClientDisconnect(int client)
+{
+	// might not be needed since we check and set on connect
+	g_bClientWantsSFX[client] = false;
+}
+
+
+// returns true only if previous cookies were found
+ReadCookies(int client)
+{
+	if (!IsValidClient(client))
+		return;
+
+	char cookie[2];
+	GetClientCookie(client, FindClientCookie("wants-hurt-sfx"), cookie, sizeof(cookie));
+
+	#if DEBUG
+	PrintToServer("[nt_hurt_sfx] DEBUG ReadCookies(%N) cookie is: \"%s\"",
+	client, ((cookie[0] != '\0' && StringToInt(cookie)) ? "null" : cookie ));
+	#endif
+
+	g_bClientWantsSFX[client] = (cookie[0] != '\0' && StringToInt(cookie));
+}
+
+
+// Toggle bool + cookie
+void ToggleCookiePreference(int client)
+{
+	if (!IsValidClient(client))
+		return;
+
+	#if DEBUG
+	PrintToServer("[nt_hurt_sfx] DEBUG Pref for %N was %s -> bool toggled.", client, (g_bClientWantsSFX[client] ? "true" : "false"));
+	#endif
+
+	g_bClientWantsSFX[client] = !g_bClientWantsSFX[client];
+
+	SetClientCookie(client, FindClientCookie("wants-hurt-sfx"), (g_bClientWantsSFX[client] ? "1" : "0"));
+
+	UpdateAffectedArrayForAlivePlayers(client);
+}
+
+
 
 public Action Event_OnPlayerSpawn(Event event, const char[] name, bool dontbroadcast)
 {
@@ -152,7 +388,7 @@ public Action Event_OnPlayerSpawn(Event event, const char[] name, bool dontbroad
 public Action timer_PrintArray(Handle timer, int client)
 {
 	for (int i = 0; i < g_iAffectedNumPlayers[client]; i++)
-		PrintToServer("[nt_hurt_sfx] g_iAffectedPlayers[%i][%i] affected client index %d (%N)", 
+		PrintToServer("[nt_hurt_sfx] timer_PrintArray() g_iAffectedPlayers[%N][%i] affected client index %d (%N)",
 		client, i, g_iAffectedPlayers[client][i], g_iAffectedPlayers[client][i]);
 }
 
@@ -168,7 +404,6 @@ public Action Event_OnRoundStart(Event event, const char[] name, bool dontbroadc
 }
 
 
-// passing -1 refreshes all arrays
 public Action timer_RefreshArraysForAll(Handle timer, int client)
 {
 	#if DEBUG
@@ -176,7 +411,7 @@ public Action timer_RefreshArraysForAll(Handle timer, int client)
 	#endif
 
 	// force update for all arrays
-	UpdateAffectedArrayForAlivePlayers(client);
+	UpdateAffectedArrayForAlivePlayers(client); // should be -1 here, forcing refresh for all arrays
 
 	if (g_RefreshArrayTimer != INVALID_HANDLE)
 		g_RefreshArrayTimer = INVALID_HANDLE;
@@ -190,7 +425,7 @@ public Action Event_OnPlayerHurt(Event event, const char[] name, bool dontbroadc
 		return Plugin_Continue;
 
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
-	
+
 	if (g_hCurrentlyPlaying[client] == INVALID_HANDLE && g_iSoundInstances <= MAX_SND_INSTANCES)
 	{
 		EmitHurtSoundFromClientPos(client);
@@ -218,7 +453,8 @@ public Action Event_OnPlayerDeath(Event event, const char[] name, bool dontbroad
 
 public void OnClientPutInServer(int client)
 {
-	// delay ?
+	// need some delay perhaps?
+	g_bClientWantsSFX[client] = false; // by default, we need to opt-in to be affected
 	UpdateAffectedArrayForAlivePlayers(client);
 }
 
@@ -243,30 +479,38 @@ public Action Event_OnPlayerDisconnect(Event event, const char[] name, bool dont
 // for each alive player, update their array to reflect updated_client being affected
 public void UpdateAffectedArrayForAlivePlayers(int updated_client)
 {
+	// WARNING: updated_client can be -1 here!
 	for (int client = 1; client <= MaxClients; client++)
 	{
 		if (!IsValidClient(client) || !IsClientConnected(client))
 		{
-			#if DEBUG
+			#if DEBUG > 1
 			PrintToServer("[nt_hurt_sfx] client %d is either not valid or not connected", client);
 			#endif
 
 			continue;
 		}
 
+		#if DEBUG > 1
+		if (updated_client > 0)
+			PrintToServer("[nt_hurt_sfx] during refresh for \"%N\" updated_client \"%N\"'s pref was %s.",
+			client, updated_client, (g_bClientWantsSFX[updated_client] ? "true" : "false"));
+		#endif
+
 		if (client == updated_client) // don't emit for ourselves
 			continue;
 
 		if (!IsPlayerReallyAlive(client)) // dead players wouldn't emit any sound
 			continue;
-		
-		if (!IsValidClient(updated_client) || !IsClientConnected(updated_client))
+
+		if (!IsValidClient(updated_client) || !IsClientConnected(updated_client) || (updated_client > 0 && !g_bClientWantsSFX[updated_client]))
 		{
 			#if DEBUG
-			PrintToServer("[nt_hurt_sfx] Player %d not valid, rebuilding array for %N.", updated_client, client);
+			PrintToServer("[nt_hurt_sfx] A player has to be removed, rebuilding array for %N.", updated_client, client);
 			#endif
 
-			// no choice but to rebuild the entire array :(
+			// CAVEAT: whenever an affected player is to be taken out of the emitting player's array
+			// we have no choice but to rebuild the entire array :( There might be a better way?
 
 			g_iAffectedNumPlayers[client] = 0; // reset counter
 
@@ -274,8 +518,8 @@ public void UpdateAffectedArrayForAlivePlayers(int updated_client)
 			{
 				if (!IsValidClient(j) || !IsClientConnected(j))
 					continue;
-				
-				if (j == client)
+
+				if (j == client || !g_bClientWantsSFX[j])
 					continue; // we shouldn't emit for ourselves
 
 				if (IsPlayerReallyAlive(j))
@@ -283,7 +527,7 @@ public void UpdateAffectedArrayForAlivePlayers(int updated_client)
 					#if DEBUG > 1
 					PrintToServer("[nt_hurt_sfx] Player \"%N\" is alive.", j)
 					#endif
-	
+
 					if (GetConVarBool(CVAR_spec_only))
 						continue;
 					if (GetConVarBool(CVAR_team_only) && GetClientTeam(j) != GetClientTeam(client))
@@ -292,7 +536,7 @@ public void UpdateAffectedArrayForAlivePlayers(int updated_client)
 					#if DEBUG > 1
 					PrintToServer("[nt_hurt_sfx] Adding %N to array for %N.", j, client)
 					#endif
-	
+
 					g_iAffectedPlayers[client][g_iAffectedNumPlayers[client]++] = j;
 					continue;
 				}
@@ -306,7 +550,7 @@ public void UpdateAffectedArrayForAlivePlayers(int updated_client)
 		}
 
 		#if DEBUG > 1
-		PrintToServer("[nt_hurt_sfx] Adding \"%N\" to array for %N", updated_client, updated_client, client);
+		PrintToServer("[nt_hurt_sfx] Adding \"%N\" to array for %N.", updated_client, updated_client, client);
 		#endif
 		g_iAffectedPlayers[client][g_iAffectedNumPlayers[client]++] = updated_client;
 
@@ -325,22 +569,18 @@ void EmitHurtSoundFromClientPos(int client)
 	vecOrigin[2] -= 15;
 
 	#if DEBUG
-	PrintToServer("[nt_hurt_sfx] Emitting sound %s at %f %f %f.", g_sCustomGirlHurtSound[rand], vecOrigin[0], vecOrigin[1], vecOrigin[2]);
+	PrintToServer("[nt_hurt_sfx] Emitting sound %s at %f %f %f.\nFor clients (%d) affected by %N:",
+	g_sCustomGirlHurtSound[rand], vecOrigin[0], vecOrigin[1], vecOrigin[2], g_iAffectedNumPlayers[client], client);
+	for (int i = 0; i < g_iAffectedNumPlayers[client]; i++)
+	{
+		PrintToServer("%i: %N", i, g_iAffectedPlayers[client][i]);
+	}
 	#endif
 
-	if (GetConVarBool(CVAR_spec_only) || GetConVarBool(CVAR_team_only))
-	{
-		EmitSound(g_iAffectedPlayers[client], g_iAffectedNumPlayers[client],
-				 g_sCustomGirlHurtSound[rand], 
-				 SOUND_FROM_WORLD, SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, SNDVOL_NORMAL, 
-				 GetRandomInt(95, 110), -1, vecOrigin, vecEyeAngles);
-	}
-	else
-	{
-		EmitSoundToAll(g_sCustomGirlHurtSound[rand], 
-		SOUND_FROM_WORLD, SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, SNDVOL_NORMAL, 
-		GetRandomInt(95, 110), -1, vecOrigin, vecEyeAngles);
-	}
+	EmitSound(g_iAffectedPlayers[client], g_iAffectedNumPlayers[client],
+				g_sCustomGirlHurtSound[rand],
+				SOUND_FROM_WORLD, SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, SNDVOL_NORMAL,
+				GetRandomInt(95, 110), -1, vecOrigin, vecEyeAngles);
 	//StopSoundPerm(client, g_sCustomGirlHurtSound[rand]);
 }
 
@@ -361,11 +601,11 @@ public Action OnNormalSound(int clients[64], int &numClients, char sample[PLATFO
 }
 #endif //DEBUG
 
- 
+
 void StopSoundPerm(int client, char[] sound)
 {
 	if(IsClientConnected(client) && IsClientInGame(client))
-	{			
+	{
 		StopSound(client, SNDCHAN_AUTO, sound);
 		StopSound(client, SNDCHAN_WEAPON, sound);
 		StopSound(client, SNDCHAN_VOICE, sound);

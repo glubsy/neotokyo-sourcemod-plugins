@@ -259,7 +259,7 @@ void BuildTopPropsMenu()
 	{
 		// AddToTopMenu(g_hTopMenu, "nt_menu", TopMenuObject_Item, TopCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "nt_menu", 0);
 
-		// in our plugin can, we have one category for ourselves, so we can add all menus there
+		// in our plugin, we have one category for ourselves, so we can add all menus there
 		g_tmo_propsphys = g_hTopMenu.AddItem("sm_props_physics", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_props");
 		g_tmo_propsdyn = g_hTopMenu.AddItem("sm_props_dynamic", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_props");
 		g_tmo_dong = g_hTopMenu.AddItem("sm_dick", TopMenuCategory_Handler, g_hTopPropsMainMenu_topmenuobj, "sm_dick");
@@ -437,7 +437,7 @@ public Menu BuildMainPropsMenu(int type)
 }
 
 
-
+// this is used for two different menus, because why not
 public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int param2)
 {
 	switch(action)
@@ -875,9 +875,9 @@ public OnClientPostAdminCheck(int client)
 
 public Action timer_AdvertiseHelp(Handle timer, int client)
 {
-	if (!IsValidClient(client))
+	if (!IsValidClient(client) || !IsClientConnected(client))
 		return;
-	PrintToChat(client, "[nt_props] You can print available commands with !props_help");
+	PrintToChat(client, "[nt_props] You can print available commands with !props_help or get the menu with !menu");
 }
 
 

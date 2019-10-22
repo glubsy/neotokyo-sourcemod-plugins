@@ -22,8 +22,8 @@ bool g_bEmitsLaser[NEO_MAX_CLIENTS+1];
 
 
 // each entity has an array of affected clients
-// int g_iLaserBeam[NEO_MAX_CLIENTS+1][NEO_MAX_CLIENTS+1]; 
-int g_iLaserDot[NEO_MAX_CLIENTS+1]; 
+// int g_iLaserBeam[NEO_MAX_CLIENTS+1][NEO_MAX_CLIENTS+1];
+int g_iLaserDot[NEO_MAX_CLIENTS+1];
 
 
 // credit goes to https://forums.alliedmods.net/showthread.php?p=2121702
@@ -37,7 +37,7 @@ public Plugin:myinfo =
 	url = "https://github.com/glubsy"
 };
 
-// TODO: 
+// TODO:
 // -> Attach a prop to the muzzle of every srs, then raytrace a laser straight in front when tossed in the world
 
 // OBJECTIVE: laser beam can only be seen with bare eyes (very thin and transparent), or night vision (thicker, more visible if possible)
@@ -122,7 +122,7 @@ public OnMapStart()
 	// laser beam
 	// g_modelLaser = PrecacheModel("sprites/laser.vmt");
 	g_modelLaser = PrecacheModel("sprites/laserdot.vmt");
-	
+
 	// laser halo
 	g_modelHalo = PrecacheModel("materials/sprites/halo01.vmt");
 	// g_modelHalo = PrecacheModel("materials/sprites/autoaim_1a.vmt");
@@ -134,7 +134,7 @@ public OnMapStart()
 
 	// laser dot
 	g_imodelLaserDot = PrecacheDecal("materials/sprites/laserdot.vmt"); // works!
-	// g_imodelLaserDot = PrecacheModel("materials/sprites/laser.vmt"); 
+	// g_imodelLaserDot = PrecacheModel("materials/sprites/laser.vmt");
 	// g_imodelLaserDot = PrecacheDecal("materials/decals/Blood5.vmt");
 }
 
@@ -190,7 +190,7 @@ public void OnClientSpawned_Post(int client)
 public Action Timer_TestForWeapons(Handle timer, int userid)
 {
 	int client = GetClientOfUserId(userid);
-	
+
 	if (!IsValidClient(client) || IsFakeClient(client))
 		return Plugin_Stop;
 
@@ -198,7 +198,7 @@ public Action Timer_TestForWeapons(Handle timer, int userid)
 	PrintToServer("[nt_sniper_laser] TestForWeapons: %N", client);
 	#endif
 	int weapon = GetPlayerWeaponSlot(client, SLOT_PRIMARY);
-	
+
 	if (!IsValidEdict(weapon))
 	{
 		#if DEBUG
@@ -206,7 +206,7 @@ public Action Timer_TestForWeapons(Handle timer, int userid)
 		#endif
 		return Plugin_Stop;
 	}
-	
+
 	decl String:classname[LONGEST_WEP_NAME + 1]; // Plus one for string terminator.
 	if (!GetEdictClassname(weapon, classname, sizeof(classname)))
 	{
@@ -215,7 +215,7 @@ public Action Timer_TestForWeapons(Handle timer, int userid)
 		#endif
 		return Plugin_Stop;
 	}
-	
+
 	for (int i = 0; i < sizeof(g_sLaserWeaponNames); i++)
 	{
 		if (StrEqual(classname, g_sLaserWeaponNames[i]))
@@ -234,7 +234,7 @@ public Action Timer_TestForWeapons(Handle timer, int userid)
 			#endif
 		}
 	}
-	
+
 	return Plugin_Stop;
 }
 
@@ -281,7 +281,7 @@ bool IsAttachableWeapon(int weapon)
 			#if DEBUG
 			PrintToServer("Attachable: %i", i);
 			#endif
-			
+
 			return true;
 		}
 
@@ -289,14 +289,15 @@ bool IsAttachableWeapon(int weapon)
 		PrintToServer("[nt_sniper_laser] %i -- not attachable for: %i vs %i", i, weapon, iAffectedWeapons[i]);
 		#endif
 	}
-	
+
 	return false;
 }
 
 public void OnWeaponSwitch_Post(int client, int weapon)
 {
 	#if DEBUG
-	PrintToServer("[nt_sniper_laser] OnWeaponEquip %N, weapon %d", client, weapon);
+	if (!IsFakeClient(client))  // reduces log output
+		PrintToServer("[nt_sniper_laser] OnWeaponSwitch_Post %N, weapon %d", client, weapon);
 	#endif
 	CheckForUpdateOnWeapon(client, weapon);
 }
@@ -323,7 +324,8 @@ void NeedUpdateLoop()
 public void OnWeaponEquip(int client, int weapon)
 {
 	#if DEBUG
-	PrintToServer("[nt_sniper_laser] OnWeaponEquip %N, weapon %d", client, weapon);
+	if (!IsFakeClient(client)) // reduces log output
+		PrintToServer("[nt_sniper_laser] OnWeaponEquip %N, weapon %d", client, weapon);
 	#endif
 	CheckForUpdateOnWeapon(client, weapon);
 }
@@ -334,7 +336,7 @@ int CreateFakeAttachedProp(int weapon, int client)
 	#if DEBUG
 	PrintToChatAll("[nt_sniper_laser] Creating attached prop on %N", client);
 	#endif
-	
+
 	int entity = CreateEntityByName("info_target");
 	// int entity = CreateEntityByName("prop_dynamic_ornament");
 	// DispatchKeyValue(entity, "model", "models/nt/a_lil_tiger.mdl");
@@ -368,13 +370,13 @@ int CreateLaserDotEnt(int client)
 	DispatchKeyValue(ent, "model", "materials/sprites/laserdot.vmt");
 	DispatchKeyValueFloat(ent, "scale", 0.1); // doesn't seem to work
 	// SetEntPropFloat(ent, Prop_Data, "m_flSpriteScale", 0.2); // doesn't seem to work
-	DispatchKeyValue(ent, "rendermode", "9"); // 3 glow, makes it smaller?, 9 world space glow 5 additive, 
+	DispatchKeyValue(ent, "rendermode", "9"); // 3 glow, makes it smaller?, 9 world space glow 5 additive,
 	DispatchKeyValueFloat(ent, "GlowProxySize", 0.2); // not sure if this works
 	DispatchKeyValueFloat(ent, "HDRColorScale", 1.0); // needs testing
 	DispatchKeyValue(ent, "renderamt", "180"); // transparency
 	DispatchKeyValue(ent, "disablereceiveshadows", "1");
 	DispatchKeyValue(ent, "renderfx", "15");
-	// DispatchKeyValue(ent, "rendercolor", "0 255 0"); 
+	// DispatchKeyValue(ent, "rendercolor", "0 255 0");
 
 	SetVariantFloat(0.1);
 	AcceptEntityInput(ent, "SetScale");  // this works!
@@ -435,7 +437,7 @@ public void OnWeaponDrop(int client, int weapon)
 {
 	if(!IsValidEdict(weapon) || !IsValidClient(client))
 		return;
-	
+
 	g_bEmitsLaser[client] = false;
 
 	NeedUpdateLoop();
@@ -463,7 +465,7 @@ void CheckForUpdateOnWeapon(int client, int weapon)
 		g_bNeedUpdateLoop = true;
 		return;
 	}
-	
+
 	g_bEmitsLaser[client] = false;
 
 	NeedUpdateLoop();
@@ -552,7 +554,7 @@ public OnGameFrame()
 				TE_SetupBeamPoints(origin, end, g_modelLaser, g_modelHalo, 0, 1, 0.1, 0.9, 0.1, 1, 0.1, laser_color, 0);
 				// add flags manually because sdktools forgot about them (see sdktools_tempents_stocks)
 				TE_WriteNum("m_nFlags", FBEAM_HALOBEAM|FBEAM_FADEOUT|FBEAM_SHADEOUT|FBEAM_FADEIN|FBEAM_SHADEIN);
-				#endif 
+				#endif
 
 
 				new iBeamClients[MaxClients], nBeamClients;
@@ -566,7 +568,7 @@ public OnGameFrame()
 				if (IsValidEntity(g_iLaserDot[client]))
 					// TODO: get velocity vector from somewhere?
 					TeleportEntity(g_iLaserDot[client], end, NULL_VECTOR, NULL_VECTOR);
-				
+
 			}
 		}
 	}
@@ -575,17 +577,17 @@ public OnGameFrame()
 
 #if METHOD == 0
 // trace from weapon
-float GetEndPositionFromWeapon(int entity, float[3] start, float[3] angle) 
+float GetEndPositionFromWeapon(int entity, float[3] start, float[3] angle)
 {
 	// int client;
 	// client = GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity");
 
-	decl Float:end[3]; 
+	decl Float:end[3];
 
-	TR_TraceRayFilter(start, angle, MASK_SOLID, RayType_Infinite, TraceEntityFilterPlayer, entity); 
-	if (TR_DidHit(INVALID_HANDLE)) 
-	{ 
-		TR_GetEndPosition(end, INVALID_HANDLE); 
+	TR_TraceRayFilter(start, angle, MASK_SOLID, RayType_Infinite, TraceEntityFilterPlayer, entity);
+	if (TR_DidHit(INVALID_HANDLE))
+	{
+		TR_GetEndPosition(end, INVALID_HANDLE);
 	}
 	// adjusting alignment
 	end[0] += 5.0;
@@ -597,14 +599,14 @@ float GetEndPositionFromWeapon(int entity, float[3] start, float[3] angle)
 
 
 // trace from client, return true on hit
-stock bool GetEndPositionFromClient(int client, float[3] end) 
-{ 
-	decl Float:start[3], Float:angle[3]; 
-	GetClientEyePosition(client, start); 
-	GetClientEyeAngles(client, angle); 
-	TR_TraceRayFilter(start, angle, (CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_MONSTER|CONTENTS_DEBRIS|CONTENTS_HITBOX), RayType_Infinite, TraceEntityFilterPlayer, client); 
-	if (TR_DidHit(INVALID_HANDLE)) 
-	{ 
+stock bool GetEndPositionFromClient(int client, float[3] end)
+{
+	decl Float:start[3], Float:angle[3];
+	GetClientEyePosition(client, start);
+	GetClientEyeAngles(client, angle);
+	TR_TraceRayFilter(start, angle, (CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_MONSTER|CONTENTS_DEBRIS|CONTENTS_HITBOX), RayType_Infinite, TraceEntityFilterPlayer, client);
+	if (TR_DidHit(INVALID_HANDLE))
+	{
 		TR_GetEndPosition(end, INVALID_HANDLE);
 
 		int hit_entity = TR_GetEntityIndex(INVALID_HANDLE);
@@ -612,15 +614,15 @@ stock bool GetEndPositionFromClient(int client, float[3] end)
 		{
 			float hit_normals[3];
 			TR_GetPlaneNormal(INVALID_HANDLE, hit_normals);
-			
-			// TR_TraceRayFilter(start, angle, (CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_MONSTER|CONTENTS_DEBRIS|CONTENTS_HITBOX), RayType_Infinite, TraceEntityFilterPlayer, client); 
-			
+
+			// TR_TraceRayFilter(start, angle, (CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_MONSTER|CONTENTS_DEBRIS|CONTENTS_HITBOX), RayType_Infinite, TraceEntityFilterPlayer, client);
+
 			#if DEBUG > 1
 			PrintToChatAll("We hit: %N, normals: %f %f %f", hit_entity, hit_normals[0], hit_normals[1], hit_normals[2]);
 			#endif
-			
+
 			// filter the targeted player to avoid blinding them and filter out the rifle holder
-			
+
 			int AffectedClients[NEO_MAX_CLIENTS+1], numClients;
 			for (int j = MaxClients; j > 0; j--)
 			{
@@ -657,11 +659,11 @@ stock bool GetEndPositionFromClient(int client, float[3] end)
 	// end[1] += 5.0;
 	// end[2] += 5.0;
 	return false;
-} 
+}
 
 
-public bool:TraceEntityFilterPlayer(entity, contentsMask, any:data)  
-{ 
+public bool:TraceEntityFilterPlayer(entity, contentsMask, any:data)
+{
 	// return entity > MaxClients;
 	return entity != data; // only avoid collision with ourself (or data)
 }
@@ -673,7 +675,7 @@ bool BuildArrayFilterClient(int clients[NEO_MAX_CLIENTS+1], int numClients)
 {
 	int clients[MaxClients];
 	int total = 0;
-	
+
 	for (new i=1; i<=MaxClients; i++)
 	{
 		if (IsClientInGame(i) && i !)
