@@ -7,13 +7,10 @@ WORKSPACE="$(pwd)"
 DEBUG=""
 if [[ "$2" -eq "17" ]]; then
 	TARGETVER="1.7.3-git5334";
-	SPVER="SPVER=17";
 elif [[ "$2" -eq "19" ]]; then
 	TARGETVER="1.9.0-git6282-windows";
-	SPVER="SPVER=19";
 elif [[ "$2" -eq "110" ]]; then
 	TARGETVER="1.10.0-git6445-windows";
-	SPVER="SPVER=110";
 else
 	echo "Asked wrong version";
 	exit;
@@ -29,11 +26,11 @@ SMPATH=/home_data/NEOTOKYO/ADMIN_2019/sourcemod-$TARGETVER
 cd $WORKSPACE;
 if [[ "${1}" == "all" ]]; then
 	for file in *.sp; do
-		echo "$SMPATH/scripting/spcomp ${SPVER} ${DEBUG} -o"$SMPATH/scripting/compiled/${file%.sp}.smx" "$WORKSPACE/${file}"";
-		$SMPATH/scripting/spcomp ${SPVER} ${DEBUG} -o"$SMPATH/scripting/compiled/${file%.sp}.smx" "$WORKSPACE/${file}";
+		echo "$SMPATH/scripting/spcomp ${DEBUG} -o"$SMPATH/scripting/compiled/${file%.sp}.smx" "$WORKSPACE/${file}"";
+		$SMPATH/scripting/spcomp ${DEBUG} -o"$SMPATH/scripting/compiled/${file%.sp}.smx" "$WORKSPACE/${file}";
 		echo "done with ${file}";
 	done
 else
-		echo "$SMPATH/scripting/spcomp ${SPVER} ${DEBUG} -o"$SMPATH/scripting/compiled/${3%.sp}.smx" "$WORKSPACE/${3}"";
-		$SMPATH/scripting/spcomp ${SPVER} ${DEBUG} -o"$SMPATH/scripting/compiled/${3%.sp}.smx" "$WORKSPACE/${3}";
+		echo "$SMPATH/scripting/spcomp ${DEBUG} -o"$SMPATH/scripting/compiled/${3%.sp}.smx" "$WORKSPACE/${3}"";
+		$SMPATH/scripting/spcomp ${DEBUG} -o"$SMPATH/scripting/compiled/${3%.sp}.smx" "$WORKSPACE/${3}";
 fi

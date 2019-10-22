@@ -21,7 +21,7 @@ public Plugin:myinfo =
 
 public OnPluginStart()
 {
-	#if SPVER < 18
+	#if SOURCEMOD_V_MAJOR == 1 && SOURCEMOD_V_MINOR == 8
 	CreateConVar("sm_nt_entitytools", PLUGIN_VERSION, "NEOTOKYO entitytools version");
 	#else  //need sm1.8 compiler for this
 	CreateConVar("sm_nt_entitytools", PLUGIN_VERSION, "NEOTOKYO entitytools version", FCVAR_HIDDEN);

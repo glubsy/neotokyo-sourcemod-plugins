@@ -1463,16 +1463,14 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 		int r,g,b,a, rendm, rendfx;
 		float gravity;
 
-		#if SPVER > 17
-		// #if SOURCEMOD_V_MAJOR == 1
-		// #if SOURCEMOD_V_MINOR == 7
+		#if SOURCEMOD_V_MAJOR == 1 && SOURCEMOD_V_MINOR > 7
 		GetEntityClassname(entity, clsname, sizeof(clsname));
 		GetEntityRenderColor(entity, r, g, b, a);
 		rendfx = view_as<int>(GetEntityRenderFx(entity);
 		rendm = view_as<int>(GetEntityRenderMode(entity);
 		gravity = GetEntityGravity(entity);
 		PrintToConsole(client, "Rendered before: %s with colors: %d,%d,%d,%d rendermode %d fx %d gravity %f", clsname, r,g,b,a, rendm, rendfx, gravity );
-		#endif // SPVER
+		#endif
 		#endif // DEBUG
 
 		// SetEntityRenderMode(entity, RENDER_NORMAL);
@@ -1498,11 +1496,9 @@ Prop_Spawn_Dispatch_Admin(int client, const char[] argstring)
 		rendm = view_as<int>(GetEntityRenderMode(entity));
 		gravity = GetEntityGravity(entity);
 
-		#if SPVER > 17
-		// #if SOURCEMOD_V_MAJOR == 1
-		// #if SOURCEMOD_V_MINOR == 7
+		#if SOURCEMOD_V_MAJOR == 1 && SOURCEMOD_V_MINOR > 7
 		GetEntityRenderColor(entity, r, g, b, a);
-		#endif // SPVER
+		#endif
 		PrintToConsole(client, "Rendered after: %s with colors: %d,%d,%d,%d rendermode %d, fx %d gravity %f", clsname, r,g,b,a, rendm, rendfx, gravity);
 		#endif // DEBUG
 	}
