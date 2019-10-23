@@ -3,22 +3,46 @@
 #include <sdkhooks>
 #include <neotokyo>
 #define NEO_MAX_CLIENTS 32
-#define DEBUG 1
+#if !defined DEBUG
+	#define DEBUG 0
+#endif
+#define IN_NEOZOOM = (1 << 23) //IN_GRENADE1
+#define IN_ALTFIRE = (1 << 11) //IN_ATTACK2
 
 int g_modelLaser, g_modelHalo, g_imodelLaserDot;
-Handle CVAR_PluginEnabled;
+Handle CVAR_PluginEnabled, CVAR_LaserAlpha, CVAR_AllWeapons;
 int laser_color[4] = {210, 10, 0, 20};
 
 // Weapons where laser makes sense
 new const String:g_sLaserWeaponNames[][] = {
+	"weapon_aa13",
+	"weapon_jitte",
+	"weapon_jittescoped",
+	"weapon_m41",
+	"weapon_m41l",
+	"weapon_m41s",
+	"weapon_mp5",
+	"weapon_mpn",
+	"weapon_mx",
+	"weapon_mx_silenced",
+	"weapon_pz",
+	"weapon_smac",
+	"weapon_srm",
+	"weapon_srm_s",
 	"weapon_srs",
-	"weapon_zr68l"
-};
+	"weapon_supa7",
+	"weapon_zr68c",
+	"weapon_zr68s",
+	"weapon_srs",
+	"weapon_zr68l" };
 #define LONGEST_WEP_NAME 12
-static int iAffectedWeapons[NEO_MAX_CLIENTS + 1];
+static int iAffectedWeapons[NEO_MAX_CLIENTS + 1]; // only primary weapons currently
 static int iAffectedWeapons_Head = 0;
+static int iAttachment[NEO_MAX_CLIENTS+1];
 bool g_bNeedUpdateLoop;
 bool g_bEmitsLaser[NEO_MAX_CLIENTS+1];
+bool g_bInZoom[NEO_MAX_CLIENTS+1];
+Handle g_TimerInZoom[NEO_MAX_CLIENTS+1];
 
 
 // each entity has an array of affected clients
@@ -30,10 +54,10 @@ int g_iLaserDot[NEO_MAX_CLIENTS+1];
 // some code stolen from Rain https://github.com/Rainyan/sourcemod-nt-quickswitchlimiter
 public Plugin:myinfo =
 {
-	name = "NEOTOKYO sniper laser",
+	name = "NEOTOKYO laser sights",
 	author = "glub",
-	description = "Traces a laser beam from sniper rifles",
-	version = "0.1",
+	description = "Traces a laser beam from guns",
+	version = "0.2",
 	url = "https://github.com/glubsy"
 };
 
@@ -43,16 +67,23 @@ public Plugin:myinfo =
 // OBJECTIVE: laser beam can only be seen with bare eyes (very thin and transparent), or night vision (thicker, more visible if possible)
 // but not with motion or thermal vsion (don't send to of those classes when vision active)
 // laser dot visible also only with bare eyes and night vision
+// laser beams are always visible to spectators
 // TODO: make opt-out
 // TODO: make cookie pref menu
+// TODO: use return GetEntProp(weapon, Prop_Data, "m_iState") to check if weapon is being carried by a player (see smlib/weapons.inc)
 
-#define METHOD 1
+#define ATTACH 0
+#define CROTCH 1
+#define METHOD CROTCH
 // Method 0: teleport entity and get start of beam from it, no parenting needed (not ideal)
 // Method 1: no need for prop here, just trace a ray from center of mass and be done with it whatever
 
 public void OnPluginStart()
 {
-	CVAR_PluginEnabled = CreateConVar("sm_sniper_laser_enable", "1", "Enable (1) or disable (0) Sniper Laser.", _, true, 0.0, true, 1.0);
+	CVAR_PluginEnabled = CreateConVar("sm_lasersight_enable", "1", "Enable (1) or disable (0) Sniper Laser.", _, true, 0.0, true, 1.0);
+	CVAR_LaserAlpha = CreateConVar("sm_lasersight_alpha", "20.0", "Transparency amount for laser beam", _, true, 0.0, true, 255.0);
+	laser_color[3] = GetConVarInt(CVAR_LaserAlpha); //TODO: hook convar change
+	CVAR_AllWeapons = CreateConVar("sm_lasersight_allweapons", "1", "Draw laser beam from all weapons, not just sniper rifles.", _, true, 0.0, true, 1.0);
 
 	// Make sure we will allocate enough size to hold our weapon names throughout the plugin.
 	for (int i = 0; i < sizeof(g_sLaserWeaponNames); i++)
@@ -94,7 +125,7 @@ public void OnConfigsExecuted()
 			continue; // Can't get class name
 
 
-		for (int i = 0; i < sizeof(g_sLaserWeaponNames); i++)
+		for (int i = sizeof(g_sLaserWeaponNames); i > (GetConVarBool(CVAR_AllWeapons) ? sizeof(g_sLaserWeaponNames) : sizeof(g_sLaserWeaponNames) -2 ); i--)
 		{
 			if (StrEqual(g_sLaserWeaponNames[i], classname))
 			{
@@ -103,8 +134,8 @@ public void OnConfigsExecuted()
 				#endif
 
 				#if METHOD == 0
-				iAffectedWeapons[client] = CreateFakeAttachedProp(weapon, client);
-				//DispatchLaser(iAffectedWeapons[client], client);
+				iAttachment[client] = CreateFakeAttachedProp(weapon, client);
+				//DispatchLaser(iAttachment[client], client);
 				#endif
 			}
 		}
@@ -216,7 +247,7 @@ public Action Timer_TestForWeapons(Handle timer, int userid)
 		return Plugin_Stop;
 	}
 
-	for (int i = 0; i < sizeof(g_sLaserWeaponNames); i++)
+	for (int i = sizeof(g_sLaserWeaponNames); i > (GetConVarBool(CVAR_AllWeapons) ? sizeof(g_sLaserWeaponNames) : sizeof(g_sLaserWeaponNames) - 2) ; i--)
 	{
 		if (StrEqual(classname, g_sLaserWeaponNames[i]))
 		{
@@ -224,7 +255,7 @@ public Action Timer_TestForWeapons(Handle timer, int userid)
 			PrintToServer("[nt_sniper_laser] Store OK: %s is %s. Hooking %s %d", classname, g_sLaserWeaponNames[i], classname, weapon);
 			#endif
 
-			StoreWeapon(weapon);
+			StoreWeapon(weapon, client);
 			break;
 		}
 		else
@@ -240,12 +271,9 @@ public Action Timer_TestForWeapons(Handle timer, int userid)
 
 
 // Assumes valid input; make sure you're inputting a valid edict.
-void StoreWeapon(int weapon)
+void StoreWeapon(int weapon, int client)
 {
 #if DEBUG
-	// This should never happen because we should be the only function
-	// modifying the value of _iPenalizableWeapons_Head, and we always
-	// mod cycle the array index. Therefore only checking in debug.
 	if (iAffectedWeapons_Head >= sizeof(iAffectedWeapons))
 	{
 		ThrowError("[nt_sniper_laser] iAffectedWeapons_Head %i >= sizeof(iAffectedWeapons) %i",
@@ -299,6 +327,7 @@ public void OnWeaponSwitch_Post(int client, int weapon)
 	if (!IsFakeClient(client))  // reduces log output
 		PrintToServer("[nt_sniper_laser] OnWeaponSwitch_Post %N, weapon %d", client, weapon);
 	#endif
+	g_bEmitsLaser[client] = false;
 	CheckForUpdateOnWeapon(client, weapon);
 }
 
@@ -327,6 +356,7 @@ public void OnWeaponEquip(int client, int weapon)
 	if (!IsFakeClient(client)) // reduces log output
 		PrintToServer("[nt_sniper_laser] OnWeaponEquip %N, weapon %d", client, weapon);
 	#endif
+	g_bEmitsLaser[client] = false;
 	CheckForUpdateOnWeapon(client, weapon);
 }
 
@@ -351,6 +381,11 @@ int CreateFakeAttachedProp(int weapon, int client)
 	#endif
 
 	TeleportEntity(entity, VecOrigin, NULL_VECTOR, NULL_VECTOR);
+
+	//from SM discord:
+	TeleportEntity(entity, NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
+    GetEntPropVector(entity, Prop_Data, "m_vecAbsOrigin", pos);
+    AcceptEntityInput(entity, "kill");
 
 	return entity;
 }
@@ -429,7 +464,6 @@ void DispatchLaser(int laser, int client)
 	DispatchKeyValue(laser, "spotlight_length", "200");
 	AcceptEntityInput(laser, "LightOn");
 	DispatchSpawn(laser);
-
 }
 
 
@@ -451,9 +485,9 @@ void CheckForUpdateOnWeapon(int client, int weapon)
 
 	if (IsAttachableWeapon(weapon))
 	{
-		#if METHOD == 0
-		iAffectedWeapons[client] = CreateFakeAttachedProp(weapon, client);
-		//DispatchLaser(iAffectedWeapons[client], client);
+		#if METHOD == ATTACH
+		iAttachment[client] = CreateFakeAttachedProp(weapon, client); // FIXME: MISTAKE HERE, DON'T ASSIGN!
+		//DispatchLaser(iAttachment[client], client);
 		#endif
 
 		if (!ClientHasCreatedLaserDot(client))
@@ -480,27 +514,6 @@ bool ClientHasCreatedLaserDot(int client)
 }
 
 
-#if DEBUG
-//DELETE: only used for testing
-public void OnEntityCreated(int entity, const char[] classname)
-{
-	if(StrEqual(classname, "weapon_srs"))
-	{
-		int owner = GetEntPropEnt(entity, Prop_Send, "m_hOwnerEntity");
-		int state = GetEntPropEnt(entity, Prop_Data, "m_hOwner");
-		if (owner < 0)
-		{
-			PrintToServer("[nt_sniper_laser] Weapon SRS %d created, but owner invalid. State: %d", entity, state);
-			return;
-		}
-		PrintToServer("[nt_sniper_laser] Entity SRS created! index: %d, owner %N", entity, owner);
-	}
-}
-#endif //DEBUG
-
-
-
-
 public OnGameFrame()
 {
 	if(g_bNeedUpdateLoop)
@@ -514,7 +527,7 @@ public OnGameFrame()
 		// 	TE_SetupBeamPoints(weapon_origin, GetEndPositionWeapon(weapon), g_modelLaser, g_modelHalo, initial_frame, 1, 0.1, 0.1, 0.1, 1, 0.1, laser_color, 0)
 		// }
 
-		for (int client = MaxClients; client > 0; --client)
+		for (int client = 1; client <= MaxClients; client++)
 		{
 			if(g_bEmitsLaser[client] && IsValidClient(client))
 			{
@@ -525,9 +538,9 @@ public OnGameFrame()
 				#if METHOD == 0
 				float vecForward[3], vecPos[3], vecVel[3];
 				float vecEyeAng[3];
-				if (iAffectedWeapons[client] != -1)
+				if (iAttachment[client] != -1)
 				{
-					// GetEntPropVector(iAffectedWeapons[client], Prop_Send, "m_vecOrigin", origin);
+					// GetEntPropVector(iAttachment[client], Prop_Send, "m_vecOrigin", origin);
 					// PrintToChatAll("origin: %f %f %f", origin[0], origin[1], origin[2]);
 					GetClientEyeAngles(client, vecEyeAng);
 					GetAngleVectors(vecEyeAng, vecForward, NULL_VECTOR, NULL_VECTOR);
@@ -536,26 +549,43 @@ public OnGameFrame()
 					vecPos[1]+=vecForward[1]*20.0;
 					vecPos[2]+=vecForward[2]*10.0;
 					SubtractVectors(vecPos, vecForward, vecVel);
-					TeleportEntity(iAffectedWeapons[client], vecPos, vecEyeAng, NULL_VECTOR);
+					TeleportEntity(iAttachment[client], vecPos, vecEyeAng, NULL_VECTOR);
 
-					GetEntPropVector(iAffectedWeapons[client], Prop_Send, "m_vecOrigin", vecPos);
+					GetEntPropVector(iAttachment[client], Prop_Send, "m_vecOrigin", vecPos);
 				}
 				#endif // METHOD == 0
 
 
 				bool didhit = GetEndPositionFromClient(client, end);
 
-				#if METHOD == 0 // using attached prop as origin
-				TE_SetupBeamPoints(vecPos, GetEndPositionFromWeapon(iAffectedWeapons[client], vecPos, vecEyeAng), g_modelLaser, g_modelHalo, 0, 1, 0.1, 0.9, 0.1, 1, 0.1, laser_color, 0);
+				#if METHOD == ATTACH // using attached prop as origin
+				// TE_SetupBeamPoints(vecPos, GetEndPositionFromWeapon(iAttachment[client], vecPos, vecEyeAng), g_modelLaser, g_modelHalo, 0, 1, 0.1, 0.9, 0.1, 1, 0.1, laser_color, 0);
+				TE_Start("BeamPoints");
+				TE_WriteVector("m_vecStartPoint", vecPos);
+				TE_WriteVector("m_vecEndPoint", GetEndPositionFromWeapon(iAttachment[client], vecPos, vecEyeAng));
+				//TE_WriteNum("m_nFlags", FBEAM_HALOBEAM|FBEAM_FADEOUT|FBEAM_SHADEOUT|FBEAM_FADEIN|FBEAM_SHADEIN);
+				TE_WriteNum("m_nModelIndex", g_modelLaser);
+				TE_WriteNum("m_nHaloIndex", g_modelHalo);
+				TE_WriteNum("m_nStartFrame", 0);
+				TE_WriteNum("m_nFrameRate", 1);
+				TE_WriteFloat("m_fLife", 0.1);
+				TE_WriteFloat("m_fWidth", 0.9);
+				TE_WriteFloat("m_fEndWidth", 0.1);
+				TE_WriteFloat("m_fAmplitude", 0.1);
+				TE_WriteNum("r", Color[0]);
+				TE_WriteNum("g", Color[1]);
+				TE_WriteNum("b", Color[2]);
+				TE_WriteNum("a", Color[3]);
+				TE_WriteNum("m_nSpeed", 1);
+				TE_WriteNum("m_nFadeLength", 1);
 				#endif
 
-				#if METHOD == 1 // coming from crotch
+				#if METHOD == CROTCH // coming from crotch
 				// NOTE: Halo can be set to 0, needs testing
 				TE_SetupBeamPoints(origin, end, g_modelLaser, g_modelHalo, 0, 1, 0.1, 0.9, 0.1, 1, 0.1, laser_color, 0);
 				// add flags manually because sdktools forgot about them (see sdktools_tempents_stocks)
 				TE_WriteNum("m_nFlags", FBEAM_HALOBEAM|FBEAM_FADEOUT|FBEAM_SHADEOUT|FBEAM_FADEIN|FBEAM_SHADEIN);
 				#endif
-
 
 				new iBeamClients[MaxClients], nBeamClients;
 				for(new j = 1; j <= MaxClients; j++)
@@ -575,7 +605,7 @@ public OnGameFrame()
 }
 
 
-#if METHOD == 0
+#if METHOD == ATTACH
 // trace from weapon
 float GetEndPositionFromWeapon(int entity, float[3] start, float[3] angle)
 {
@@ -700,6 +730,118 @@ public Action Hook_SetTransmit(int entity, int client)
 
 	return Plugin_Continue;
 }
+
+
+public Action OnPlayerRunCmd(int client, int &buttons)
+{
+	if (!GetConVarBool(CVAR_PluginEnabled) || client > MaxClients || client <= 0)
+		return Plugin_Continue;
+
+	if ((buttons & IN_GRENADE1) == IN_GRENADE1) // ZOOM key pressed
+	{
+		PrintToServer("Key IN_GRENADE1 pressed (neozoom?) %d", GetActiveWeapon(client));
+
+		decl String:weaponName[19];
+		GetClientWeapon(client, weaponName, sizeof(weaponName));
+
+		if (StrEqual(weaponName, "weapon_srs"))
+		{
+			g_bInZoom[client] = !g_bInZoom[client];
+			if (g_TimerInZoom[client] != INVALID_HANDLE)
+				g_TimerInZoom[client] = CreateTimer(0.1, timer_UpdateZoomKey, client, TIMER_REPEAT);
+			// toggle laser beam here
+		}
+	}
+
+
+	if ((buttons & IN_ATTACK2) == IN_ATTACK2) // Alt Fire mode key pressed
+	{
+		PrintToServer("Key IN_ATTACK2 pressed (altfire?)");
+		decl String:weaponName[19];
+		GetClientWeapon(client, weaponName, sizeof(weaponName));
+		if (StrEqual(weaponName, "weapon_srs"))
+		{
+			// toggle laser beam here?
+		}
+	}
+
+	if ((buttons & IN_RELOAD) == IN_RELOAD)
+	{
+		PrintToServer("Key IN_RELOAD pressed");
+		SetWeaponAmmo(client, AMMO_PRIMARY, 24);
+		// check until "m_bInReload" in weapon_srs is released
+
+	}
+
+	if ((buttons & IN_ATTACK) == IN_ATTACK)
+	{
+		g_bInZoom[client] = false;
+	}
+	// PrintToServer("next attack: %f", GetNextAttack(client));
+
+	return Plugin_Continue;
+}
+
+
+public Action timer_UpdateZoomKey(Handle timer, int client)
+{
+	PrintCenterTextAll("Client zoom is %s", (g_bInZoom[client] ? "active" : "inactive"));
+	PrintToChat(client, "Client zoom is %s", (g_bInZoom[client] ? "active" : "inactive"));
+
+	if (!IsValidClient(client) || IsFakeClient(client))
+		return Plugin_Stop;
+	int weapon = GetPlayerWeaponSlot(client, SLOT_PRIMARY);
+	if (!IsValidEdict(weapon))
+	{
+		#if DEBUG
+		PrintToServer("!IsValidEdict: %i", weapon);
+		#endif
+		return Plugin_Stop;
+	}
+	decl String:classname[30];
+	if (!GetEdictClassname(weapon, classname, sizeof(classname)))
+	{
+		#if DEBUG
+		PrintToServer("!GetEdictClassname: %i", weapon);
+		#endif
+		return Plugin_Stop;
+	}
+
+	// g_bInZoom[client] = GetInReload(weapon);
+	PrintToServer("m_nSequence: %d", GetEntProp(weapon, Prop_Data, "m_nSequence", 4));
+
+	int iSequence = GetEntProp(weapon, Prop_Data, "m_nSequence", 4);
+	// 3 shooting, 4 fire pressed continuously, 6 reloading, 11 bolt
+	// m_nSequence == 6 is equivalent to m_bInReload == 1
+	if (iSequence > 0)
+		g_bInZoom[client] = false;
+
+	// PrintToServer("m_bInReload: %d", GetEntProp(weapon, Prop_Data, "m_bInReload", 1));
+	// g_bInZoom[client] = !view_as<bool>(GetEntProp(weapon, Prop_Data, "m_bInReload", 1));
+
+	if (!g_bInZoom[client])
+	{
+		g_TimerInZoom[client] = INVALID_HANDLE;
+		KillTimer(timer);
+	}
+	return Plugin_Continue;
+}
+
+
+float GetNextAttack(int client)
+{
+	static int ptrHandle = 0;
+	new const String:sOffsetName[] = "m_flNextAttack";
+
+	if ((!ptrHandle) && (ptrHandle = FindSendPropInfo(
+		"CNEOPlayer", sOffsetName)) == -1)
+	{
+		SetFailState("Failed to obtain offset: \"%s\"!", sOffsetName);
+	}
+
+	return GetEntDataFloat(client, ptrHandle);
+}
+
 
 // Projected Decals half work, but never disappear as TE, don't show actual model
 // Glow Sprite load a model from a different precache table (can be actual player models too, weird)
