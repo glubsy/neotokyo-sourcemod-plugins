@@ -50,7 +50,7 @@ public Plugin:myinfo =
 
 public void OnPluginStart()
 {
-	CVAR_hurt_sounds = CreateConVar("sm_hurt_sounds", "1",
+	CVAR_hurt_sounds = CreateConVar("sm_hurt_sounds_active", "1",
 	"Enable (1) or disable (0) emitting custom sounds when players are hurt.", 0, true, 0.0, true, 1.0);
 
 	CVAR_hurt_sounds_delay = CreateConVar("sm_hurt_sounds_delay", "8.5",
@@ -62,7 +62,7 @@ public void OnPluginStart()
 	CVAR_spec_only = CreateConVar("sm_hurt_sounds_spec_only", "0",
 	"Enable (1) or disable (0) emitting custom sounds for alive players.", 0, true, 0.0, true, 1.0);
 
-	RegConsoleCmd("sm_hurt_sounds_prefs", ConCommand_Prefs, "Hurt players emit moaning sound effects when active.");
+	RegConsoleCmd("sm_hurt_sounds", ConCommand_Prefs, "Hurt players emit moaning sound effects when active.");
 
 	#if DEBUG > 1
 	AddNormalSoundHook(OnNormalSound);
@@ -70,10 +70,19 @@ public void OnPluginStart()
 
 	HookConVarChange(CVAR_hurt_sounds, OnConVarChanged);
 
-	RegClientCookie("wants-hurt-sfx", "player opted to have fun with props", CookieAccess_Protected);
+	RegClientCookie("wants-hurt-sfx", "player opted to hear custom sounds when a player is hurt", CookieAccess_Protected);
+
+	// late loading
+	for (new i = MaxClients; i > 0; --i)
+	{
+		if (!AreClientCookiesCached(i))
+			continue;
+
+		OnClientCookiesCached(i);
+	}
 
 	// prebuild menus
-	g_hPrefsMenu = BuildSubMenu(1);
+	g_hPrefsMenu = BuildSubMenu(0);
 
 	// Is our menu already loaded?
 	TopMenu topmenu;
@@ -112,7 +121,7 @@ public void OnConfigsExecuted()
 	if (!GetConVarBool(CVAR_hurt_sounds))
 		return;
 
-	HookEvent("player_hurt", Event_OnPlayerHurt);
+	HookEvent("player_hurt", Event_OnPlayerHurt, EventHookMode_Pre);
 	HookEvent("player_death", Event_OnPlayerDeath);
 	HookEvent("game_round_start", Event_OnRoundStart);
 	HookEvent("player_spawn", Event_OnPlayerSpawn);
@@ -226,7 +235,7 @@ public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int p
 	{
 		case MenuAction_End:
 		{
-			CloseHandle(menu);
+			// CloseHandle(menu); // breaks toggles
 			//delete menu; (should we here?)
 		}
 		case MenuAction_Cancel:
@@ -310,7 +319,7 @@ public Action timer_AdvertiseHelp(Handle timer, int client)
 {
 	if (!IsValidClient(client) || !IsClientConnected(client))
 		return Plugin_Stop;
-	PrintToChat(client, "[nt_hurt_sfx] You can activate hurt sound effect with !hurt_sfx_prefs");
+	PrintToChat(client, "[nt_hurt_sfx] You can activate hurt sound effects with !hurt_sounds");
 	return Plugin_Stop;
 }
 
@@ -323,7 +332,7 @@ public OnClientDisconnect(int client)
 
 
 // returns true only if previous cookies were found
-ReadCookies(int client)
+void ReadCookies(int client)
 {
 	if (!IsValidClient(client))
 		return;
@@ -380,7 +389,7 @@ public Action Event_OnPlayerSpawn(Event event, const char[] name, bool dontbroad
 
 	// for players spawning after freeze time has already ended
 	if (g_RefreshArrayTimer == INVALID_HANDLE)
-		g_RefreshArrayTimer = CreateTimer(5.0, timer_RefreshArraysForAll, -1, TIMER_FLAG_NO_MAPCHANGE);
+		g_RefreshArrayTimer = CreateTimer(10.0, timer_RefreshArraysForAll, -1, TIMER_FLAG_NO_MAPCHANGE);
 
 	#if DEBUG
 	CreateTimer(20.0, timer_PrintArray, client);
@@ -397,7 +406,7 @@ public Action timer_PrintArray(Handle timer, int client)
 		client, i, g_iAffectedPlayers[client][i], g_iAffectedPlayers[client][i]);
 }
 
-
+// This might not be needed if we do the same on player spawn
 public Action Event_OnRoundStart(Event event, const char[] name, bool dontbroadcast)
 {
 	#if DEBUG
@@ -420,16 +429,22 @@ public Action timer_RefreshArraysForAll(Handle timer, int client)
 
 	if (g_RefreshArrayTimer != INVALID_HANDLE)
 		g_RefreshArrayTimer = INVALID_HANDLE;
-	return Plugin_Continue;
+	return Plugin_Stop;
 }
 
 
 public Action Event_OnPlayerHurt(Event event, const char[] name, bool dontbroadcast)
 {
-	if (!GetConVarBool(CVAR_hurt_sounds))
-		return Plugin_Continue;
-
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
+	int health = GetEventInt(event, "health");
+
+	if (health <= 1) //don't play any sound on death, could even play a different sound too
+	{
+		#if DEBUG
+		PrintToServer("[nt_hurt_sfx] health on hurt is <= 1. Skipping.");
+		#endif
+		return Plugin_Continue;
+	}
 
 	if (g_hCurrentlyPlaying[client] == INVALID_HANDLE && g_iSoundInstances <= MAX_SND_INSTANCES)
 	{
@@ -447,10 +462,11 @@ public Action Event_OnPlayerDeath(Event event, const char[] name, bool dontbroad
 	int victim = GetClientOfUserId(GetEventInt(event, "userid"));
 
 	#if DEBUG
-	PrintToServer("[nt_hurt_sfx] %N died, updating arrays.", victim);
+	PrintToServer("[nt_hurt_sfx] %N died, asking to update arrays.", victim);
 	#endif
 
-	UpdateAffectedArrayForAlivePlayers(victim);
+	if (g_RefreshArrayTimer == INVALID_HANDLE)
+		g_RefreshArrayTimer = CreateTimer(1.5, timer_RefreshArraysForAll, victim, TIMER_FLAG_NO_MAPCHANGE);
 
 	return Plugin_Continue;
 }

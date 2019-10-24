@@ -444,7 +444,7 @@ public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int p
 	{
 		case MenuAction_End:
 		{
-			CloseHandle(menu);
+			// CloseHandle(menu); // breaks toggles?
 			//delete menu; (should we here?)
 		}
 		case MenuAction_Cancel:
@@ -2115,7 +2115,7 @@ public Action UpdateGrabbedObjects(Handle timer)
 
 	for (int client = 1; client <= MaxClients; client++)
 	{
-		if (g_GrabbedProp[client] <= 0)
+		if (g_GrabbedProp[client] <= 0 || !IsValidEntity(g_GrabbedProp[client] ))
 			continue;
 
 		float viewAng[3], vecPos[3], vecDir[3], vecVel[3];
@@ -2576,7 +2576,7 @@ void ComputePriceForProp(int client, int i_case, int &price, int affected[NEO_MA
 		// didn't ask for specs to be affected
 		if (GetCmdArgs() < 2 && !IsPlayerReallyAlive(i))
 			continue;
-		else if (!IsPlayerReallyAlive(i) && IsPlayerObserving(i)) // already observing someone
+		else if (!IsPlayerReallyAlive(i) && IsPlayerObservingALockedTarget(i)) // already observing someone
 			continue;
 
 		// don't add on top of another already attached
@@ -2649,7 +2649,7 @@ public void SpawnAndStrapDongToSelf(int client)
 		PrintToServer("[nt_props] DEBUG: Client %N is a spectator. Strapping differently.", client);
 		#endif
 
-		if (IsPlayerObserving(client)) // don't attach if already spectating someone
+		if (IsPlayerObservingALockedTarget(client)) // don't attach if already spectating someone
 			return;
 
 		g_AttachmentEnt[client] = Create_Prop_For_Attachment(client, gs_dongs[0], 5, true);
@@ -2673,18 +2673,18 @@ public OnMapEnd()
 }
 
 
-bool IsPlayerObserving(int client)
+bool IsPlayerObservingALockedTarget(int client)
 {
 	int mode = GetEntProp(client, Prop_Send, "m_iObserverMode");
 
 	#if DEBUG
 	// note movetype is most likely 10 too
-	PrintToServer("%N is observing target: mode %d", client, mode);
+	PrintToServer("[nt_props] %N %s observing: m_iObserverMode %d", client, (mode ? "is" : "is not"), mode);
 	#endif
 
 	if(mode == 5) // 5 mean free fly
 		return false;
-	return true; // 4 means observing a target
+	return true; // 4 means observing a target (locked in)
 }
 
 

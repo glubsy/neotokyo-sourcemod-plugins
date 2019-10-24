@@ -487,7 +487,8 @@ public Action Event_OnPlayerDeath(Event event, const char[] name, bool dontbroad
 		return Plugin_Continue;
 
 	// need short delay to read deadflag
-	CreateTimer(0.5, timer_RefreshAffectedArray, victim, TIMER_FLAG_NO_MAPCHANGE);
+	if (g_RefreshArrayTimer == INVALID_HANDLE)
+		g_RefreshArrayTimer = CreateTimer(0.5, timer_RefreshAffectedArray, victim, TIMER_FLAG_NO_MAPCHANGE);
 
 	return Plugin_Continue;
 }
@@ -539,7 +540,8 @@ public Action timer_RefreshAffectedArray(Handle timer, int client)
 
 	UpdateAffectedClientsArray(client); // should be -1 here, forcing refresh for all arrays
 
-	g_RefreshArrayTimer = INVALID_HANDLE;
+	if (g_RefreshArrayTimer != INVALID_HANDLE)
+		g_RefreshArrayTimer = INVALID_HANDLE;
 	return Plugin_Stop;
 }
 
