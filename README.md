@@ -31,13 +31,13 @@
 
 **nt_entitytools**: various tools to manipulate entities in game. Allows Admins to spawn props. Mostly for testing purposes.
 
-**nt_props**: allows player to spawn various props depending on their score. [unfinished]
+**nt_props**: allows player to spawn various props depending on their score.
 
-**nt_sniper_laser**: adds laser beam and laser dot to sniper rifles. [unfinished]
+**nt_sniper_laser**: adds laser beam and laser dot to sniper rifles.
 
-**nt_highlights**: highlights player_hurt events for spectators by tracing coloured beams matching damage done. [unfinished]
+**nt_highlights**: highlights player_hurt events for spectators by tracing coloured beams matching damage done.
 
-**nt_hurt_sfx**: highlights player_hurt events with sound effects. [unfinished]
+**nt_hurt_sfx**: highlights player_hurt events with sound effects.
 
 Donger model here: https://www.mediafire.com/?6y352ceczvs3oc1
 
