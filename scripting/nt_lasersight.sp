@@ -71,6 +71,7 @@ public Plugin:myinfo =
 // TODO: make opt-out
 // TODO: make cookie pref menu
 // TODO: use return GetEntProp(weapon, Prop_Data, "m_iState") to check if weapon is being carried by a player (see smlib/weapons.inc)
+// TODO: make checking for in_zoom state a forward (for other plugins to use)
 
 #define ATTACH 0
 #define CROTCH 1

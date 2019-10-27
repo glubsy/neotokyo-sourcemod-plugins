@@ -18,7 +18,7 @@ int g_iSoundInstances = 0;
 int g_iAffectedPlayers[NEO_MAX_CLIENTS+1][NEO_MAX_CLIENTS+1]; // arrays of affected players
 int g_iAffectedNumPlayers[NEO_MAX_CLIENTS+1] = { 0, ...}; // number of affected players in the array above
 Handle g_RefreshArrayTimer = INVALID_HANDLE;
-Handle CVAR_hurt_sounds, CVAR_team_only, CVAR_spec_only, CVAR_hurt_sounds_delay = INVALID_HANDLE;
+Handle CVAR_hurt_sounds_active, CVAR_team_only, CVAR_spec_only, CVAR_hurt_sounds_delay, CVAR_hurt_sounds_override = INVALID_HANDLE;
 char g_sCustomGirlHurtSound[][] = {
 	"custom/himitu09065b.mp3",
 	"custom/himitu09065.mp3",
@@ -50,8 +50,11 @@ public Plugin:myinfo =
 
 public void OnPluginStart()
 {
-	CVAR_hurt_sounds = CreateConVar("sm_hurt_sounds_active", "1",
+	CVAR_hurt_sounds_active = CreateConVar("sm_hurt_sounds_active", "1",
 	"Enable (1) or disable (0) emitting custom sounds when players are hurt.", 0, true, 0.0, true, 1.0);
+
+	CVAR_hurt_sounds_override = CreateConVar("sm_hurt_sounds_force_on", "0",
+	"(1) force opt-out mode for all players who have not already explicitly opted-out.", 0, true, 0.0, true, 1.0);
 
 	CVAR_hurt_sounds_delay = CreateConVar("sm_hurt_sounds_delay", "8.5",
 	"Delay until more hurt sounds may be emitted by a player.", 0, true, 0.0, true, 500.0);
@@ -68,13 +71,16 @@ public void OnPluginStart()
 	AddNormalSoundHook(OnNormalSound);
 	#endif
 
-	HookConVarChange(CVAR_hurt_sounds, OnConVarChanged);
+	HookConVarChange(CVAR_hurt_sounds_active, OnConVarChanged);
+	HookConVarChange(CVAR_hurt_sounds_override, OnConVarChanged);
 
 	RegClientCookie("wants-hurt-sfx", "player opted to hear custom sounds when a player is hurt", CookieAccess_Protected);
 
 	// late loading
 	for (new i = MaxClients; i > 0; --i)
 	{
+		if (!IsValidClient(i) || !IsClientConnected(i))
+			continue;
 		if (!AreClientCookiesCached(i))
 			continue;
 
@@ -118,7 +124,7 @@ public void OnConfigsExecuted()
 {
 	AutoExecConfig(true, "nt_hurt_sfx");
 
-	if (!GetConVarBool(CVAR_hurt_sounds))
+	if (!GetConVarBool(CVAR_hurt_sounds_active))
 		return;
 
 	HookEvent("player_hurt", Event_OnPlayerHurt, EventHookMode_Pre);
@@ -145,9 +151,9 @@ public void OnConfigsExecuted()
 }
 
 
-public void OnConVarChanged(ConVar convar, const char[] oldValue, const char[] newValue)
+public void OnConVarChanged(Handle convar, const char[] oldValue, const char[] newValue)
 {
-	if (!GetConVarBool(CVAR_hurt_sounds))
+	if (!GetConVarBool(CVAR_hurt_sounds_active))
 	{
 		UnhookEvent("player_hurt", Event_OnPlayerHurt);
 		UnhookEvent("player_death", Event_OnPlayerDeath);
@@ -159,17 +165,32 @@ public void OnConVarChanged(ConVar convar, const char[] oldValue, const char[] n
 		// so maybe we don't really need to update arrays here
 		UnhookEvent("player_disconnect", Event_OnPlayerDisconnect);
 		#endif
+		return;
 	}
-	HookEvent("player_hurt", Event_OnPlayerHurt);
-	HookEvent("player_death", Event_OnPlayerDeath);
-	HookEvent("game_round_start", Event_OnRoundStart);
-	HookEvent("player_spawn", Event_OnPlayerSpawn);
+	else
+	{
+		HookEvent("player_hurt", Event_OnPlayerHurt);
+		HookEvent("player_death", Event_OnPlayerDeath);
+		HookEvent("game_round_start", Event_OnRoundStart);
+		HookEvent("player_spawn", Event_OnPlayerSpawn);
 
-	#if DEBUG
-	// tempents probably won't generate errors when sending to disconnected clients
-	// so maybe we don't really need to update arrays here
-	HookEvent("player_disconnect", Event_OnPlayerDisconnect);
-	#endif
+		#if DEBUG
+		// tempents probably won't generate errors when sending to disconnected clients
+		// so maybe we don't really need all this in order to update arrays here
+		HookEvent("player_disconnect", Event_OnPlayerDisconnect);
+		#endif
+	}
+
+	if (convar == CVAR_hurt_sounds_override)
+	{
+		for (int i = 1; i <= MaxClients; i++)
+		{
+			if (!IsClientInGame(i) || !(IsValidClient(i) || !IsClientConnected(i)))
+				continue;
+			ReadCookies(i); // force checking cookies and setting default pref value of true when possible
+		}
+		UpdateAffectedArrayForAlivePlayers(-1);
+	}
 }
 
 
@@ -278,11 +299,11 @@ public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int p
 			char info[2];
 			menu.GetItem(param2, info, sizeof(info));
 
-			char display[25];
+			char display[30];
 
 			if (StrEqual(info, "a")) // toggle item
 			{
-				Format(display, sizeof(display), "Hurt sounds are active [%s]", (g_bClientWantsSFX[param1] ? 'x' : ' ' ));
+				Format(display, sizeof(display), "Hurt sounds are: [%s]", (g_bClientWantsSFX[param1] ? "enabled" : "disabled" ));
 				return RedrawMenuItem(display);
 			}
 			return 0;
@@ -299,15 +320,21 @@ public Action ConCommand_Prefs(int client, int args)
 }
 
 
-// not sure when this is called
+// "Called once a client's saved cookies have been loaded from the database"
 public OnClientCookiesCached(int client)
 {
+	#if DEBUG
+	PrintToServer("[nt_hurt_sfx] OnClientCookiesCached(%d)", client)
+	#endif
 	ReadCookies(client);
 }
 
 
 public OnClientPostAdminCheck(int client)
 {
+	#if DEBUG
+	PrintToServer("[nt_hurt_sfx] OnClientPostAdminCheck(%d)", client)
+	#endif
 	if (AreClientCookiesCached(client))
 	{
 		ReadCookies(client);
@@ -319,7 +346,7 @@ public Action timer_AdvertiseHelp(Handle timer, int client)
 {
 	if (!IsValidClient(client) || !IsClientConnected(client))
 		return Plugin_Stop;
-	PrintToChat(client, "[nt_hurt_sfx] You can activate hurt sound effects with !hurt_sounds");
+	PrintToChat(client, "[nt_hurt_sfx] You can toggle hurt sound effects with !hurt_sounds");
 	return Plugin_Stop;
 }
 
@@ -342,10 +369,18 @@ void ReadCookies(int client)
 
 	#if DEBUG
 	PrintToServer("[nt_hurt_sfx] DEBUG ReadCookies(%N) cookie is: \"%s\"",
-	client, ((cookie[0] != '\0' && StringToInt(cookie)) ? "null" : cookie ));
+	client, ((cookie[0] != '\0' && StringToInt(cookie)) ? cookie : "null" ));
 	#endif
 
-	g_bClientWantsSFX[client] = (cookie[0] != '\0' && StringToInt(cookie));
+	if (GetConVarBool(CVAR_hurt_sounds_override))
+	{
+		if (cookie[0] != '\0')
+			g_bClientWantsSFX[client] = view_as<bool>(StringToInt(cookie));
+		else
+			g_bClientWantsSFX[client] = true; //override mode defaults to true unless cookie says otherwise
+	}
+	else
+		g_bClientWantsSFX[client] = (cookie[0] != '\0' && StringToInt(cookie));
 }
 
 
@@ -474,9 +509,11 @@ public Action Event_OnPlayerDeath(Event event, const char[] name, bool dontbroad
 
 public void OnClientPutInServer(int client)
 {
-	// need some delay perhaps?
 	g_bClientWantsSFX[client] = false; // by default, we need to opt-in to be affected
-	UpdateAffectedArrayForAlivePlayers(client);
+
+	if (g_RefreshArrayTimer == INVALID_HANDLE)
+		g_RefreshArrayTimer = CreateTimer(3.5, timer_RefreshArraysForAll, client, TIMER_FLAG_NO_MAPCHANGE);
+
 	CreateTimer(160.0, timer_AdvertiseHelp, client, TIMER_FLAG_NO_MAPCHANGE);
 }
 

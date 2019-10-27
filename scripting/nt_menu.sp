@@ -66,7 +66,6 @@ public OnMapStart()
 	ParseConfigs();
 }
 
-
 public OnAllPluginsLoaded()
 {
 	hTopMenu = new TopMenu(DefaultCategoryHandler);

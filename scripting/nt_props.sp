@@ -9,7 +9,9 @@
 #undef REQUIRE_PLUGIN
 #include <nt_menu>
 
-#define DEBUG 1
+#if !defined DEBUG
+	#define DEBUG 0
+#endif
 #pragma semicolon 1
 #define NEO_MAX_CLIENTS 32
 #define MAX_PROPS_PER_PLAYER 10
@@ -18,7 +20,7 @@
 Handle g_cvar_props_enabled, g_cvar_restrict_alive, g_cvar_give_initial_credits, g_cvar_credits_replenish, g_cvar_score_as_credits, g_cvar_opt_in_mode = INVALID_HANDLE;
 Handle cvMaxPropsCreds = INVALID_HANDLE; // maximum credits given
 Handle cvPropMaxTTL = INVALID_HANDLE; // maximum time to live before prop gets auto removed
-// Handle g_hPropPrefCookie = INVALID_HANDLE;
+Handle g_hPropPrefCookie = INVALID_HANDLE;
 Handle g_cvar_props_oncapture, g_cvar_props_onghostpickup, g_cvar_props_oncapture_nodongs, gTimer = INVALID_HANDLE;
 bool gb_PausePropSpawning;
 int g_AttachmentEnt[NEO_MAX_CLIENTS+1] = {-1, ...}; // strapped on prop
@@ -141,11 +143,14 @@ public OnPluginStart()
 	RegConsoleCmd("sm_props_rotate_angles", ConCommand_Props_Rotate_Angles, "Change targeted prop's angles");
 	RegConsoleCmd("sm_props_rotate_position", ConCommand_Props_Rotate_Position, "Change targeted prop's position");
 
-	// g_hPropPrefCookie = RegClientCookie("wants-props", "player opted to have fun with props", CookieAccess_Protected);
+	g_hPropPrefCookie = FindClientCookie("wants-props");
+	if (g_hPropPrefCookie == INVALID_HANDLE)
+		g_hPropPrefCookie = RegClientCookie("wants-props", "player opted to have fun with props", CookieAccess_Protected);
 
 	RegConsoleCmd("sm_props_help", Command_Print_Help, "Prints all props-related commands.");
 	RegConsoleCmd("sm_props_pause", Command_Pause_Props_Spawning, "Prevent any further custom prop spawning until end of round.");
 	RegConsoleCmd("sm_props_nothx", Command_Hate_Props_Toggle, "Toggle your preference to not see custom props wherever possible.");
+	RegConsoleCmd("sm_props_status", Command_Status, "Display who is seeing props or not.");
 
 	// conditions
 	g_cvar_props_onghostpickup = CreateConVar("sm_props_onghostpickup", "0", "Picking up the ghost is exciting,", FCVAR_NONE, true, 0.0, true, 1.0 );
@@ -204,6 +209,9 @@ public OnPluginStart()
 	// late loading
 	for (new i = MaxClients; i > 0; --i)
 	{
+		if (!IsValidClient(i) || !IsClientConnected(i))
+			continue;
+
 		if (!AreClientCookiesCached(i))
 			continue;
 
@@ -512,11 +520,11 @@ public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int p
 			char info[32];
 			menu.GetItem(param2, info, sizeof(info));
 
-			char display[64];
+			char display[29];
 
 			if (StrEqual(info, "a")) // toggle item
 			{
-				Format(display, sizeof(display), "Props are active [%s]", (g_bClientWantsProps[param1] ? 'x' : ' ' ));
+				Format(display, sizeof(display), "Custom props are: [%s]", (g_bClientWantsProps[param1] ? "enabled" : "disabled" ));
 				return RedrawMenuItem(display);
 			}
 			return 0;
@@ -833,6 +841,38 @@ bool Has_Anyone_Opted_Out()
 }
 
 
+public Action Command_Status(int client, int args)
+{
+	char optedin[1000], optedout[1000], name[MAX_NAME_LENGTH];
+	int countin, countout;
+
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsValidClient(i) || !IsClientConnected(i))
+			continue;
+
+		if (g_bClientWantsProps[i])
+		{
+			Format(name, sizeof(name), "%N\n", i);
+			StrCat(optedin, sizeof(optedin), name);
+			countin++;
+		}
+		else
+		{
+			char cookie[2];
+			GetClientCookie(i, g_hPropPrefCookie, cookie, sizeof(cookie));
+			Format(name, sizeof(name), "%N%s\n", i, ((cookie[0] != '\0' && !StringToInt(cookie)) ? " (explicitly)" : "" ));
+			StrCat(optedout, sizeof(optedout), name);
+			countout++;
+		}
+	}
+	PrintToConsole(client, "Props are active for:\n%s", (countin ? optedin : "NOBODY! D:"));
+	PrintToConsole(client, "Props are inactive for:\n%s", (countout ? optedout : "NOBODY! :D"));
+
+
+	return Plugin_Handled;
+}
+
 // public MyCookieMenuHandler(client, CookieMenuAction:action, any:info, String:buffer[], maxlen)
 // {
 // 	switch (action)
@@ -897,11 +937,11 @@ ReadCookies(int client)
 
 	char cookie[2];
 
-	GetClientCookie(client, FindClientCookie("wants-props"), cookie, sizeof(cookie));
+	GetClientCookie(client, g_hPropPrefCookie, cookie, sizeof(cookie));
 
 	#if DEBUG
 	PrintToServer("[nt_props] DEBUG ReadCookies(%N) cookie is: \"%s\"",
-	client, ((cookie[0] != '\0' && StringToInt(cookie)) ? "null" : cookie ));
+	client, ((cookie[0] != '\0' && StringToInt(cookie)) ? cookie : "null" ));
 	#endif
 
 	g_bClientWantsProps[client] = (cookie[0] != '\0' && StringToInt(cookie));
@@ -924,6 +964,8 @@ void ToggleCookiePreference(int client)
 	g_bClientWantsProps[client] = !g_bClientWantsProps[client];
 
 	SetClientCookie(client, FindClientCookie("wants-props"), (g_bClientWantsProps[client] ? "1" : "0"));
+
+	LogAction(-1, -1, "%N %s custom props.", client, (g_bClientWantsProps[client] ? "opted in" : "opted out"));
 }
 
 
@@ -1531,7 +1573,6 @@ sm_props: spawns a model in the game\n\
 sm_dick [1-5] [s]: spawns a dong of scale 1 to 5 with optional static properties\n\
 sm_props_credit_status: check credits of other players and yourself\n\
 sm_props_pause: stops anyone from spawning props until the end of the current round\n");
-		ClientCommand(client, "toggleconsole");
 	}
 }
 
@@ -1657,12 +1698,11 @@ public Action ConCommand_PropSpawn(int client, int args)
 	// 	return Plugin_Handled;
 	// }
 
-	// opt-in here automatically (if opt-in mode?)
-
+	// opt-in here automatically (if opt-in mode)
 	if (GetConVarBool(g_cvar_opt_in_mode) && !g_bClientWantsProps[client])
 	{
 		ToggleCookiePreference(client);
-		PrintToChat(client, "[nt_props] You have opted to see custom props. Use !menu to toggle it off.");
+		PrintToChat(client, "[nt_props] You have opted to see custom props. Use !props to toggle it off.");
 	}
 
 	if (!IsPropCommandAllowed(client) && !IsAdmin(client))
@@ -1826,20 +1866,25 @@ public Action Command_Dong_Spawn(int client, int args)
 	if (!IsValidClient(client))
 		return Plugin_Handled;
 
-	// TODO: opt-in here
-	// TODO: if no arg given, display menu
-
-	if (!IsCommandAllowed(client) && !IsAdmin(client))
-		return Plugin_Handled;
-
 	if ((GetCmdArgs() > 2) || (GetCmdArgs() == 0))
 	{
 		PrintToChat(client, "[nt_props] Usage: !dick [scale 1-5] [1 for static]");
 		PrintToConsole(client, "[nt_props] Usage: sm_dick [scale 1-5] [1 for static]");
 		PrintToChat(client, "[nt_props] Type: !props_credit_status see brouzoufs for everyone.");
 		PrintToConsole(client, "[nt_props] Type sm_props_credit_status to see brouzoufs for everyone.");
+
+		DisplayMenu(g_hSpawnDongMenu, client, 20); // display only that submenu
 		return Plugin_Handled;
 	}
+
+	if (GetConVarBool(g_cvar_opt_in_mode) && !g_bClientWantsProps[client])
+	{
+		ToggleCookiePreference(client);
+		PrintToChat(client, "[nt_props] You have opted to see custom props. Use !props to toggle it off.");
+	}
+
+	if (!IsCommandAllowed(client) && !IsAdmin(client))
+		return Plugin_Handled;
 
 	new String:model_scale[2], String:model_property[2]; //FIXME maybe better way?
 	GetCmdArg(1, model_scale, sizeof(model_scale));
@@ -1906,6 +1951,13 @@ public Action ConCommand_Props_Rotate_Skin(int client, int args)
 		if (!IsAdmin(client))
 			return Plugin_Handled;
 	}
+
+	//FIXME: property might not be found on just any prop
+	// if (GetEntSendPropOffs(entity, "m_nSkin", true) == -1)
+	// {
+	// 	PrintToChat(client, "Property not found!");
+	// 	return Plugin_Handled;
+	// }
 
 	int skin = GetEntProp(entity, Prop_Data, "m_nSkin");
 
@@ -2668,8 +2720,10 @@ public void SpawnAndStrapDongToSelf(int client)
 
 public OnMapEnd()
 {
-	KillTimer(gTimer);
-	KillTimer(g_updTimer);
+	if (gTimer != INVALID_HANDLE)
+		KillTimer(gTimer);
+	if (g_updTimer != INVALID_HANDLE)
+		KillTimer(g_updTimer);
 }
 
 
@@ -3460,3 +3514,29 @@ void GetEntityRenderColorFuture(int entity, int &r, int &g, int &b, int &a)
 	b = GetEntData(entity, offset + 2, 1);
 	a = GetEntData(entity, offset + 3, 1);
 }
+
+
+// Use code below to check area before spawning a prop, to avoid spawning on a player?
+
+// #include <sdktools>
+
+// bool IsAreaClearOfPlayers(int MovingEnt, float pos[3])
+// {
+//     float vecMins[3], vecMaxs[3];
+    
+//     GetEntPropVector(MovingEnt, Prop_Send, "m_vecMins", vecMins);
+//     GetEntPropVector(MovingEnt, Prop_Send, "m_vecMaxs", vecMaxs);
+
+//     TR_TraceHull(pos, pos, vecMins, vecMaxs, MASK_SOLID);
+//     TR_TraceHullFilter(pos, pos, vecMins, vecMaxs, MASK_SOLID, Filter_OnlyPlayers);
+    
+//     if(!TR_DidHit())
+//         return true;
+    
+//     return false;
+// }
+
+// public bool Filter_OnlyPlayers(int entity, int contentsMask, any data)
+// {
+//     return (entity > 0) && (entity <= MaxClients);
+// } 
