@@ -2,8 +2,8 @@
 #include <sdktools>
 #include <neotokyo>
 #include <clientprefs>
+#include <nt_menu>
 #pragma semicolon 1
-#pragma newdecls required
 
 #if !defined DEBUG
 	#define DEBUG 0
@@ -31,8 +31,14 @@ Handle g_hFuzzTimers;
 Handle FuzzTimer[3] = { INVALID_HANDLE, ...};
 Handle KillGhostTimer = INVALID_HANDLE;
 
-Handle g_PropPrefCookie = INVALID_HANDLE; // handle to cookie in DB
+Handle g_hPrefCookie = INVALID_HANDLE; // handle to cookie in DB
 bool g_bWantsGhostSFX[NEO_MAX_PLAYERS+1];
+
+// menus
+TopMenuObject g_hTopMainMenu_topmenuobj = INVALID_TOPMENUOBJECT;
+TopMenuObject g_tmo_prefs = INVALID_TOPMENUOBJECT;
+TopMenu g_hTopMenu; // handle to the nt_menu plugin topmenu
+Handle g_hPrefsMenu;
 
 // caching of affected players
 int g_iAffectedAlivePlayers[3][NEO_MAX_PLAYERS+1]; // one array for each team
@@ -103,7 +109,7 @@ public Plugin myinfo =
 public void OnPluginStart()
 {
 	convar_ghost_sounds_enabled = CreateConVar("nt_ghost_sounds_enabled", "1", "Ghost emits sounds when held and captured.", FCVAR_SPONLY, true, 0.0, true, 1.0);
-	convar_ghostexplodes = CreateConVar("nt_ghostexplodes", "1", "Ghost explodes on removal", FCVAR_SPONLY, true, 0.0, true, 1.0);
+	convar_ghostexplodes = CreateConVar("nt_ghostexplodes", "1", "Ghost explodes on capture or timeout.", FCVAR_SPONLY, true, 0.0, true, 1.0);
 	convar_ghostexplosiondamages = CreateConVar("nt_ghostexplosiondamages", "1", "Explosion from ghost damages players", FCVAR_SPONLY, true, 0.0, true, 1.0);
 
 
@@ -115,11 +121,11 @@ public void OnPluginStart()
 	convar_nt_doublecap_version = FindConVar("nt_doublecap_version");
 	convar_nt_ghostcap_version = FindConVar("sm_ntghostcap_version");
 
-	RegConsoleCmd("sm_ghostcapsfx_prefs", Command_Hate_Sounds_Toggle, "Toggle your preference to not hear custom ghost capture sound effect.");
+	RegConsoleCmd("nt_ghostcapsfx_prefs", Command_Hate_Sounds_Toggle, "Toggle your preference to not hear custom ghost capture sound effect.");
 
-	g_PropPrefCookie = FindClientCookie("wants-ghostcapfx");
-	if (g_PropPrefCookie == INVALID_HANDLE)
-		g_PropPrefCookie = RegClientCookie("wants-ghostcapfx", "Asked for no ghost capture sound effects.", CookieAccess_Public);
+	g_hPrefCookie = FindClientCookie("wants-ghostcapfx");
+	if (g_hPrefCookie == INVALID_HANDLE)
+		g_hPrefCookie = RegClientCookie("wants-ghostcapfx", "Asked for no ghost capture sound effects.", CookieAccess_Public);
 
 	if(convar_nt_ghostcap_version == INVALID_HANDLE)
 		ThrowError("[nt_ghostcapsfx] Couldn't find nt_ghostcap plugin. Wrong version? Aborting.");
@@ -132,6 +138,50 @@ public void OnPluginStart()
 	// We need the version of nt_doublecap where the ghost is removed with RemoveEdict(), not AcceptEntityInput() otherwise they will crash the server!
 	if(GetConVarFloat(convar_nt_doublecap_version) < 0.43)
 		ThrowError("[nt_ghostcapsfx] nt_doublecap plugin is outdated (version is %f and should be at least 0.43)! Aborting.", GetConVarFloat(convar_nt_doublecap_version));
+
+
+	// late loading read cookies
+	for (int i = 0; i <= MaxClients; i++)
+	{
+		if (!IsValidClient(i) || !IsClientConnected(i))
+			continue;
+
+		if (!AreClientCookiesCached(i))
+			continue;
+
+		OnClientCookiesCached(i);
+	}
+
+	// prebuild menus
+	g_hPrefsMenu = BuildSubMenu(0);
+
+	// Is our menu already loaded?
+	TopMenu topmenu;
+	if (LibraryExists("nt_menu") && ((topmenu = GetNTTopMenu()) != null))
+	{
+		OnNTMenuReady(topmenu);
+	}
+	else
+	{
+		// library missing, we build our own
+		g_hTopMenu = CreateTopMenu(TopMenuCategory_Handler);
+		BuildTopMenu();
+	}
+}
+
+
+public void OnNTMenuReady(Handle aTopMenu)
+{
+	TopMenu topmenu = TopMenu.FromHandle(aTopMenu);
+
+	// Block us from being called twice
+	if (topmenu == g_hTopMenu)
+		return;
+
+	// Save the Handle
+	g_hTopMenu = topmenu;
+
+	BuildTopMenu();
 }
 
 
@@ -193,6 +243,126 @@ public void OnAllPluginsLoaded()
 //==================================
 
 
+void BuildTopMenu()
+{
+	g_hTopMainMenu_topmenuobj = FindTopMenuCategory(g_hTopMenu, "Various effects"); // get the category provided by nt_menu plugin
+
+	if (g_hTopMainMenu_topmenuobj != INVALID_TOPMENUOBJECT)
+	{
+		// AddToTopMenu(g_hTopMenu, "nt_menu", TopMenuObject_Item, TopCategory_Handler, g_hTopMainMenu_topmenuobj, "nt_menu", 0);
+		g_tmo_prefs = g_hTopMenu.AddItem("sm_ghostcapsfx_prefs", TopMenuCategory_Handler, g_hTopMainMenu_topmenuobj, "sm_ghostcapsfx_prefs");
+		return;
+	}
+
+	// didn't find categories, must be missing nt_menu plugin, so build our own category and attach to it
+	g_hTopMainMenu_topmenuobj = g_hTopMenu.AddCategory("Various effects", TopMenuCategory_Handler);
+
+	g_tmo_prefs = AddToTopMenu(g_hTopMenu, "sm_ghostcapsfx_prefs", TopMenuObject_Item, TopMenuCategory_Handler, g_hTopMainMenu_topmenuobj, "sm_ghostcapsfx_prefs");
+}
+
+
+
+public void TopMenuCategory_Handler (Handle topmenu, TopMenuAction action, TopMenuObject object_id, int param, char[] buffer, int maxlength)
+{
+	if ((action == TopMenuAction_DisplayOption) || (action == TopMenuAction_DisplayTitle))
+	{
+		// GetTopMenuObjName(topmenu, object_id, buffer, maxlength);
+
+		if (object_id == INVALID_TOPMENUOBJECT)
+			Format(buffer, maxlength, "Neotokyo Menu", param);
+		if (object_id == g_tmo_prefs)
+			Format(buffer, maxlength, "%s", "Ghost sound effects", param);
+	}
+	else if (action == TopMenuAction_SelectOption)
+	{
+		if (object_id == g_tmo_prefs)
+			DisplayMenu(g_hPrefsMenu, param, 20);
+	}
+}
+
+
+public Menu BuildSubMenu(int type)
+{
+	Menu menu;
+
+	switch (type)
+	{
+		case 0: // in case we need more later
+		{
+			menu = new Menu(PropsPrefsMenuHandler, MENU_ACTIONS_ALL);
+			menu.SetTitle("Ghost sounds preference:");
+			menu.AddItem("a", "Set ghost sounds preference");
+			menu.ExitButton = true;
+			menu.ExitBackButton = true;
+		}
+	}
+	return menu;
+}
+
+public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int param2)
+{
+	switch(action)
+	{
+		case MenuAction_End:
+		{
+			// CloseHandle(menu);
+			//delete menu; (should we here?)
+		}
+		case MenuAction_Cancel:
+		{
+			if (param2 == MenuCancel_ExitBack && g_hTopMenu != INVALID_HANDLE)
+			{
+				DisplayTopMenu(g_hTopMenu, param1, TopMenuPosition_LastCategory);
+			}
+		}
+		// case MenuAction_Display:
+		// {
+		// 	char title[255];
+		// 	Format(title, sizeof(title), "Hurt sfx preferences:", param1);
+
+		// 	Panel panel = view_as<Panel>(param2);
+		// 	panel.SetTitle(title);
+		// }
+		case MenuAction_Select:
+		{
+			decl String:info[2];
+			GetMenuItem(menu, param2, info, sizeof(info));
+
+			switch (info[0])
+			{
+				case 'a':
+				{
+					ToggleCookiePreference(param1);
+					DisplayMenu(g_hPrefsMenu, param1, 20);
+				}
+				default:
+				{
+					CloseHandle(g_hTopMenu);
+					return 0;
+				}
+			}
+		}
+
+		case MenuAction_DisplayItem:
+		{
+			char info[2];
+			menu.GetItem(param2, info, sizeof(info));
+
+			char display[39];
+
+			if (StrEqual(info, "a")) // toggle item
+			{
+				Format(display, sizeof(display), "Ghost warning sounds are: [%s]", (g_bWantsGhostSFX[param1] ? "enabled" : "disabled" ));
+				return RedrawMenuItem(display);
+			}
+			return 0;
+		}
+	}
+	return 0;
+}
+
+
+
 public void OnClientPutInServer(int client)
 {
 	CreateTimer(50.0, timer_AdvertiseHelp, client);
@@ -248,7 +418,7 @@ void ProcessCookies(int client)
 		return;
 
 	char cookie[2];
-	GetClientCookie(client, g_PropPrefCookie, cookie, sizeof(cookie));
+	GetClientCookie(client, g_hPrefCookie, cookie, sizeof(cookie));
 
 	if (cookie[0] != '\0') // we have a cookie
 	{
@@ -272,8 +442,8 @@ public Action DisplayNotification(Handle timer, int client)
 	{
 		if(g_bWantsGhostSFX[client])
 		{
-			PrintToChat(client, 	"[sm_ghostcapsfx] You can toggle hearing ghost sound effects by typing !sounds_nothx");
-			PrintToConsole(client, 	"\n[sm_ghostcapsfx] You can toggle hearing ghost sound effects by typing sm_sounds_nothx\n");
+			PrintToChat(client, 	"[nt_ghostcapsfx] You can toggle hearing ghost sound effects by typing !sounds_nothx");
+			PrintToConsole(client, 	"\n[nt_ghostcapsfx] You can toggle hearing ghost sound effects by typing sm_sounds_nothx\n");
 		}
 	}
 	return Plugin_Handled;
@@ -287,16 +457,31 @@ public Action Command_Hate_Sounds_Toggle(int client, int args)
 
 	g_bWantsGhostSFX[client] = !g_bWantsGhostSFX[client];
 
-	SetClientCookie(client, g_PropPrefCookie, (g_bWantsGhostSFX[client] ? "1" : "0"));
+	SetClientCookie(client, g_hPrefCookie, (g_bWantsGhostSFX[client] ? "1" : "0"));
 
 	ReplyToCommand(client, "[nt_ghostcapsfx] You have %s sound effects while ghost is held.",
 	g_bWantsGhostSFX[client] ? "opted to hear" : "opted out of hearing");
 
 	UpdateAffectedArrays(client, IsPlayerAlive(client));
-	ShowActivity2(client, "[sm_ghostcapsfx] ", "%N opted %s.", client, g_bWantsGhostSFX[client] ? "back in" : "out" );
-	LogAction(client, -1, "[sm_ghostcapsfx] \"%L\" opted %s.", client, g_bWantsGhostSFX[client] ? "back in" : "out");
+	ShowActivity2(client, "[nt_ghostcapsfx] ", "%N opted %s.", client, g_bWantsGhostSFX[client] ? "back in" : "out" );
+	LogAction(client, -1, "[nt_ghostcapsfx] \"%L\" opted %s.", client, g_bWantsGhostSFX[client] ? "back in" : "out");
 
 	return Plugin_Handled;
+}
+
+
+
+// Toggle bool + cookie
+void ToggleCookiePreference(int client)
+{
+	if (!IsValidClient(client))
+		return;
+
+	#if DEBUG
+	PrintToServer("[nt_ghostcapsfx] DEBUG Pref for %N was %s -> bool toggled.", client, (g_bWantsGhostSFX[client] ? "true" : "false"));
+	#endif
+	g_bWantsGhostSFX[client] = !g_bWantsGhostSFX[client];
+	SetClientCookie(client, g_hPrefCookie, (g_bWantsGhostSFX[client] ? "1" : "0"));
 }
 
 
@@ -388,7 +573,7 @@ void BuildAffectedTeamArray()
 		if (g_iGhostCarrier <= 0) // ghost has not been picked up yet
 			continue;
 
-		if (thisClient == g_iGhostCarrier) // carrier shouldn't hear warning sound anyway 
+		if (thisClient == g_iGhostCarrier) // carrier shouldn't hear warning sound anyway
 			continue;
 
 		int iClientTeam = GetClientTeam(thisClient); // FIXME: cache teams by hooking join_team event?
@@ -475,6 +660,7 @@ public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 
 public Action timer_SignalEndOfRound(Handle timer)
 {
+	
 	g_bEndOfRound = true;
 
 }
@@ -546,10 +732,10 @@ bool UpdateNextSoundOrigin()
 	// if (g_bGhostIsCaptured)
 	// 	return false;
 
-	if (!IsValidEntity(g_iGhost))
+	if (!IsValidEntity(g_iGhost) || g_iGhost == 0)
 	{
 		#if DEBUG
-		PrintToServer("[sm_ghostcapsfx] g_iGhost (%d) entity was not valid! UpdateNextSoundOrigin() returns false!", g_iGhost);
+		PrintToServer("[nt_ghostcapsfx] g_iGhost (%d) entity was not valid! UpdateNextSoundOrigin() returns false!", g_iGhost);
 		#endif
 		return false;
 	}
@@ -560,14 +746,14 @@ bool UpdateNextSoundOrigin()
 	{
 		GetEntPropVector(carrier, Prop_Send, "m_vecOrigin", g_vecOrigin);
 		#if DEBUG
-		PrintToServer("[sm_ghostcapsfx] client must be a player (carrier=%d) at pos: %f %f %f. UpdateNextSoundOrigin()", carrier, g_vecOrigin[0], g_vecOrigin[1], g_vecOrigin[2]);
+		PrintToServer("[nt_ghostcapsfx] client must be a player (carrier=%d) at pos: %f %f %f. UpdateNextSoundOrigin()", carrier, g_vecOrigin[0], g_vecOrigin[1], g_vecOrigin[2]);
 		#endif
 	}
 	else
 	{
 		GetEntPropVector(g_iGhost, Prop_Send, "m_vecOrigin", g_vecOrigin);
 		#if DEBUG
-		PrintToServer("[sm_ghostcapsfx] ghost (%d) must be on the ground (carrier=%d) at pos: %f %f %f. UpdateNextSoundOrigin()", g_iGhost, carrier, g_vecOrigin[0], g_vecOrigin[1], g_vecOrigin[2]);
+		PrintToServer("[nt_ghostcapsfx] ghost (%d) must be on the ground (carrier=%d) at pos: %f %f %f. UpdateNextSoundOrigin()", g_iGhost, carrier, g_vecOrigin[0], g_vecOrigin[1], g_vecOrigin[2]);
 		#endif
 	}
 
@@ -585,7 +771,7 @@ public void OnGhostSpawn(int entity)
 	#if DEBUG
 	PrintToServer("[nt_ghostcapsfx] OnGhostSpawn() returned entity index: %d.", entity);
 	#endif
-	
+
 	g_bGhostIsCaptured = false;
 	g_bGhostIsHeld = false;
 	g_bEndOfRound = false;
@@ -701,7 +887,7 @@ public Action timer_ExplodeGhost(Handle timer, int timernumber) // explode ghost
 	if (timernumber != -1)
 		GhostTimer[timernumber] = INVALID_HANDLE;
 
-	CreateTimer(0.0, timer_ChargingSound, TIMER_FLAG_NO_MAPCHANGE); // charging sound right before explosion
+	CreateTimer(0.2, timer_ChargingSound, TIMER_FLAG_NO_MAPCHANGE); // charging sound right before explosion
 
 	if(KillGhostTimer != INVALID_HANDLE)
 		KillTimer(KillGhostTimer);
@@ -734,7 +920,7 @@ public Action timer_CreateFuzzTimers(Handle timer)
 	FuzzTimer[0] = CreateTimer(1.0, timer_EmmitPickupSound1, 0, TIMER_FLAG_NO_MAPCHANGE);
 	FuzzTimer[1] = CreateTimer(1.5, timer_EmmitPickupSound1, 1, TIMER_FLAG_NO_MAPCHANGE);
 	FuzzTimer[2] = CreateTimer(2.0, timer_EmmitPickupSound1, 2, TIMER_FLAG_NO_MAPCHANGE);
-	
+
 	return Plugin_Continue;
 }
 
@@ -773,8 +959,8 @@ void CreateAnnouncerTimers()
 }
 
 
-// // TODO: use one template function for all sounds? 
-// 	EmitSound(g_, total, sample, entity, channel, 
+// // TODO: use one template function for all sounds?
+// 	EmitSound(g_, total, sample, entity, channel,
 // 		level, flags, volume, pitch, speakerentity,
 // 		origin, dir, updatePos, soundtime);
 
@@ -851,76 +1037,76 @@ public void DoSparkleEffect(int client)
 }
 
 
-public void OnEntityDestroyed(int entity)
-{
-	if(!g_bEndOfRound)
-		return;
+// public void OnEntityDestroyed(int entity)
+// {
+// 	if(!g_bEndOfRound)
+// 		return;
 
-	if(!IsValidEntity(entity) || entity <= MaxClients)
-		return;
+// 	if(!IsValidEntity(entity) || entity <= MaxClients)
+// 		return;
 
-	if(!GetConVarBool(convar_ghostexplodes))
-		return;
+// 	if(!GetConVarBool(convar_ghostexplodes))
+// 		return;
 
-	char classname[50];
-	GetEntityClassname(entity, classname, sizeof(classname));
+// 	char classname[50];
+// 	GetEntityClassname(entity, classname, sizeof(classname));
 
-	#if DEBUG > 0
-	PrintToServer("[sm_ghostcapsfx] \"%s\" destroyed (id: %d)", classname, entity);
-	#endif
+// 	#if DEBUG > 0
+// 	PrintToServer("[nt_ghostcapsfx] \"%s\" destroyed (id: %d)", classname, entity);
+// 	#endif
 
-    if (StrEqual(classname, "weapon_ghost"))
-    {
-		#if DEBUG
-		int carrier = GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity");
-		PrintToServer("[sm_ghostcapsfx] m_hOwnerEntity of \"%s\" (id: %d) entity (%d) was: %d.", classname, g_iGhost, entity, carrier);
-		#endif
-		g_bGhostIsHeld = false;
-		Explode(entity);
-    }
-}
+//     if (StrEqual(classname, "weapon_ghost"))
+//     {
+// 		#if DEBUG
+// 		int carrier = GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity");
+// 		PrintToServer("[nt_ghostcapsfx] m_hOwnerEntity of \"%s\" (id: %d) entity (%d) was: %d.", classname, g_iGhost, entity, carrier);
+// 		#endif
+// 		g_bGhostIsHeld = false;
+// 		Explode(entity);
+
+// 		// avoid checking for destroyed entities during round restart (lots of them get destroyed, too verbose, slows down server)
+// 		g_bEndOfRound = false;
+//     }
+// }
 
 
-void Explode(int entity)
+void Explode(int entity, int carrier)
 {
 	#if DEBUG
-	PrintToServer("[sm_ghostcapsfx] Explode(%d)!", entity);
+	PrintToServer("[nt_ghostcapsfx] Explode(%d)!", entity);
 	#endif
 
-	int carrier = GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity");
-	if(MaxClients >= carrier > 0)
+	if(carrier > 0)
 		entity = carrier;
 
 	#if DEBUG
-	PrintToServer("[sm_ghostcapsfx] carrier is %d.", carrier);
+	PrintToServer("[nt_ghostcapsfx] carrier is %d.", carrier);
 	#endif
 
 	float pos[3];
 	GetEntPropVector(entity, Prop_Send, "m_vecOrigin", pos);
 	#if DEBUG
-	PrintToServer("[sm_ghostcapsfx] pos of %d is %f %f %f.", entity, pos[0], pos[1], pos[2]);
+	PrintToServer("[nt_ghostcapsfx] pos of %d is %f %f %f.", entity, pos[0], pos[1], pos[2]);
 	#endif
 
 	int explosion;
 
 	if(g_bGhostIsCaptured)
 		explosion = CreateEntityByName("env_physexplosion");
+
 	if(!g_bGhostIsCaptured && GetConVarBool(convar_ghostexplosiondamages))
-		explosion = CreateEntityByName("env_explosion");
+		explosion = CreateEntityByName("env_explosion"); // explode and damage
 	else
-		explosion = CreateEntityByName("env_physexplosion");
+		explosion = CreateEntityByName("env_physexplosion"); // FIXME?
 
 	//DispatchKeyValueFloat(explosion, "magnitude", GetConVarFloat(cv_JarateKnockForce));
-	DispatchKeyValue(explosion, "iMagnitude", "400");
+	DispatchKeyValue(explosion, "iMagnitude", "800");
 	//DispatchKeyValue(explosion, "spawnflags", "18428");
 	DispatchKeyValue(explosion, "spawnflags", "0");
 	DispatchKeyValue(explosion, "iRadiusOverride", "256");
 
 	if ( DispatchSpawn(explosion) )
 	{
-		#if DEBUG
-		PrintToServer("[sm_ghostcapsfx] DispatchSpawn(explosion) was true.");
-		#endif
 		EmitExplosionSound(explosion, pos);
 
 		if (IsValidClient(carrier))
@@ -934,9 +1120,6 @@ void Explode(int entity)
 		TE_SetupSparks(pos, dir, 50, 8);
 		TE_SendToAll();
 	}
-
-	// avoid checking for destroyed entities during round restart (lots of them get destroyed, too verbose, slows down server)
-	g_bEndOfRound = false;
 }
 
 
@@ -1029,6 +1212,9 @@ public Action timer_RemoveGhost(Handle timer)
 
 	if(!StrEqual(classname, "weapon_ghost"))
 	{
+		#if DEBUG
+		PrintToServer("[nt_ghostcapsfx] g_iGhost (%d) was not a weapon_ghost! Skipping.", g_iGhost);
+		#endif
 		return Plugin_Handled;
 	}
 
@@ -1043,7 +1229,7 @@ public Action timer_RemoveGhost(Handle timer)
 		#if DEBUG > 0
 		PrintToServer("Timer: removed ghost from carrier %i!", g_iGhostCarrier);
 		#endif
-
+		Explode(g_iGhost, g_iGhostCarrier);
 		RemoveGhost(g_iGhostCarrier);
 	}
 	else
@@ -1053,11 +1239,16 @@ public Action timer_RemoveGhost(Handle timer)
 			#if DEBUG > 0
 			PrintToServer("Timer: removed ghost %i classname %s!", g_iGhost, classname);
 			#endif
-
+			Explode(g_iGhost, -1);
 			RemoveEdict(g_iGhost);
 			// AcceptEntityInput(ghost, "Kill"); // should be safer
 		}
 	}
+
+	g_bGhostIsHeld = false;
+
+	// avoid checking for destroyed entities during round restart (lots of them get destroyed, too verbose, slows down server)
+	g_bEndOfRound = false;
 
 	return Plugin_Handled;
 }
