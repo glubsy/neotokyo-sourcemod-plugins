@@ -33,6 +33,9 @@ bool g_bClientWantsBulletTrails[NEO_MAX_CLIENTS+1];
 bool g_bClientWantsGrenadeTrails[NEO_MAX_CLIENTS+1];
 Handle g_RefreshArrayTimer = INVALID_HANDLE;
 
+//cookies
+Handle g_hBulletPrefCookie, g_hGrenadePrefCookie = INVALID_HANDLE;
+
 // menus
 TopMenuObject g_hTopMainMenu_topmenuobj = INVALID_TOPMENUOBJECT;
 TopMenuObject g_tmo_prefs = INVALID_TOPMENUOBJECT;
@@ -68,8 +71,13 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_highlights_bullets_prefs", ConCommand_ToggleBulletPrefs, "Toggle seeing highlighted bullet trails as a spectator.");
 	RegConsoleCmd("sm_highlights_grenade_prefs", ConCommand_ToggleGrenadePrefs, "Toggle seeing highlighted grenade trails as a spectator.");
 
-	RegClientCookie("wants-bullet-trails", "player opted to see highlighted bullet trails as spectator", CookieAccess_Protected);
-	RegClientCookie("wants-grenade-trails", "player opted to see highlighted grenade trails as spectator", CookieAccess_Protected);
+	g_hBulletPrefCookie = FindClientCookie("wants-bullet-trails");
+	if (g_hBulletPrefCookie == INVALID_HANDLE)
+		g_hBulletPrefCookie = RegClientCookie("wants-bullet-trails", "player opted to see highlighted bullet trails as spectator", CookieAccess_Protected);
+
+	g_hGrenadePrefCookie = FindClientCookie("wants-grenade-trails");
+	if (g_hGrenadePrefCookie == INVALID_HANDLE)
+		g_hGrenadePrefCookie = RegClientCookie("wants-grenade-trails", "player opted to see highlighted grenade trails as spectator", CookieAccess_Protected);
 
 	AutoExecConfig(true, "nt_highlights");
 
@@ -90,6 +98,9 @@ public void OnPluginStart()
 	// late loading read cookies
 	for (new i = MaxClients; i > 0; --i)
 	{
+		if (!IsValidClient(i) || !IsClientConnected(i))
+			continue;
+
 		if (!AreClientCookiesCached(i))
 			continue;
 
@@ -264,12 +275,12 @@ public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int p
 
 			if (StrEqual(info, "a")) // toggle item
 			{
-				Format(display, sizeof(display), "Bullet highlights are active [%s]", (g_bClientWantsBulletTrails[param1] ? 'x' : ' ' ));
+				Format(display, sizeof(display), "Bullet highlights are: [%s]", (g_bClientWantsBulletTrails[param1] ? "enabled" : "disabled" ));
 				return RedrawMenuItem(display);
 			}
 			if (StrEqual(info, "b")) // toggle item
 			{
-				Format(display, sizeof(display), "Grenade highlights are active [%s]", (g_bClientWantsGrenadeTrails[param1] ? 'x' : ' ' ));
+				Format(display, sizeof(display), "Grenade highlights are: [%s]", (g_bClientWantsGrenadeTrails[param1] ? "enabled" : "disabled" ));
 				return RedrawMenuItem(display);
 			}
 			return 0;
@@ -387,7 +398,7 @@ void ReadCookies(int client)
 		return;
 
 	char cookie[2];
-	GetClientCookie(client, FindClientCookie("wants-bullet-trails"), cookie, sizeof(cookie));
+	GetClientCookie(client, g_hBulletPrefCookie, cookie, sizeof(cookie));
 
 	#if DEBUG
 	PrintToServer("[nt_highlights] DEBUG ReadCookies(%N) cookie \"wants-bullet-trails\" is: \"%s\"",
@@ -409,7 +420,7 @@ void ReadCookies(int client)
 
 	cookie[0] = '\0';
 
-	GetClientCookie(client, FindClientCookie("wants-grenade-trails"), cookie, sizeof(cookie));
+	GetClientCookie(client, g_hGrenadePrefCookie, cookie, sizeof(cookie));
 
 	#if DEBUG
 	PrintToServer("[nt_highlights] DEBUG ReadCookies(%N) cookie \"wants-grenade-trails\" is: \"%s\"",
@@ -445,7 +456,7 @@ void ToggleCookiePreference(int client, int type)
 			PrintToServer("[nt_highlights] DEBUG Pref for %N was %s -> bool toggled.", client, (g_bClientWantsBulletTrails[client] ? "true" : "false"));
 			#endif
 			g_bClientWantsBulletTrails[client] = !g_bClientWantsBulletTrails[client];
-			SetClientCookie(client, FindClientCookie("wants-bullet-trails"), (g_bClientWantsBulletTrails[client] ? "1" : "0"));
+			SetClientCookie(client, g_hBulletPrefCookie, (g_bClientWantsBulletTrails[client] ? "1" : "0"));
 			UpdateAffectedClientsArray(client);
 
 		}
@@ -455,7 +466,7 @@ void ToggleCookiePreference(int client, int type)
 			PrintToServer("[nt_highlights] DEBUG Pref for %N was %s -> bool toggled.", client, (g_bClientWantsGrenadeTrails[client] ? "true" : "false"));
 			#endif
 			g_bClientWantsGrenadeTrails[client] = !g_bClientWantsGrenadeTrails[client];
-			SetClientCookie(client, FindClientCookie("wants-grenade-trails"), (g_bClientWantsGrenadeTrails[client] ? "1" : "0"));
+			SetClientCookie(client, g_hGrenadePrefCookie, (g_bClientWantsGrenadeTrails[client] ? "1" : "0"));
 			UpdateAffectedClientsArray(client);
 		}
 	}
@@ -623,6 +634,7 @@ void DrawBeamFromProjectile(int entity, bool jinrai=true)
 
 	TE_Start("BeamFollow");
 	TE_WriteEncodedEnt("m_iEntIndex", entity);
+	// TE_WriteNum("m_nFlags", FBEAM_HALOBEAM|FBEAM_FADEOUT|FBEAM_SHADEOUT|FBEAM_FADEIN|FBEAM_SHADEIN);
 	TE_WriteNum("m_nModelIndex", g_modelLaser);
 	TE_WriteNum("m_nHaloIndex", g_modelHalo);
 	TE_WriteNum("m_nStartFrame", 0);
