@@ -11,28 +11,37 @@
 
 #define SOUND_INSTANCES 31
 #define MAX_ANNOUNCER_OCCURENCES 6
-#define MAX_FUZZ_OCCURENCES 3
 #define NEO_MAX_PLAYERS 32
+#define CARRYING_TEAM 0 // team holding the ghost
+#define OPPOSING_TEAM 1 // team not holding the ghost
+#define ALL_ALIVE 2 // all alive players
 
-int ghost, g_ghostCarrier, g_ghostCarrierTeam;
+int g_iGhost, g_iGhostCarrier, g_iGhostCarrierTeam;
 bool g_bGhostIsCaptured, g_bGhostIsHeld, g_bEndOfRound;
 int g_iTickCount = 95;
-float g_fFuzzRepeatDelay = 0.0;
 float g_vecOrigin[3];
+float g_fFuzzRepeatDelay = 0.0;
 
 Handle convar_ghostexplodes, convar_ghostexplosiondamages, convar_roundtimelimit,
 convar_nt_doublecap_version, convar_nt_ghostcap_version, convar_ghost_sounds_enabled = INVALID_HANDLE;
 
 Handle GhostTimer[SOUND_INSTANCES] = { INVALID_HANDLE, ...};
 Handle AnnouncerTimer[MAX_ANNOUNCER_OCCURENCES] = { INVALID_HANDLE, ...};
-Handle FuzzTimer[MAX_FUZZ_OCCURENCES] = { INVALID_HANDLE, ...};
-Handle g_hAnnouncerTimerStarter[2] = { INVALID_HANDLE, ... };
+Handle g_hFuzzTimers;
+Handle FuzzTimer[3] = { INVALID_HANDLE, ...};
+Handle KillGhostTimer = INVALID_HANDLE;
 
 Handle g_PropPrefCookie = INVALID_HANDLE; // handle to cookie in DB
 bool g_bWantsGhostSFX[NEO_MAX_PLAYERS+1];
-int g_soundsEnabledClient[NEO_MAX_PLAYERS+1];
-int g_numClients;
-Handle KillGhostTimer = INVALID_HANDLE;
+
+// caching of affected players
+int g_iAffectedAlivePlayers[3][NEO_MAX_PLAYERS+1]; // one array for each team
+int g_iNumAffectedAlive[3];
+
+int g_iAffectedDeadPlayers[NEO_MAX_PLAYERS]; // at least one player remains alive, doesn't apply to them + no team distinction
+int g_iNumAffectedDead;
+int g_iLastCarryingTeam;
+
 
 char g_sRadioChatterSoundEffect[][] =
 {
@@ -81,8 +90,10 @@ public Plugin myinfo =
 };
 
 //FIXME: ghost doesn't explode when carried AND not currently primary weapon AND neo_disable_tie is 1 (probably not really important)
-// TODO: explode ghost on clock expiration, not 5 seconds after
+// NOTE: actually it doesn't explode when neo_restart_this 1 is called, as the ghost entity is not properly reported by OnGhostSpawn()
+
 //FIXME: seems that a remnant timer is activated as soon as the ghost gets picked up, or it's just the game delaying the orignal alarm sound.
+
 // TODO: sound/gameplay/ghost_idle_loop.wav while being carried
 // TODO: use sound/player/CPcaptured.wav for ghost capture sound
 // TODO: redo all the emitgamesounds to use an array of affected clients instead (for the haters)
@@ -97,6 +108,7 @@ public void OnPluginStart()
 
 
 	HookEvent("game_round_start", OnRoundStart);
+	HookEvent("player_death", OnPlayerDeath);
 
 	convar_roundtimelimit = FindConVar("neo_round_timelimit");
 
@@ -132,6 +144,14 @@ public void OnConfigsExecuted()
 	for(int snd = 0; snd < sizeof(g_sSoundEffect); snd++)
 	{
 		PrecacheSound(g_sSoundEffect[snd], true);
+	}
+
+	// Late loading, players should head by default
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsValidClient(i) || !IsClientConnected(i) | IsFakeClient(i))
+			continue;
+		ProcessCookies(i);
 	}
 }
 
@@ -216,8 +236,8 @@ public void OnClientDisconnect(int client)
 {
 	if(GetConVarBool(convar_ghost_sounds_enabled))
 	{
-		g_bWantsGhostSFX[client] = false;
-		UpdateSoundEffectOptedOutArray();
+		g_bWantsGhostSFX[client] = true;
+		//UpdateAffectedArrays(-1); // probably only needed in case it generates errors
 	}
 }
 
@@ -240,7 +260,7 @@ void ProcessCookies(int client)
 		g_bWantsGhostSFX[client] = true;
 	}
 
-	UpdateSoundEffectOptedOutArray();
+	UpdateAffectedArrays(client, IsPlayerAlive(client));
 	CreateTimer(60.0, DisplayNotification, client);
 	return;
 }
@@ -272,8 +292,8 @@ public Action Command_Hate_Sounds_Toggle(int client, int args)
 	ReplyToCommand(client, "[nt_ghostcapsfx] You have %s sound effects while ghost is held.",
 	g_bWantsGhostSFX[client] ? "opted to hear" : "opted out of hearing");
 
-	UpdateSoundEffectOptedOutArray();
-	ShowActivity2(client, "[sm_ghostcapsfx] ", "%s opted %s.", client, g_bWantsGhostSFX[client] ? "back in" : "out" );
+	UpdateAffectedArrays(client, IsPlayerAlive(client));
+	ShowActivity2(client, "[sm_ghostcapsfx] ", "%N opted %s.", client, g_bWantsGhostSFX[client] ? "back in" : "out" );
 	LogAction(client, -1, "[sm_ghostcapsfx] \"%L\" opted %s.", client, g_bWantsGhostSFX[client] ? "back in" : "out");
 
 	return Plugin_Handled;
@@ -291,29 +311,105 @@ bool HasAnyoneOptedOut()
 }
 
 
-void UpdateSoundEffectOptedOutArray()
+public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 {
-	g_numClients = 0;
-	int arraySize = sizeof(g_soundsEnabledClient);
+	int victim = GetClientOfUserId(GetEventInt(event, "userid"));
+	UpdateAffectedArrays(victim, true);
+}
 
+
+void UpdateAffectedArrays(int client, bool dead=false)
+{
+	if (dead) // assume player is dead, only upd
+	{
+		UpdateDeadArray(client);
+	}
+	if (client == -1) // blank out arrays, start of round
+	{
+		g_iNumAffectedAlive[CARRYING_TEAM] = 0;
+		g_iNumAffectedAlive[OPPOSING_TEAM] = 0;
+		g_iNumAffectedDead = 0;
+		UpdateDeadArray(-1);
+		BuildAffectedTeamArray();
+		return;
+	}
+
+	// we do need to rebuild everytime
+	BuildAffectedTeamArray();
+
+}
+
+
+void UpdateDeadArray(int client)
+{
+	// Make sure to only call 15 seconds after round start
+	if (client <= 0) // force rebuild for all
+	{
+		for (int thisClient = 1; thisClient <= MaxClients; thisClient++)
+		{
+			if (!IsValidClient(thisClient) || !IsClientConnected(thisClient))
+				continue;
+
+			// check if observing mode
+			if ((IsPlayerObserving(thisClient) || GetClientTeam(thisClient) <= 1) && g_bWantsGhostSFX[thisClient])
+				g_iAffectedDeadPlayers[g_iNumAffectedDead++] = thisClient;
+		}
+		return;
+	}
+
+	// checks here
+	BuildAffectedTeamArray();
+
+	// remove from alive array -> rebuild alive array!
+	g_iAffectedDeadPlayers[g_iNumAffectedDead++] = client;
+}
+
+
+// type is carrying team or not
+void BuildAffectedTeamArray()
+{
+	g_iNumAffectedAlive[CARRYING_TEAM] = 0;
+	g_iNumAffectedAlive[OPPOSING_TEAM] = 0;
+	g_iNumAffectedAlive[ALL_ALIVE] = 0;
 	for (int thisClient = 1; thisClient <= MaxClients; thisClient++)
 	{
-		// Reached the max size of array
-		if (g_numClients == arraySize)
-			break;
+		if (!IsValidClient(thisClient) || !IsClientConnected(thisClient))
+			continue;
 
-		if (IsValidClient(thisClient) && IsClientConnected(thisClient) && g_bWantsGhostSFX[thisClient])
-		{
-			g_soundsEnabledClient[g_numClients++] = thisClient;
-		}
+		if (!IsPlayerAlive(thisClient) || IsPlayerObserving(thisClient))
+			continue;
+
+		if (!g_bWantsGhostSFX[thisClient])
+			continue;
+
+		if(thisClient != g_iGhostCarrier)
+			g_iAffectedAlivePlayers[ALL_ALIVE][g_iNumAffectedAlive[ALL_ALIVE]++] = thisClient;
+
+		if (g_iGhostCarrier <= 0) // ghost has not been picked up yet
+			continue;
+
+		if (thisClient == g_iGhostCarrier) // carrier shouldn't hear warning sound anyway 
+			continue;
+
+		int iClientTeam = GetClientTeam(thisClient); // FIXME: cache teams by hooking join_team event?
+
+		if (iClientTeam == g_iGhostCarrierTeam)
+			g_iAffectedAlivePlayers[CARRYING_TEAM][g_iNumAffectedAlive[CARRYING_TEAM]++] = thisClient;
+		else
+			g_iAffectedAlivePlayers[OPPOSING_TEAM][g_iNumAffectedAlive[OPPOSING_TEAM]++] = thisClient;
 	}
+
 }
 
 
 public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
 	g_bGhostIsHeld = false;
+	g_iGhostCarrier = -1;
 	g_fFuzzRepeatDelay = 0.0;
+	g_iLastCarryingTeam = 0;
+
+	UpdateAffectedArrays(-2); // force rebuild all arrays
 
 	if(!GetConVarBool(convar_ghostexplodes))
 		return;
@@ -340,47 +436,55 @@ public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 	#endif
 
 	int index;
+	float fBaseTime = GetConVarFloat(convar_roundtimelimit) * 60.0;
+	CreateTimer(fBaseTime, timer_SignalEndOfRound, TIMER_FLAG_NO_MAPCHANGE);
 
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 33.0, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE); //30 sec before timeout
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 26.0, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE); //sparks
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 21.0, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 16.0, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 12.5, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 11.0, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 10.8, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 10.0, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 4.8, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE); //sparks inbetween ticks
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 5.3, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 6.5, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 12.0, timer_SoundEffect3, index++, TIMER_FLAG_NO_MAPCHANGE); //beeps countdown
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 11.0, timer_SoundEffect3, index++, TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 10.0, timer_SoundEffect3, index++, TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 9.0, timer_SoundEffect3, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 8.0, timer_SoundEffect3, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 7.0, timer_SoundEffect3, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 6.0, timer_SoundEffect3, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 5.0, timer_SoundEffect3, index++,  TIMER_FLAG_NO_MAPCHANGE); //end beeps countdow
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 4.0, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE); //crazy sparks
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 3.7, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 3.6, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 3.5, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 3.4, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 2.0, timer_SoundEffect2, index++,  TIMER_FLAG_NO_MAPCHANGE); //crazy ticks
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 1.9, timer_SoundEffect2, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 1.8, timer_SoundEffect2, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 1.7, timer_SoundEffect2, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 1.6, timer_SoundEffect2, index++,  TIMER_FLAG_NO_MAPCHANGE);
-	GhostTimer[index] = CreateTimer((GetConVarFloat(convar_roundtimelimit) * 60.0 ) - 1.0 , timer_ExplodeGhost, index, TIMER_FLAG_NO_MAPCHANGE); //+sec after round end
+	GhostTimer[index] = CreateTimer(fBaseTime - 33.0, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE); //30 sec before timeout
+	GhostTimer[index] = CreateTimer(fBaseTime - 26.0, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE); //sparks
+	GhostTimer[index] = CreateTimer(fBaseTime - 21.0, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 16.0, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 12.5, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 11.0, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 10.8, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 10.0, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 4.8, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE); //sparks inbetween ticks
+	GhostTimer[index] = CreateTimer(fBaseTime - 5.3, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 6.5, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 12.0, timer_SoundEffect3, index++, TIMER_FLAG_NO_MAPCHANGE); //beeps countdown
+	GhostTimer[index] = CreateTimer(fBaseTime - 11.0, timer_SoundEffect3, index++, TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 10.0, timer_SoundEffect3, index++, TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 9.0, timer_SoundEffect3, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 8.0, timer_SoundEffect3, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 7.0, timer_SoundEffect3, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 6.0, timer_SoundEffect3, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 5.0, timer_SoundEffect3, index++,  TIMER_FLAG_NO_MAPCHANGE); //end beeps countdow
+	GhostTimer[index] = CreateTimer(fBaseTime - 4.0, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE); //crazy sparks
+	GhostTimer[index] = CreateTimer(fBaseTime - 3.7, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 3.6, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 3.5, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 3.4, timer_SoundEffect1, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 2.0, timer_SoundEffect2, index++,  TIMER_FLAG_NO_MAPCHANGE); //crazy ticks
+	GhostTimer[index] = CreateTimer(fBaseTime - 1.9, timer_SoundEffect2, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 1.8, timer_SoundEffect2, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 1.7, timer_SoundEffect2, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 1.6, timer_SoundEffect2, index++,  TIMER_FLAG_NO_MAPCHANGE);
+	GhostTimer[index] = CreateTimer(fBaseTime - 1.0 , timer_ExplodeGhost, index, TIMER_FLAG_NO_MAPCHANGE); //+sec after round end
 }
 
 
+
+public Action timer_SignalEndOfRound(Handle timer)
+{
+	g_bEndOfRound = true;
+
+}
 
 
 public Action timer_ChargingSound(Handle timer) //charging sound effect
 {
 	g_bEndOfRound = true; //we are allowed to hook entity destructions for a short time during end of round
 
-	if (!SetupSoundEffect())
+	if (!UpdateNextSoundOrigin())
 		return Plugin_Stop;
 
 	EmitSoundToAll(g_sSoundEffect[0], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.4, 100, -1, g_vecOrigin); //charging effect
@@ -391,17 +495,20 @@ public Action timer_ChargingSound(Handle timer) //charging sound effect
 
 public Action timer_SoundEffect1(Handle timer, int timernumber)  //sparks sound effect
 {
+	GhostTimer[timernumber] = INVALID_HANDLE;
 
-
-	if (!SetupSoundEffect())
+	if (!UpdateNextSoundOrigin())
 		return Plugin_Stop;
 
-	if (HasAnyoneOptedOut())
-		EmitSound(g_soundsEnabledClient, g_numClients, g_sSoundEffect[GetRandomInt(3,5)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, GetRandomInt(90, 110), -1, g_vecOrigin); //sparks
-	else
-		EmitSoundToAll(g_sSoundEffect[GetRandomInt(3,5)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, GetRandomInt(90, 110), -1, g_vecOrigin); //sparks
+	// if (HasAnyoneOptedOut())
+	// 	EmitSound(g_iAffectedAlivePlayers, g_iNumAffectedAlive, g_sSoundEffect[GetRandomInt(3,5)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, GetRandomInt(90, 110), -1, g_vecOrigin); //sparks
+	// else
+	// 	EmitSoundToAll(g_sSoundEffect[GetRandomInt(3,5)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, GetRandomInt(90, 110), -1, g_vecOrigin); //sparks
 
-	GhostTimer[timernumber] = INVALID_HANDLE;
+	EmitSound(g_iAffectedAlivePlayers[ALL_ALIVE], g_iNumAffectedAlive[ALL_ALIVE], g_sSoundEffect[GetRandomInt(3,5)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, GetRandomInt(90, 110), -1, g_vecOrigin); //sparks
+	EmitSound(g_iAffectedDeadPlayers, g_iNumAffectedDead, g_sSoundEffect[GetRandomInt(3,5)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, GetRandomInt(90, 110), -1, g_vecOrigin); //sparks
+
+
 	return Plugin_Stop;
 }
 
@@ -410,7 +517,7 @@ public Action timer_SoundEffect2(Handle timer, int timernumber) //grenade tick s
 {
 	GhostTimer[timernumber] = INVALID_HANDLE;
 
-	if (!SetupSoundEffect())
+	if (!UpdateNextSoundOrigin())
 		return Plugin_Stop;
 
 	EmitSoundToAll(g_sSoundEffect[6], SOUND_FROM_WORLD, SNDCHAN_AUTO, 90, SND_NOFLAGS, SNDVOL_NORMAL, g_iTickCount, -1, g_vecOrigin); //ticks
@@ -424,7 +531,7 @@ public Action timer_SoundEffect3(Handle timer, int timernumber) //beeps countdow
 {
 	GhostTimer[timernumber] = INVALID_HANDLE;
 
-	if (!SetupSoundEffect())
+	if (!UpdateNextSoundOrigin())
 		return Plugin_Stop;
 
 	EmitSoundToAll(g_sSoundEffect[10], SOUND_FROM_WORLD, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.5, g_iTickCount, -1, g_vecOrigin); //beeps
@@ -434,33 +541,33 @@ public Action timer_SoundEffect3(Handle timer, int timernumber) //beeps countdow
 }
 
 
-bool SetupSoundEffect()
+bool UpdateNextSoundOrigin()
 {
-	if (g_bGhostIsCaptured)
-		return false;
+	// if (g_bGhostIsCaptured)
+	// 	return false;
 
-	if (!IsValidEntity(ghost))
+	if (!IsValidEntity(g_iGhost))
 	{
 		#if DEBUG
-		PrintToServer("[sm_ghostcapsfx] ghost entity was not valid! index: %d", ghost);
+		PrintToServer("[sm_ghostcapsfx] g_iGhost (%d) entity was not valid! UpdateNextSoundOrigin() returns false!", g_iGhost);
 		#endif
 		return false;
 	}
 
-	int carrier = GetEntPropEnt(ghost, Prop_Data, "m_hOwnerEntity");
+	int carrier = GetEntPropEnt(g_iGhost, Prop_Data, "m_hOwnerEntity");
 
 	if (MaxClients >= carrier > 0)
 	{
 		GetEntPropVector(carrier, Prop_Send, "m_vecOrigin", g_vecOrigin);
 		#if DEBUG
-		PrintToServer("[sm_ghostcapsfx] SetupSoundEffect(), client must be a player at pos: %f %f %f", g_vecOrigin[0], g_vecOrigin[1], g_vecOrigin[2]);
+		PrintToServer("[sm_ghostcapsfx] client must be a player (carrier=%d) at pos: %f %f %f. UpdateNextSoundOrigin()", carrier, g_vecOrigin[0], g_vecOrigin[1], g_vecOrigin[2]);
 		#endif
 	}
 	else
 	{
-		GetEntPropVector(ghost, Prop_Send, "m_vecOrigin", g_vecOrigin);
+		GetEntPropVector(g_iGhost, Prop_Send, "m_vecOrigin", g_vecOrigin);
 		#if DEBUG
-		PrintToServer("[sm_ghostcapsfx] SetupSoundEffect(), ghost must be on the ground at pos: %f %f %f", g_vecOrigin[0], g_vecOrigin[1], g_vecOrigin[2]);
+		PrintToServer("[sm_ghostcapsfx] ghost (%d) must be on the ground (carrier=%d) at pos: %f %f %f. UpdateNextSoundOrigin()", g_iGhost, carrier, g_vecOrigin[0], g_vecOrigin[1], g_vecOrigin[2]);
 		#endif
 	}
 
@@ -471,16 +578,27 @@ bool SetupSoundEffect()
 
 public void OnGhostSpawn(int entity)
 {
-	ghost = entity;
+	if (IsValidEntity(entity))
+	{
+		g_iGhost = entity;
+	}
+	#if DEBUG
+	PrintToServer("[nt_ghostcapsfx] OnGhostSpawn() returned entity index: %d.", entity);
+	#endif
+	
 	g_bGhostIsCaptured = false;
 	g_bGhostIsHeld = false;
+	g_bEndOfRound = false;
 }
 
 
 public void OnGhostCapture(int client)
 {
+	#if DEBUG
+	PrintToServer("[nt_ghostcapsfx] OnGhostCaptured() marking end of round.");
+	#endif
 	g_bGhostIsCaptured = true;
-	g_bGhostIsHeld = false;
+	// g_bGhostIsHeld = false;
 	g_bEndOfRound = true;
 
 	EmmitCapSound(client);
@@ -488,12 +606,14 @@ public void OnGhostCapture(int client)
 	for(int i = 0; i < SOUND_INSTANCES; i++)
 	{
 		//killing all remaining timers for sound effects
-		if(GhostTimer[i] != INVALID_HANDLE)
+		if(GhostTimer[i] != null)
 		{
 			KillTimer(GhostTimer[i]);
-			GhostTimer[i] = INVALID_HANDLE;
+			GhostTimer[i] = null;
 		}
 	}
+
+	CreateTimer(8.0, timer_ExplodeGhost, -1);
 
 	CreateTimer(6.1, timer_EmitRadioChatterSound, client);
 	CreateTimer(6.4, timer_EmitRadioChatterSound, client);
@@ -510,12 +630,11 @@ public void OnGhostCapture(int client)
 	CreateTimer(2.9, timer_DoSparks, client);
 	CreateTimer(6.1, timer_DoSparks, client);
 	CreateTimer(7.0, timer_DoSparks, client);
+	CreateTimer(7.5, timer_DoSparks, client);
 	CreateTimer(8.0, timer_DoSparks, client);
-	CreateTimer(9.0, timer_DoSparks, client);
-	CreateTimer(10.0, timer_DoSparks, client);
-	CreateTimer(11.0, timer_DoSparks, client);
+	CreateTimer(8.5, timer_DoSparks, client);
 
-	CreateTimer(11.0, timer_ExplodeGhost, -1);
+
 
 }
 
@@ -524,50 +643,61 @@ public void OnGhostPickUp(int client)
 {
 	g_bGhostIsHeld = true;
 
-	g_ghostCarrier = client;
+	g_iGhostCarrier = client;
 
-	g_ghostCarrierTeam = GetClientTeam(g_ghostCarrier);
+	g_iGhostCarrierTeam = GetClientTeam(g_iGhostCarrier);
 
+	if (g_iGhostCarrierTeam != g_iLastCarryingTeam) // first pick up will always be true
+	{
+		UpdateAffectedArrays(-1); // affects team but not carrier
+		CreateAnnouncerTimers(); // avoids recalling this if same team picks it up again, only do announcements once
+	}
+	g_iLastCarryingTeam = g_iGhostCarrierTeam;
 
-	g_hAnnouncerTimerStarter[0] = CreateTimer(0.0, timer_CreateAnnouncerTimers, 0, TIMER_FLAG_NO_MAPCHANGE);
-	g_hAnnouncerTimerStarter[1] = CreateTimer(g_fFuzzRepeatDelay + 15.0, timer_CreateFuzzTimers, 1, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+	/* Due to timers being very inaccurate the longer the delay (due to engine ticks not being a constant rate or something)
+	we need short delays whenever possible, otherwise these delays become longer than they should be over time. */
 
+	if (g_hFuzzTimers != INVALID_HANDLE)
+		KillTimer(g_hFuzzTimers);
+
+	g_hFuzzTimers = CreateTimer(g_fFuzzRepeatDelay + 15.0, timer_CreateFuzzTimers, _, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 	g_fFuzzRepeatDelay = 10.0;
 
-	if(g_hAnnouncerTimerStarter[1] != INVALID_HANDLE)
-		TriggerTimer(g_hAnnouncerTimerStarter[1]);
+	CreateTimer(0.1, timer_CreateFuzzTimers, _, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 
 public void OnGhostDrop(int client)
 {
 	g_bGhostIsHeld = false;
-	g_ghostCarrier = -1;
+	g_iGhostCarrier = -1;
 	g_fFuzzRepeatDelay = 0.0;
 
 	for(int i; i < sizeof(AnnouncerTimer); i++)
 	{
-		if(AnnouncerTimer[i] != INVALID_HANDLE)
-		{
-			KillTimer(AnnouncerTimer[i]);
-			AnnouncerTimer[i] = INVALID_HANDLE;
-		}
+		if(AnnouncerTimer[i] == INVALID_HANDLE || i == 2 || i == 3) // don't kill announcer in its track
+			continue;
+		KillTimer(AnnouncerTimer[i]);
+		AnnouncerTimer[i] = INVALID_HANDLE;
 	}
 
-	for(int i; i < sizeof(g_hAnnouncerTimerStarter); i++)
+	for (int i; i < sizeof(FuzzTimer); i++)
 	{
-		if(g_hAnnouncerTimerStarter[i] != INVALID_HANDLE)
-		{
-			KillTimer(g_hAnnouncerTimerStarter[i]);
-			g_hAnnouncerTimerStarter[i] = INVALID_HANDLE;
-		}
+		if (FuzzTimer[i] == INVALID_HANDLE)
+			continue;
+		KillTimer(FuzzTimer[i]);
+		FuzzTimer[i] = INVALID_HANDLE;
 	}
-}
 
+}
 
 
 public Action timer_ExplodeGhost(Handle timer, int timernumber) // explode ghost
 {
+	#if DEBUG
+	PrintToServer("[nt_ghostcapsfx] Fired timer_ExplodeGhost.");
+	#endif
+
 	if (timernumber != -1)
 		GhostTimer[timernumber] = INVALID_HANDLE;
 
@@ -583,14 +713,20 @@ public Action timer_ExplodeGhost(Handle timer, int timernumber) // explode ghost
 
 
 
-public Action timer_CreateFuzzTimers(Handle timer, int timerindex)
+public Action timer_CreateFuzzTimers(Handle timer)
 {
-	for(int i; i < sizeof(FuzzTimer); i++)
+	if (!g_bGhostIsHeld || g_bEndOfRound)
 	{
-		if(FuzzTimer[i] != INVALID_HANDLE)
+		g_hFuzzTimers = INVALID_HANDLE;
+		return Plugin_Stop;
+	}
+
+	for(int i = 0; i < sizeof(FuzzTimer); i++)
+	{
+		if(FuzzTimer[i] != null)
 		{
 			KillTimer(FuzzTimer[i]);
-			FuzzTimer[i] = INVALID_HANDLE;
+			FuzzTimer[i] = null;
 		}
 	}
 
@@ -598,15 +734,27 @@ public Action timer_CreateFuzzTimers(Handle timer, int timerindex)
 	FuzzTimer[0] = CreateTimer(1.0, timer_EmmitPickupSound1, 0, TIMER_FLAG_NO_MAPCHANGE);
 	FuzzTimer[1] = CreateTimer(1.5, timer_EmmitPickupSound1, 1, TIMER_FLAG_NO_MAPCHANGE);
 	FuzzTimer[2] = CreateTimer(2.0, timer_EmmitPickupSound1, 2, TIMER_FLAG_NO_MAPCHANGE);
-
+	
 	return Plugin_Continue;
 }
 
 
-public Action timer_CreateAnnouncerTimers(Handle timer, int timerindex)
+public Action timer_EmmitPickupSound1(Handle timer, int timernumber) //"fuzz" -> short beeps
 {
-	g_hAnnouncerTimerStarter[timerindex] = INVALID_HANDLE;
+	FuzzTimer[timernumber] = null;
 
+	if(!g_bGhostIsHeld || g_bEndOfRound)
+		return Plugin_Stop;
+
+	EmitSound(g_iAffectedAlivePlayers[ALL_ALIVE], g_iNumAffectedAlive[ALL_ALIVE], g_sSoundEffect[11], SOUND_FROM_PLAYER, SNDCHAN_AUTO,
+			60, SND_NOFLAGS, 0.4, 100, -1, NULL_VECTOR, NULL_VECTOR );
+
+	return Plugin_Stop;
+}
+
+
+void CreateAnnouncerTimers()
+{
 	for(int i; i < sizeof(AnnouncerTimer); i++)
 	{
 		if(AnnouncerTimer[i] != INVALID_HANDLE)
@@ -625,36 +773,11 @@ public Action timer_CreateAnnouncerTimers(Handle timer, int timerindex)
 }
 
 
+// // TODO: use one template function for all sounds? 
+// 	EmitSound(g_, total, sample, entity, channel, 
+// 		level, flags, volume, pitch, speakerentity,
+// 		origin, dir, updatePos, soundtime);
 
-public Action timer_EmmitPickupSound1(Handle timer, int timerindex) //fuzz
-{
-	FuzzTimer[timerindex] = INVALID_HANDLE;
-
-	if(!g_bGhostIsHeld || g_bEndOfRound)
-		return Plugin_Stop;
-
-	for(int client = 1; client <= MaxClients; client++)
-	{
-		if(!IsClientInGame(client) || !IsClientConnected(client))
-			continue;
-
-		if(client == g_ghostCarrier)
-			continue;
-
-		if (!g_bWantsGhostSFX[client]) // no wants soundz
-			continue;
-
-		if(!IsPlayerAlive(client))
-		{
-			EmitSoundToClient(client, g_sSoundEffect[11], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 60, SND_NOFLAGS, 0.2, 100, -1, NULL_VECTOR, NULL_VECTOR);
-			continue;
-		}
-
-		EmitSoundToClient(client, g_sSoundEffect[11], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.4, 100, -1, NULL_VECTOR, NULL_VECTOR);
-	}
-
-	return Plugin_Stop;
-}
 
 public Action timer_EmmitPickupSound2(Handle timer, int timerindex) //warning
 {
@@ -663,22 +786,8 @@ public Action timer_EmmitPickupSound2(Handle timer, int timerindex) //warning
 	if(!g_bGhostIsHeld || g_bEndOfRound)
 		return Plugin_Stop;
 
-	for(int client = 1; client <= MaxClients; client++)
-	{
-		if(!IsClientConnected(client) || !IsClientInGame(client) || !IsPlayerAlive(client))
-			continue;
-
-		if (!g_bWantsGhostSFX[client]) // no wants soundz
-			continue;
-
-		if(client == g_ghostCarrier)
-			continue;
-
-		if(GetClientTeam(client) == g_ghostCarrierTeam)
-			continue;
-
-		EmitSoundToClient(client, g_sSoundEffect[12], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
-	}
+	EmitSound(g_iAffectedAlivePlayers[OPPOSING_TEAM], g_iNumAffectedAlive[OPPOSING_TEAM], g_sSoundEffect[12], SOUND_FROM_PLAYER, SNDCHAN_AUTO,
+			60, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR );
 
 	return Plugin_Stop;
 }
@@ -691,20 +800,8 @@ public Action timer_EmmitPickupSound3(Handle timer, int timerindex) //automatic 
 	if(!g_bGhostIsHeld || g_bEndOfRound)
 		return Plugin_Stop;
 
-	for(int client = 1; client <= MaxClients; client++)
-	{
-		if(!IsClientInGame(client) || !IsClientConnected(client) || !IsPlayerAlive(client))
-			continue;
-
-		if (!g_bWantsGhostSFX[client]) // no wants soundz
-			continue;
-
-		if(client == g_ghostCarrier)
-			continue;
-
-		EmitSoundToClient(client, g_sSoundEffect[13], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
-	}
-
+	EmitSound(g_iAffectedAlivePlayers[ALL_ALIVE], g_iNumAffectedAlive[ALL_ALIVE], g_sSoundEffect[13], SOUND_FROM_PLAYER, SNDCHAN_AUTO,
+			60, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
 
 	return Plugin_Stop;
 }
@@ -717,19 +814,8 @@ public Action timer_EmmitPickupSound4(Handle timer, int timerindex) //acquired
 	if(!g_bGhostIsHeld || g_bEndOfRound)
 		return Plugin_Stop;
 
-	for(int client = 1; client <= MaxClients; client++)
-	{
-		if(!IsClientInGame(client) || !IsClientConnected(client) || !IsPlayerAlive(client))
-			continue;
-
-		if (g_bWantsGhostSFX[client]) // no wants soundz
-			continue;
-
-		if(client == g_ghostCarrier)
-			continue;
-
-		EmitSoundToClient(client, g_sSoundEffect[14], SOUND_FROM_PLAYER, SNDCHAN_AUTO, 70, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR);
-	}
+	EmitSound(g_iAffectedAlivePlayers[ALL_ALIVE], g_iNumAffectedAlive[ALL_ALIVE], g_sSoundEffect[14], SOUND_FROM_PLAYER, SNDCHAN_AUTO,
+			60, SND_NOFLAGS, 0.3, 100, -1, NULL_VECTOR, NULL_VECTOR );
 
 	return Plugin_Stop;
 }
@@ -787,7 +873,7 @@ public void OnEntityDestroyed(int entity)
     {
 		#if DEBUG
 		int carrier = GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity");
-		PrintToServer("[sm_ghostcapsfx] m_hOwnerEntity of \"%s\" (id: %d) entity (%d) was: %d.", classname, ghost, entity, carrier);
+		PrintToServer("[sm_ghostcapsfx] m_hOwnerEntity of \"%s\" (id: %d) entity (%d) was: %d.", classname, g_iGhost, entity, carrier);
 		#endif
 		g_bGhostIsHeld = false;
 		Explode(entity);
@@ -878,8 +964,9 @@ public Action timer_EmitRadioChatterSound(Handle timer, int client)
 	if (!HasAnyoneOptedOut())
 		EmitSoundToAll(g_sRadioChatterSoundEffect[GetRandomInt(0, sizeof(g_sRadioChatterSoundEffect) -1)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 130, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
 	else
-		EmitSound(g_soundsEnabledClient, g_numClients, g_sRadioChatterSoundEffect[GetRandomInt(0, sizeof(g_sRadioChatterSoundEffect) -1)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 130, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
-
+	{
+		EmitSound(g_iAffectedAlivePlayers[ALL_ALIVE], g_iNumAffectedAlive[ALL_ALIVE], g_sRadioChatterSoundEffect[GetRandomInt(0, sizeof(g_sRadioChatterSoundEffect) -1)], SOUND_FROM_WORLD, SNDCHAN_AUTO, 130, SND_NOFLAGS, SNDVOL_NORMAL, GetRandomInt(85, 110), -1, vecOrigin, NULL_VECTOR);
+	}
 	return Plugin_Stop;
 }
 
@@ -919,12 +1006,6 @@ public void OnMapEnd()
 			FuzzTimer[i] = INVALID_HANDLE;
 	}
 
-	for(i = 0; i < sizeof(g_hAnnouncerTimerStarter); i++)
-	{
-		if(g_hAnnouncerTimerStarter[i] != INVALID_HANDLE)
-			g_hAnnouncerTimerStarter[i] = INVALID_HANDLE;
-	}
-
 	if(KillGhostTimer != INVALID_HANDLE)
 		KillGhostTimer = INVALID_HANDLE;
 }
@@ -938,42 +1019,42 @@ public Action timer_RemoveGhost(Handle timer)
 {
 	KillGhostTimer = INVALID_HANDLE;
 
-	if(!IsValidEntity(ghost))
+	if(!IsValidEntity(g_iGhost))
 	{
 		return Plugin_Handled;
 	}
 
 	char classname[50];
-	GetEntityClassname(ghost, classname, sizeof(classname));
+	GetEntityClassname(g_iGhost, classname, sizeof(classname));
 
 	if(!StrEqual(classname, "weapon_ghost"))
 	{
 		return Plugin_Handled;
 	}
 
-	g_ghostCarrier = GetEntPropEnt(ghost, Prop_Data, "m_hOwnerEntity");
+	g_iGhostCarrier = GetEntPropEnt(g_iGhost, Prop_Data, "m_hOwnerEntity");
 
 	#if DEBUG > 0
-	PrintToServer("Timer: carrier = %i", g_ghostCarrier);
+	PrintToServer("Timer: carrier = %i", g_iGhostCarrier);
 	#endif
 
-	if((MaxClients >= g_ghostCarrier > 0) && IsPlayerAlive(g_ghostCarrier))
+	if((MaxClients >= g_iGhostCarrier > 0) && IsPlayerAlive(g_iGhostCarrier))
 	{
 		#if DEBUG > 0
-		PrintToServer("Timer: removed ghost from carrier %i!", g_ghostCarrier);
+		PrintToServer("Timer: removed ghost from carrier %i!", g_iGhostCarrier);
 		#endif
 
-		RemoveGhost(g_ghostCarrier);
+		RemoveGhost(g_iGhostCarrier);
 	}
 	else
 	{
-		if(IsValidEdict(ghost))
+		if(IsValidEdict(g_iGhost))
 		{
 			#if DEBUG > 0
-			PrintToServer("Timer: removed ghost %i classname %s!", ghost, classname);
+			PrintToServer("Timer: removed ghost %i classname %s!", g_iGhost, classname);
 			#endif
 
-			RemoveEdict(ghost);
+			RemoveEdict(g_iGhost);
 			// AcceptEntityInput(ghost, "Kill"); // should be safer
 		}
 	}
@@ -985,14 +1066,14 @@ public Action timer_RemoveGhost(Handle timer)
 void RemoveGhost(int client)
 {
 	#if DEBUG > 0
-	PrintToServer("Removing current ghost %i", ghost);
+	PrintToServer("Removing current ghost %i", g_iGhost);
 	#endif
 
 	// Switch to last weapon if player is still alive and has ghost active
 	if(IsValidClient(client) && IsPlayerAlive(client))
 	{
 		int activeweapon = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
-		int ghost_index = EntRefToEntIndex(ghost);
+		int ghost_index = EntRefToEntIndex(g_iGhost);
 
 		if(activeweapon == ghost_index)
 		{
@@ -1007,9 +1088,26 @@ void RemoveGhost(int client)
 	}
 
 	// Delete ghost
-	if(IsValidEdict(ghost))
+	if(IsValidEdict(g_iGhost))
 	{
-		RemoveEdict(ghost);
+		RemoveEdict(g_iGhost);
 		// 	AcceptEntityInput(ghost, "Kill"); // should be safer
 	}
+
+	g_bEndOfRound = false; // stop hooking entity destruction until restart of round
+}
+
+
+bool IsPlayerObserving(int client)
+{
+	int mode = GetEntProp(client, Prop_Send, "m_iObserverMode");
+
+	#if DEBUG
+	// note movetype is most likely 10 too
+	PrintToServer("[nt_ghostcapsfx] %N %s observing: m_iObserverMode %d", client, (mode ? "is" : "is not"), mode);
+	#endif
+
+	if(mode) // 0 means most likely alive
+		return true;
+	return false;
 }
