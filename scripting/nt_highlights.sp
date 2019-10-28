@@ -20,10 +20,11 @@ int green_laser_color[3] = {10, 210, 10};
 int iBulletTrailAlphaAmount = 180;
 float fBulletTrailTTL = 0.1;
 int iProjectileTrailAlphaAmount = 180;
-float fProjectileTrailTTL = 4.0;
+float fProjectileTrailTTL = 5.0;
 int g_modelLaser, g_modelHalo;
 
-Handle CVAR_hurt_trails, CVAR_grenade_trails, CVAR_BulletTrailAlpha, CVAR_GrenadeTrailAlpha, CVAR_BulletTrailTTL, CVAR_GrenadeTrailTTL = INVALID_HANDLE;
+// Handle CVAR_hurt_trails, CVAR_grenade_trails = INVALID_HANDLE;
+Handle CVAR_BulletTrailAlpha, CVAR_GrenadeTrailAlpha, CVAR_BulletTrailTTL, CVAR_GrenadeTrailTTL = INVALID_HANDLE;
 // int m_hThrower, m_hOwnerEntity; // offsets
 int g_iBulletTrailClient[NEO_MAX_CLIENTS+1];
 int g_nBulletTrailClients = 0;
@@ -55,8 +56,8 @@ public Plugin:myinfo =
 
 public void OnPluginStart()
 {
-	CVAR_hurt_trails = CreateConVar("sm_hurt_trails", "1", "Enable (1) or completely disable (0) drawing beams between a hit player and their attacker.", _, true, 0.0, true, 1.0);
-	CVAR_grenade_trails = CreateConVar("sm_grenade_trails", "1", "Enable (1) or completely disable (0) drawing trails on thrown projectiles.", _, true, 0.0, true, 1.0);
+	// CVAR_hurt_trails = CreateConVar("sm_hurt_trails", "1", "Enable (1) or completely disable (0) drawing beams between a hit player and their attacker.", _, true, 0.0, true, 1.0);
+	// CVAR_grenade_trails = CreateConVar("sm_grenade_trails", "1", "Enable (1) or completely disable (0) drawing trails on thrown projectiles.", _, true, 0.0, true, 1.0);
 
 	CVAR_BulletTrailAlpha = CreateConVar("sm_highlights_bullet_alpha", "180.0", "Transparency amount for bullet trails while spectating.", _, true, 30.0, true, 255.0);
 	CVAR_GrenadeTrailAlpha = CreateConVar("sm_highlights_grenade_alpha", "180.0", "Transparency amount for grenade trails while spectating.", _, true, 30.0, true, 255.0);
@@ -308,15 +309,18 @@ public Action ConCommand_MenuPrefs(int client, int args)
 
 void TogglePrefs(int client, int type)
 {
-	if (!type)
+	switch(type)
 	{
-		ToggleCookiePreference(client, type);
-		PrintToChat(client, "[nt_highlights] You have %s see spectator bullet traces.", (g_bClientWantsBulletTrails[client] ? "opted to" : "opted not to"));
-	}
-	if (type == 1)
-	{
-		ToggleCookiePreference(client, type);
-		PrintToChat(client, "[nt_highlights] You have %s see spectator grenade trails.", (g_bClientWantsGrenadeTrails[client] ? "opted to" : "opted not to"));
+		case 0:
+		{
+			ToggleCookiePreference(client, type);
+			PrintToChat(client, "[nt_highlights] You have %s see spectator bullet traces.", (g_bClientWantsBulletTrails[client] ? "opted to" : "opted not to"));
+		}
+		case 1:
+		{
+			ToggleCookiePreference(client, type);
+			PrintToChat(client, "[nt_highlights] You have %s see spectator grenade trails.", (g_bClientWantsGrenadeTrails[client] ? "opted to" : "opted not to"));
+		}
 	}
 }
 
@@ -457,7 +461,7 @@ void ToggleCookiePreference(int client, int type)
 			#endif
 			g_bClientWantsBulletTrails[client] = !g_bClientWantsBulletTrails[client];
 			SetClientCookie(client, g_hBulletPrefCookie, (g_bClientWantsBulletTrails[client] ? "1" : "0"));
-			UpdateAffectedClientsArray(client);
+			UpdateAffectedClientsArray(-1);
 
 		}
 		case 1: // grenade trails
@@ -467,7 +471,7 @@ void ToggleCookiePreference(int client, int type)
 			#endif
 			g_bClientWantsGrenadeTrails[client] = !g_bClientWantsGrenadeTrails[client];
 			SetClientCookie(client, g_hGrenadePrefCookie, (g_bClientWantsGrenadeTrails[client] ? "1" : "0"));
-			UpdateAffectedClientsArray(client);
+			UpdateAffectedClientsArray(-1);
 		}
 	}
 }
@@ -497,9 +501,9 @@ public Action Event_OnPlayerDeath(Event event, const char[] name, bool dontbroad
 		// no need for update
 		return Plugin_Continue;
 
-	// need short delay to read deadflag
+	// need short delay to read deadflag; also fade to black is blocking view anyway
 	if (g_RefreshArrayTimer == INVALID_HANDLE)
-		g_RefreshArrayTimer = CreateTimer(0.5, timer_RefreshAffectedArray, victim, TIMER_FLAG_NO_MAPCHANGE);
+		g_RefreshArrayTimer = CreateTimer(5.0, timer_RefreshAffectedArray, victim, TIMER_FLAG_NO_MAPCHANGE);
 
 	return Plugin_Continue;
 }
@@ -606,17 +610,17 @@ public void SpawnPost_Grenade(int iEnt)
 
 public Action Event_OnPlayerHurt(Event event, const char[] name, bool dontbroadcast)
 {
-	int client = GetClientOfUserId(GetEventInt(event, "userid"));
+	// int client = GetClientOfUserId(GetEventInt(event, "userid"));
 	int attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
 	// int health = GetEventInt(event, "health");
 
-	if (!IsValidClient(client) || !IsValidClient(attacker))
+	if (/*!IsValidClient(client) ||*/ !IsValidClient(attacker))
 		return Plugin_Continue;
 
 	if (GetClientTeam(attacker) == 3)
-		DrawBeamFromClient(client, attacker, false);
+		DrawBeamFromClient(attacker, false);
 	else
-		DrawBeamFromClient(client, attacker, true);
+		DrawBeamFromClient(attacker, true);
 
 	return Plugin_Continue;
 }
@@ -660,7 +664,7 @@ void DrawBeamFromProjectile(int entity, bool jinrai=true)
 }
 
 
-void DrawBeamFromClient(int victim, int attacker, bool green_laser=true)
+void DrawBeamFromClient(int attacker, bool green_laser=true)
 {
 	float origin[3], end[3], angle[3];
 	GetClientEyePosition(attacker, origin);
@@ -670,7 +674,7 @@ void DrawBeamFromClient(int victim, int attacker, bool green_laser=true)
 	// GetClientEyePosition(victim, end); // not precise enough for our end point
 
 
-	#if DEBUG
+	#if DEBUG > 1
 	PrintToServer("[nt_highlights] Drawing beam from {%f %f %f} to {%f %f %f} laser %d halo %d",
 	origin[0], origin[1], origin[2], end[0], end[1], end[2], g_modelLaser, g_modelHalo);
 	#endif
@@ -713,7 +717,7 @@ void DrawBeamFromClient(int victim, int attacker, bool green_laser=true)
 }
 
 
-
+// client -1 means rebuild, otherwise add dead players as they arrive
 void UpdateAffectedClientsArray(int client)
 {
 	if (client <= 0) // rebuild entire array!
@@ -760,7 +764,7 @@ void UpdateAffectedClientsArray(int client)
 			g_iGrenadeTrailClient[f], (g_iBulletTrailClient[f] > 0 ? g_iBulletTrailClient[f] : 0));
 		#endif
 	}
-	else if (client > 1) // client most likely just died
+	else if (client > 1) // should be called by OnPlayerDeath
 	{
 		#if DEBUG
 		PrintToServer("[nt_highlights] UpdateAffectedClientsArray(%d) %N asked to be updated and has deadflag bit %s.",
@@ -814,7 +818,7 @@ bool IsPlayerObserving(int client)
 }
 
 
-#if DEBUG
+#if DEBUG > 2
 // SDKHooks is not reading values at the right offsets and returns garbage values
 public Action OnTraceAttack(int victim, int &attacker, int &inflictor, float &damage, int &damagetype, int &ammotype, int hitbox, int hitgroup)
 {
