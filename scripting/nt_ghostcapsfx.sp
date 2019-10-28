@@ -125,7 +125,7 @@ public void OnPluginStart()
 
 	g_hPrefCookie = FindClientCookie("wants-ghostcapfx");
 	if (g_hPrefCookie == INVALID_HANDLE)
-		g_hPrefCookie = RegClientCookie("wants-ghostcapfx", "Asked for no ghost capture sound effects.", CookieAccess_Public);
+		g_hPrefCookie = RegClientCookie("wants-ghostcapfx", "Asked for no ghost capture sound effects.", CookieAccess_Protected);
 
 	if(convar_nt_ghostcap_version == INVALID_HANDLE)
 		ThrowError("[nt_ghostcapsfx] Couldn't find nt_ghostcap plugin. Wrong version? Aborting.");

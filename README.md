@@ -37,7 +37,7 @@
 
 **nt_highlights**: highlights player_hurt events for spectators by tracing coloured beams matching damage done.
 
-**nt_hurt_sfx**: highlights player_hurt events with sound effects.
+**nt_pain_sfx**: sound effects emitted when a player gets hurt.
 
 Donger model here: https://www.mediafire.com/?6y352ceczvs3oc1
 
