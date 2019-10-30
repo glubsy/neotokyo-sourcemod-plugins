@@ -3209,7 +3209,7 @@ bool WantsDong(int client)
 
 public Action Hide_SetTransmit(int entity, int client)
 {
-	if(entity == g_AttachmentEnt[client])
+	if (entity == g_AttachmentEnt[client])
 		return Plugin_Handled; // hide client's attached prop from himself
 	if (!g_bClientWantsProps[client])
 		return Plugin_Handled; // hide prop from opted out clients

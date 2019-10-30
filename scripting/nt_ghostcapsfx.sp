@@ -706,7 +706,7 @@ public Action timer_SoundEffect2(Handle timer, int timernumber) //grenade tick s
 	if (!UpdateNextSoundOrigin())
 		return Plugin_Stop;
 
-	EmitSoundToAll(g_sSoundEffect[6], SOUND_FROM_WORLD, SNDCHAN_AUTO, 90, SND_NOFLAGS, SNDVOL_NORMAL, g_iTickCount, -1, g_vecOrigin); //ticks
+	EmitSoundToAll(g_sSoundEffect[6], SOUND_FROM_WORLD, SNDCHAN_AUTO, 60, SND_NOFLAGS, SNDVOL_NORMAL, g_iTickCount, -1, g_vecOrigin); //ticks
 	g_iTickCount += 5;
 
 	return Plugin_Stop;
