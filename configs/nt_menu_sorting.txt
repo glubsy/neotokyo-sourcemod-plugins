@@ -1,0 +1,19 @@
+/**
+ * The default sorting is designed to look familiar to Mani's admin menu.
+ * You may re-order items here for your own menu.  Any items not explicitly 
+ * sorted will be sorted by their final translated phrases for each given client.
+ */
+
+"Menu"
+{
+    "Props"
+    {
+        "item" "sm_props_physics"
+        "item" "sm_props_dynamic"
+        "item" "sm_dick"
+        "item" "sm_strapdong"
+        "item" "sm_props_properties"
+        "item" "sm_props_prefs"
+    }
+}
+

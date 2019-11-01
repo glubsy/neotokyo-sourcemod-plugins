@@ -94,7 +94,10 @@ public void OnClientPutInServer(int client)
 
 public Action timer_AdvertiseMenu(Handle timer, int client)
 {
-	if (!client || !IsFakeClient(client) || !IsClientConnected(client))
+	if (!client || !IsClientConnected(client))
+		return Plugin_Stop;
+
+	if (IsFakeClient(client))
 		return Plugin_Stop;
 
 	PrintToChat(client, "Type !menu to change your preferences and access special features.");

@@ -2157,7 +2157,6 @@ public Action UpdateGrabbedObjects(Handle timer)
 {
 	if (!g_baPropIsBeingGrabbed)
 	{
-		KillTimer(timer);
 		g_updTimer = INVALID_HANDLE; // not sure if really needed
 		#if DEBUG
 		PrintToServer("[nt_props] Timer UpdateGrabbedObjects has been stopped!");
@@ -2718,13 +2717,13 @@ public void SpawnAndStrapDongToSelf(int client)
 }
 
 
-public OnMapEnd()
-{
-	if (gTimer != INVALID_HANDLE)
-		KillTimer(gTimer);
-	if (g_updTimer != INVALID_HANDLE)
-		KillTimer(g_updTimer);
-}
+// public OnMapEnd()
+// {
+// 	if (gTimer != INVALID_HANDLE)
+// 		KillTimer(gTimer);
+// 	if (g_updTimer != INVALID_HANDLE)
+// 		KillTimer(g_updTimer);
+// }
 
 
 bool IsPlayerObservingALockedTarget(int client)
