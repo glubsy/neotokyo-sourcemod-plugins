@@ -94,7 +94,7 @@ public void OnClientPutInServer(int client)
 
 public Action timer_AdvertiseMenu(Handle timer, int client)
 {
-	if (!client || !IsClientConnected(client))
+	if (!client || !IsClientConnected(client) || !IsClientInGame(client))
 		return Plugin_Stop;
 
 	if (IsFakeClient(client))

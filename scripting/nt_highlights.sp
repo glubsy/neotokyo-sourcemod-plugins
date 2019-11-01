@@ -18,9 +18,9 @@ String:g_sModelName[][] = {
 int blue_laser_color[3] = {20, 20, 210};
 int green_laser_color[3] = {10, 210, 10};
 int iBulletTrailAlphaAmount = 180;
-float fBulletTrailTTL = 0.1;
+float fBulletTrailTTL = 0.3;
 int iProjectileTrailAlphaAmount = 180;
-float fProjectileTrailTTL = 5.0;
+float fProjectileTrailTTL = 3.0;
 int g_modelLaser, g_modelHalo;
 
 // Handle CVAR_hurt_trails, CVAR_grenade_trails = INVALID_HANDLE;
@@ -62,7 +62,7 @@ public void OnPluginStart()
 	CVAR_BulletTrailAlpha = CreateConVar("sm_highlights_bullet_alpha", "180.0", "Transparency amount for bullet trails while spectating.", _, true, 30.0, true, 255.0);
 	CVAR_GrenadeTrailAlpha = CreateConVar("sm_highlights_grenade_alpha", "180.0", "Transparency amount for grenade trails while spectating.", _, true, 30.0, true, 255.0);
 	CVAR_BulletTrailTTL = CreateConVar("sm_highlights_bullet_ttl", "0.1", "Lifespan of grenade trails.", _, true, 0.1, true, 20.0);
-	CVAR_GrenadeTrailTTL = CreateConVar("sm_highlights_grenade_ttl", "4.0", "Lifespan of grenade trails.", _, true, 0.1, true, 20.0);
+	CVAR_GrenadeTrailTTL = CreateConVar("sm_highlights_grenade_ttl", "3.0", "Lifespan of grenade trails.", _, true, 0.1, true, 20.0);
 	HookConVarChange(CVAR_BulletTrailAlpha, OnConVarChanged);
 	HookConVarChange(CVAR_GrenadeTrailAlpha, OnConVarChanged);
 	HookConVarChange(CVAR_BulletTrailTTL, OnConVarChanged);
@@ -97,9 +97,9 @@ public void OnPluginStart()
 	// 	ThrowError("[nt_highlights] DEBUG offset m_hOwnerEntity was -1");
 
 	// late loading read cookies
-	for (new i = MaxClients; i > 0; --i)
+	for (int i = 1; i <= MaxClients; ++i)
 	{
-		if (!IsValidClient(i) || !IsClientConnected(i))
+		if (!IsValidClient(i) || !IsClientConnected(i) || !IsClientInGame(i))
 			continue;
 
 		if (!AreClientCookiesCached(i))
@@ -387,11 +387,12 @@ public Action timer_AdvertiseHelp(Handle timer, int client)
 }
 
 
-public OnClientDisconnect(int client)
+public void OnClientDisconnect(int client)
 {
 	// might not be needed since we check and set on connect
 	g_bClientWantsBulletTrails[client] = true;
 	g_bClientWantsGrenadeTrails[client] = true;
+	CreateTimer(1.0, timer_RefreshAffectedArray, -1, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 
@@ -529,22 +530,22 @@ public Action Event_OnPlayerSpawn(Event event, const char[] name, bool dontbroad
 
 	// for players spawning after freeze time has already ended
 	if (g_RefreshArrayTimer == INVALID_HANDLE)
-		g_RefreshArrayTimer = CreateTimer(20.0, timer_RefreshAffectedArray, -1, TIMER_FLAG_NO_MAPCHANGE);
+		g_RefreshArrayTimer = CreateTimer(5.0, timer_RefreshAffectedArray, -1, TIMER_FLAG_NO_MAPCHANGE);
 
 	return Plugin_Continue;
 }
 
 
 // FIXME: this one might not be needed, we already call from the first player (re)spawning anyway. REMOVE
-// public Action Event_OnRoundStart(Event event, const char[] name, bool dontbroadcast)
-// {
-// 	#if DEBUG
-// 	PrintToServer("[nt_highlights] OnRoundStart()")
-// 	#endif
+public Action Event_OnRoundStart(Event event, const char[] name, bool dontbroadcast)
+{
+	#if DEBUG
+	PrintToServer("[nt_highlights] OnRoundStart()")
+	#endif
 
-// 	// 15 seconds should be right when freeze time ends
-// 	g_RefreshArrayTimer = CreateTimer(15.0, timer_RefreshAffectedArray, -1, TIMER_FLAG_NO_MAPCHANGE);
-// }
+	// 15 seconds should be right when freeze time ends
+	g_RefreshArrayTimer = CreateTimer(15.0, timer_RefreshAffectedArray, -1, TIMER_FLAG_NO_MAPCHANGE);
+}
 
 
 public Action timer_RefreshAffectedArray(Handle timer, int client)
@@ -555,8 +556,7 @@ public Action timer_RefreshAffectedArray(Handle timer, int client)
 
 	UpdateAffectedClientsArray(client); // should be -1 here, forcing refresh for all arrays
 
-	if (g_RefreshArrayTimer != INVALID_HANDLE)
-		g_RefreshArrayTimer = INVALID_HANDLE;
+	g_RefreshArrayTimer = INVALID_HANDLE;
 	return Plugin_Stop;
 }
 
@@ -576,29 +576,43 @@ public void SpawnPost_Grenade(int iEnt)
 {
 	char sClassname[30];
 	GetEntityClassname(iEnt, sClassname, sizeof(sClassname))
-	int iOwner, iOwnerEntity;
+	int iOwnerEntity;
 	switch (sClassname[0])
 	{
 		case 'g':
 		{
+			#if DEBUG
+			int iOwner;
 			iOwner = GetEntPropEnt(iEnt, Prop_Data, "m_hThrower"); // always -1?
-			iOwnerEntity = GetEntPropEnt(iEnt, Prop_Data, "m_hOwnerEntity");
-			// iOwner = GetEntDataEnt2(iEnt, m_hThrower);
-			// iOwnerEntity = GetEntDataEnt2(iEnt, m_hOwnerEntity);
 			iOwner = iOwner == -1 ? 0 : IsClientInGame(iOwner) ? iOwner : 0;
+			// iOwner = GetEntDataEnt2(iEnt, m_hThrower);
+			#endif
+
+			iOwnerEntity = GetEntPropEnt(iEnt, Prop_Data, "m_hOwnerEntity");
+			// iOwnerEntity = GetEntDataEnt2(iEnt, m_hOwnerEntity);
 			iOwnerEntity = iOwnerEntity == -1 ? 0 : IsClientInGame(iOwnerEntity) ? iOwnerEntity : 0;
+
+			#if DEBUG
 			PrintToServer("[nt_highlights] grenade_projectile created, iOwner %d, iOwnerEntity %d", iOwner, iOwnerEntity);
+			#endif
 		}
 
 		case 's':
 		{
+			#if DEBUG
+			int iOwner;
 			iOwner = GetEntPropEnt(iEnt, Prop_Data, "m_hThrower"); // always -1?
-			iOwnerEntity = GetEntPropEnt(iEnt, Prop_Data, "m_hOwnerEntity");
-			// iOwner = GetEntDataEnt2(iEnt, m_hThrower);
-			// iOwnerEntity = GetEntDataEnt2(iEnt, m_hOwnerEntity);
 			iOwner = iOwner == -1 ? 0 : IsClientInGame(iOwner) ? iOwner : 0;
+			// iOwner = GetEntDataEnt2(iEnt, m_hThrower);
+			#endif
+
+			iOwnerEntity = GetEntPropEnt(iEnt, Prop_Data, "m_hOwnerEntity");
+			// iOwnerEntity = GetEntDataEnt2(iEnt, m_hOwnerEntity);
 			iOwnerEntity = iOwnerEntity == -1 ? 0 : IsClientInGame(iOwnerEntity) ? iOwnerEntity : 0;
+
+			#if DEBUG
 			PrintToServer("[nt_highlights] smokegrenade_projectile created, iOwner %d, iOwnerEntity %d", iOwner, iOwnerEntity);
+			#endif
 		}
 	}
 	if (GetClientTeam(iOwnerEntity) == 3) //NSF
@@ -713,7 +727,6 @@ void DrawBeamFromClient(int attacker, bool green_laser=true)
 	TE_WriteNum("m_nFadeLength", 2);
 
 	TE_Send(g_iBulletTrailClient, g_nBulletTrailClients);
-
 }
 
 
@@ -726,7 +739,7 @@ void UpdateAffectedClientsArray(int client)
 		g_nGrenadeTrailClients = 0;
 		for(int j = 1; j <= MaxClients; j++)
 		{
-			if(!IsValidClient(j) || IsFakeClient(j) || !IsClientConnected(j))
+			if(!IsValidClient(j) || !IsClientInGame(j) || IsFakeClient(j))
 				continue;
 
 			if (!IsPlayerObserving(j) || !(GetEntProp(j, Prop_Send, "m_iHealth") <= 1) || !GetEntProp(j, Prop_Send, "deadflag")) // only draw for specs here
@@ -770,7 +783,7 @@ void UpdateAffectedClientsArray(int client)
 		PrintToServer("[nt_highlights] UpdateAffectedClientsArray(%d) %N asked to be updated and has deadflag bit %s.",
 		client, client, (GetEntProp(client, Prop_Send, "deadflag") ? "set" : "not set"));
 		#endif
-		if(IsPlayerObserving(client) || (GetEntProp(client, Prop_Send, "m_iHealth") <= 1) || GetEntProp(client, Prop_Send, "deadflag")) // only draw for specs here
+		if(GetClientTeam(client) < 2 || IsPlayerObserving(client) || (GetEntProp(client, Prop_Send, "m_iHealth") <= 1) || GetEntProp(client, Prop_Send, "deadflag")) // only draw for specs here
 		{
 			if (g_bClientWantsBulletTrails[client])
 				g_iBulletTrailClient[g_nBulletTrailClients++] = client;

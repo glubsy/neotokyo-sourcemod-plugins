@@ -359,6 +359,7 @@ public OnClientDisconnect(int client)
 {
 	// might not be needed since we check and set on connect
 	g_bClientWantsSFX[client] = false;
+	UpdateAffectedArrayForAlivePlayers(-1);
 }
 
 
@@ -545,7 +546,7 @@ public void UpdateAffectedArrayForAlivePlayers(int updated_client)
 	// WARNING: updated_client can be -1 here!
 	for (int client = 1; client <= MaxClients; client++)
 	{
-		if (!IsValidClient(client) || !IsClientConnected(client))
+		if (!IsValidClient(client) || !IsClientConnected(client) || !IsClientInGame(client))
 		{
 			#if DEBUG > 1
 			PrintToServer("[nt_pain_sfx] client %d is either not valid or not connected", client);
@@ -560,7 +561,8 @@ public void UpdateAffectedArrayForAlivePlayers(int updated_client)
 		if (!IsPlayerReallyAlive(client)) // dead players wouldn't emit any sound
 			continue;
 
-		if (!IsValidClient(updated_client) || !IsClientConnected(updated_client) || (updated_client > 0 && !g_bClientWantsSFX[updated_client]))
+		if (!IsValidClient(updated_client) || !IsClientConnected(updated_client) 
+		|| (updated_client > 0 && !g_bClientWantsSFX[updated_client]))
 		{
 			#if DEBUG
 			PrintToServer("[nt_pain_sfx] A player has to be removed, rebuilding array for %N.", client);

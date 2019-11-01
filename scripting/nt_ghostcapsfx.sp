@@ -31,6 +31,8 @@ Handle g_hFuzzTimers;
 Handle FuzzTimer[3] = { INVALID_HANDLE, ...};
 Handle KillGhostTimer = INVALID_HANDLE;
 
+Handle g_RefreshArrayTimer = INVALID_HANDLE;
+
 Handle g_hPrefCookie = INVALID_HANDLE; // handle to cookie in DB
 bool g_bWantsGhostSFX[NEO_MAX_PLAYERS+1];
 
@@ -115,6 +117,7 @@ public void OnPluginStart()
 
 	HookEvent("game_round_start", OnRoundStart);
 	HookEvent("player_death", OnPlayerDeath);
+	HookEvent("player_spawn", OnPlayerSpawn);
 
 	convar_roundtimelimit = FindConVar("neo_round_timelimit");
 
@@ -371,7 +374,7 @@ public void OnClientPutInServer(int client)
 
 public Action timer_AdvertiseHelp(Handle timer, int client)
 {
-	if (!IsValidClient(client) || !IsClientConnected(client))
+	if (!IsValidClient(client) || !IsClientConnected(client) || !IsClientInGame(client))
 		return Plugin_Stop;
 
 	PrintToChat(client, "[nt_ghostcapsfx] You can disable extra ghost warning sounds with !ghostcapsfx_prefs");
@@ -407,8 +410,35 @@ public void OnClientDisconnect(int client)
 	if(GetConVarBool(convar_ghost_sounds_enabled))
 	{
 		g_bWantsGhostSFX[client] = true;
-		//UpdateAffectedArrays(-1); // probably only needed in case it generates errors
+		UpdateAffectedArrays(-1); // probably only needed in case it generates errors
 	}
+}
+
+
+public Action OnPlayerSpawn(Event event, const char[] name, bool dontbroadcast)
+{
+	int client = GetClientOfUserId(GetEventInt(event, "userid"));
+	if (!IsValidClient(client))
+		return Plugin_Continue;
+
+	#if DEBUG
+	PrintToServer("[nt_ghostcapsfx] OnPlayerSpawn(%d) (%N)", client, client);
+	#endif
+
+	if (GetEntProp(client, Prop_Send, "m_iHealth") <= 1 || GetEntProp(client, Prop_Send, "deadflag"))
+	{
+		#if DEBUG
+		PrintToServer("[nt_ghostcapsfx] client %N spawned but is actually dead!", client);
+		#endif
+		return Plugin_Continue;
+	}
+
+
+	// for players spawning after freeze time has already ended
+	if (g_RefreshArrayTimer == INVALID_HANDLE)
+		g_RefreshArrayTimer = CreateTimer(10.0, timer_UpdateArrays, -1, TIMER_FLAG_NO_MAPCHANGE);
+
+	return Plugin_Continue;
 }
 
 
@@ -430,23 +460,8 @@ void ProcessCookies(int client)
 		g_bWantsGhostSFX[client] = true;
 	}
 
-	UpdateAffectedArrays(client, IsPlayerAlive(client));
-	CreateTimer(60.0, DisplayNotification, client);
+	UpdateAffectedArrays(client, IsPlayerAlive(client)); // FIXME
 	return;
-}
-
-
-public Action DisplayNotification(Handle timer, int client)
-{
-	if(client > 0 && IsClientConnected(client) && IsClientInGame(client))
-	{
-		if(g_bWantsGhostSFX[client])
-		{
-			PrintToChat(client, 	"[nt_ghostcapsfx] You can toggle hearing ghost sound effects by typing !sounds_nothx");
-			PrintToConsole(client, 	"\n[nt_ghostcapsfx] You can toggle hearing ghost sound effects by typing sm_sounds_nothx\n");
-		}
-	}
-	return Plugin_Handled;
 }
 
 
@@ -503,13 +518,43 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 }
 
 
+public Action timer_UpdateArrays(Handle timer, int client)
+{
+	UpdateAffectedArrays(client, !IsPlayerReallyAlive(client));
+	g_RefreshArrayTimer = INVALID_HANDLE;
+	return Plugin_Stop;
+}
+
+
+bool IsPlayerReallyAlive(int client)
+{
+	if (client <= 0)
+		return false;
+
+	#if DEBUG
+	PrintToServer("[nt_ghostcapsfx] Client %N (%d) has %d health.", client, client, GetEntProp(client, Prop_Send, "m_iHealth"));
+	#endif
+
+	// For some reason, 1 health point means dead, but checking deadflag is probably more reliable!
+	if (GetEntProp(client, Prop_Send, "m_iHealth") <= 1 || GetEntProp(client, Prop_Send, "deadflag") || GetEntProp(client, Prop_Send, "m_iObserverMode") > 0)
+	{
+		#if DEBUG
+		PrintToServer("[nt_ghostcapsfx] Determined that %N is not alive right now.", client);
+		#endif
+		return false;
+	}
+
+	return true;
+}
+
+
 void UpdateAffectedArrays(int client, bool dead=false)
 {
 	if (dead) // assume player is dead, only upd
 	{
 		UpdateDeadArray(client);
 	}
-	if (client == -1) // blank out arrays, start of round
+	if (client <= -1) // blank out arrays, start of round
 	{
 		g_iNumAffectedAlive[CARRYING_TEAM] = 0;
 		g_iNumAffectedAlive[OPPOSING_TEAM] = 0;
@@ -521,7 +566,6 @@ void UpdateAffectedArrays(int client, bool dead=false)
 
 	// we do need to rebuild everytime
 	BuildAffectedTeamArray();
-
 }
 
 
@@ -530,9 +574,10 @@ void UpdateDeadArray(int client)
 	// Make sure to only call 15 seconds after round start
 	if (client <= 0) // force rebuild for all
 	{
+		g_iNumAffectedDead = 0;
 		for (int thisClient = 1; thisClient <= MaxClients; thisClient++)
 		{
-			if (!IsValidClient(thisClient) || !IsClientConnected(thisClient))
+			if (!IsValidClient(thisClient) || !IsClientConnected(thisClient) || IsFakeClient(thisClient))
 				continue;
 
 			// check if observing mode
@@ -594,7 +639,8 @@ public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 	g_fFuzzRepeatDelay = 0.0;
 	g_iLastCarryingTeam = 0;
 
-	UpdateAffectedArrays(-2); // force rebuild all arrays
+	if (g_RefreshArrayTimer == INVALID_HANDLE)
+		g_RefreshArrayTimer = CreateTimer(15.0, timer_UpdateArrays, -2, TIMER_FLAG_NO_MAPCHANGE);
 
 	if(!GetConVarBool(convar_ghostexplodes))
 		return;
