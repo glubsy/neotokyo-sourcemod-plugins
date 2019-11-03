@@ -146,7 +146,7 @@ public void OnConfigsExecuted()
 	#if DEBUG > 1
 	for (int client = MaxClients; client > 0; client--)
 	{
-		if (!IsValidClient(client) || !IsClientConnected(client))
+		if (!IsValidClient(client) || !IsClientConnected(client) || !IsClientInGame(client))
 			continue;
 
 		SDKHook(client, SDKHook_FireBulletsPost, OnFireBulletsPost);
@@ -779,6 +779,9 @@ void UpdateAffectedClientsArray(int client)
 	}
 	else if (client > 1) // should be called by OnPlayerDeath
 	{
+		if (!IsClientInGame(client))
+			return;
+
 		#if DEBUG
 		PrintToServer("[nt_highlights] UpdateAffectedClientsArray(%d) %N asked to be updated and has deadflag bit %s.",
 		client, client, (GetEntProp(client, Prop_Send, "deadflag") ? "set" : "not set"));

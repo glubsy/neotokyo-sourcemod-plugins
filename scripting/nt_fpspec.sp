@@ -26,6 +26,8 @@ bool g_bVisionHeld[MAXPLAYERS+1];
 
 float g_fLeanIncrement[MAXPLAYERS+1];
 
+//TODO: check m_hViewEntity (Prop_Data) and m_hZoomOwner, they might be related!
+
 public Plugin myinfo = 
 {
 	name = "NEOTOKYO: first person spectate",

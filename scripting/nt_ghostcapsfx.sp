@@ -409,8 +409,8 @@ public void OnClientDisconnect(int client)
 {
 	if(GetConVarBool(convar_ghost_sounds_enabled))
 	{
-		g_bWantsGhostSFX[client] = true;
-		UpdateAffectedArrays(-1); // probably only needed in case it generates errors
+		g_bWantsGhostSFX[client] = false;
+		CreateTimer(0.2, timer_UpdateArrays, -1, TIMER_FLAG_NO_MAPCHANGE);
 	}
 }
 
@@ -460,7 +460,7 @@ void ProcessCookies(int client)
 		g_bWantsGhostSFX[client] = true;
 	}
 
-	UpdateAffectedArrays(client, IsPlayerAlive(client)); // FIXME
+	UpdateAffectedArrays(client, !IsPlayerReallyAlive(client));
 	return;
 }
 
@@ -477,7 +477,7 @@ public Action Command_Hate_Sounds_Toggle(int client, int args)
 	ReplyToCommand(client, "[nt_ghostcapsfx] You have %s sound effects while ghost is held.",
 	g_bWantsGhostSFX[client] ? "opted to hear" : "opted out of hearing");
 
-	UpdateAffectedArrays(client, IsPlayerAlive(client));
+	UpdateAffectedArrays(client, !IsPlayerReallyAlive(client));
 	ShowActivity2(client, "[nt_ghostcapsfx] ", "%N opted %s.", client, g_bWantsGhostSFX[client] ? "back in" : "out" );
 	LogAction(client, -1, "[nt_ghostcapsfx] \"%L\" opted %s.", client, g_bWantsGhostSFX[client] ? "back in" : "out");
 
@@ -548,9 +548,9 @@ bool IsPlayerReallyAlive(int client)
 }
 
 
-void UpdateAffectedArrays(int client, bool dead=false)
+void UpdateAffectedArrays(int client, bool isDead=false)
 {
-	if (dead) // assume player is dead, only upd
+	if (isDead) // assume player is dead, only upd
 	{
 		UpdateDeadArray(client);
 	}
