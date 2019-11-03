@@ -40,7 +40,8 @@ Handle ghTimerCheckSequence[NEO_MAX_CLIENTS+1] = { INVALID_HANDLE, ...};
 bool gbCanSeeBeam[NEO_MAX_CLIENTS+1];
 bool gbShouldTransmitDot[NEO_MAX_CLIENTS+1]
 bool gbLaserActive[NEO_MAX_CLIENTS+1];
-
+int giActiveWeapon[NEO_MAX_CLIENTS+1];
+bool gbActiveWeaponIsSRS[NEO_MAX_CLIENTS+1];
 
 // each entity has an array of affected clients
 // int g_iLaserBeam[NEO_MAX_CLIENTS+1][NEO_MAX_CLIENTS+1];
@@ -92,7 +93,7 @@ g_sLaserWeaponNames \"%s\" (length: %i) in index %i.", LONGEST_WEP_NAME,
 		}
 	}
 
-	HookEvent("player_spawn", OnPlayerSpawn);
+	// HookEvent("player_spawn", OnPlayerSpawn);
 }
 
 public void OnConfigsExecuted()
@@ -115,7 +116,7 @@ public void OnConfigsExecuted()
 		SDKHook(client, SDKHook_WeaponEquipPost, OnWeaponEquip);
 		SDKHook(client, SDKHook_WeaponDropPost, OnWeaponDrop);
 
-		CreateTimer(5.0, Timer_TestForWeapons, GetClientUserId(client));
+		CreateTimer(5.0, timer_LookForWeaponsToTrack, GetClientUserId(client));
 
 		int weapon = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
 
@@ -213,46 +214,51 @@ public void OnClientDisconnect(int client)
 public void OnClientSpawned_Post(int client)
 {
 	#if DEBUG
-	PrintToServer("[nt_lasersight] OnClientSpawned (%N)", client);
+	PrintToServer("[nt_lasersight] OnClientSpawned_Post (%N)", client);
 	#endif
 
 	if (!IsPlayerReallyAlive(client)) // avoid potential spectator spawns
 		return;
 
-	// need no delay in case player tosses primary weapon
-	CreateTimer(1.0, Timer_TestForWeapons, GetClientUserId(client));
+	// need very little delay in case player tosses primary weapon
+	CreateTimer(0.5, timer_LookForWeaponsToTrack, GetClientUserId(client));
 }
 
 
-public Action OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
-{
-	new client = GetClientOfUserId(GetEventInt(event, "userid"));
+// // Redundant with SDKHook's OnClientSpawned_Post
+// public Action OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
+// {
+// 	new client = GetClientOfUserId(GetEventInt(event, "userid"));
 
-	if (!IsPlayerReallyAlive(client)) // avoid potential spectator spawns
-		return Plugin_Continue;
+// 	#if DEBUG
+// 	PrintToServer("[nt_lasersight] OnPlayerSpawn (%N)", client);
+// 	#endif
 
-	// need no delay in case player tosses primary weapon
-	CreateTimer(1.0, Timer_TestForWeapons, GetClientUserId(client));
-	return Plugin_Continue;
-}
+// 	if (!IsPlayerReallyAlive(client)) // avoid potential spectator spawns
+// 		return Plugin_Continue;
+
+// 	// need no delay in case player tosses primary weapon
+// 	CreateTimer(1.0, timer_LookForWeaponsToTrack, GetClientUserId(client));
+// 	return Plugin_Continue;
+// }
 
 
 
 // This is redundant if we only affect SLOT_PRIMARY weapons anyway, no need to test here REMOVE?
-public Action Timer_TestForWeapons(Handle timer, int userid)
+public Action timer_LookForWeaponsToTrack(Handle timer, int userid)
 {
 	int client = GetClientOfUserId(userid);
 
 	if (!IsValidClient(client) || IsFakeClient(client))
 	{
 		#if DEBUG
-		PrintToServer("[nt_lasersight] Timer_TestForWeapons: %d client was invalid!", client);
+		PrintToServer("[nt_lasersight] timer_LookForWeaponsToTrack: client %d is invalid.", client);
 		#endif
 		return Plugin_Stop;
 	}
 
 	#if DEBUG
-	PrintToServer("[nt_lasersight] TestForWeapons: %N", client);
+	PrintToServer("[nt_lasersight] timer_LookForWeaponsToTrack: %N", client);
 	#endif
 
 	int weapon = GetPlayerWeaponSlot(client, SLOT_PRIMARY);
@@ -260,7 +266,7 @@ public Action Timer_TestForWeapons(Handle timer, int userid)
 	if (!IsValidEdict(weapon))
 	{
 		#if DEBUG
-		PrintToServer("[nt_lasersight] TestForWeapons() !IsValidEdict: %i", weapon);
+		PrintToServer("[nt_lasersight] timer_LookForWeaponsToTrack() !IsValidEdict: %i", weapon);
 		#endif
 		return Plugin_Stop;
 	}
@@ -270,7 +276,7 @@ public Action Timer_TestForWeapons(Handle timer, int userid)
 	if (!GetEdictClassname(weapon, classname, sizeof(classname)))
 	{
 		#if DEBUG
-		PrintToServer("[nt_lasersight] TestForWeapons() !GetEdictClassname: %i", weapon);
+		PrintToServer("[nt_lasersight] timer_LookForWeaponsToTrack() !GetEdictClassname: %i", weapon);
 		#endif
 		return Plugin_Stop;
 	}
@@ -299,6 +305,8 @@ public Action Timer_TestForWeapons(Handle timer, int userid)
 		}
 	}
 
+	CheckForUpdateOnWeapon(client, weapon);
+
 	return Plugin_Stop;
 }
 
@@ -324,10 +332,10 @@ void StoreWeapon(int weapon, int client)
 
 
 // Assumes valid input; make sure you're inputting a valid edict.
-bool IsAttachableWeapon(int weapon)
+bool IsTrackedWeapon(int weapon)
 {
 	#if DEBUG
-	PrintToServer("[nt_lasersight] IsAttachableWeapon: %i", weapon);
+	PrintToServer("[nt_lasersight] IsTrackedWeapon(%i)", weapon);
 	if (weapon == 0)
 	{
 		// This should never happen; only checking in debug.
@@ -342,14 +350,15 @@ bool IsAttachableWeapon(int weapon)
 		if (weapon == iAffectedWeapons[i])
 		{
 			#if DEBUG
-			PrintToServer("[nt_lasersight] Attachable weapon found: %i", i);
+			PrintToServer("[nt_lasersight] tracked weapon %d found at iAffectedWeapons[%i]",
+			weapon, i);
 			#endif
 
 			return true;
 		}
 
 		#if DEBUG > 2
-		PrintToServer("[nt_lasersight] %i not attachable. Compared to iAffectedWeapons[%i] %i",
+		PrintToServer("[nt_lasersight] %i not tracked. Compared to iAffectedWeapons[%i] %i",
 		weapon, i, iAffectedWeapons[i]);
 		#endif
 	}
@@ -546,26 +555,34 @@ public void OnWeaponDrop(int client, int weapon)
 }
 
 
+// Tracks active weapon into arrays
 void CheckForUpdateOnWeapon(int client, int weapon)
 {
 	if(!IsValidEdict(weapon) || !IsValidClient(client))
 		return;
 
-	if (IsAttachableWeapon(weapon))
+	if (IsTrackedWeapon(weapon))
 	{
 		#if METHOD == ATTACH
 		iAttachment[client] = CreateFakeAttachedProp(weapon, client); // FIXME: MISTAKE HERE, DON'T ASSIGN!
 		//DispatchLaser(iAttachment[client], client);
 		#endif
 
-		// g_bEmitsLaser[client] = true;
-		// g_bNeedUpdateLoop = true;
+		giActiveWeapon[client] = weapon;
+
+		if (IsActiveWeaponSRS(weapon))
+		{
+			#if DEBUG
+			PrintToServer("[nt_lasersight] weapon_srs detected for client %N.",
+			client);
+			#endif
+
+			gbActiveWeaponIsSRS[client] = true;
+		}
 		return;
 	}
-
-	// g_bEmitsLaser[client] = false;
-
-	// NeedUpdateLoop();
+	giActiveWeapon[client] = -1;
+	gbActiveWeaponIsSRS[client] = false;
 }
 
 
@@ -811,50 +828,13 @@ public Action Hook_SetTransmitLaserBeam(int entity, int client)
 }
 
 
-bool IsActiveWeaponSRS(int client)
+bool IsActiveWeaponSRS(int weapon)
 {
 	decl String:weaponName[20];
-	GetClientWeapon(client, weaponName, sizeof(weaponName));
-	if (StrEqual(weaponName, "weapon_srs")){
-		#if DEBUG
-		PrintToServer("[nt_lasersight] %N active weapon is weapon_srs.", client);
-		#endif
-		return true;
-	}
-	return false;
-}
-
-
-// these are reload sequences for the world models that we want to look for
-// FIXME: check these only on weapon_switch and weapon_equip
-// FIXME: it might be better to check view models if possible
-int GetIgnoredSequencesForWeapon(int client)
-{
-	decl String:weaponName[LONGEST_WEP_NAME+1];
-	GetClientWeapon(client, weaponName, sizeof(weaponName));
-
-	if (StrEqual(weaponName, "weapon_jitte") ||
-		StrEqual(weaponName, "weapon_jittescoped") ||
-		StrEqual(weaponName, "weapon_m41") ||
-		StrEqual(weaponName, "weapon_m41s") ||
-		StrEqual(weaponName, "weapon_pz"))
-		return 7;
-
-	if (StrEqual(weaponName, "weapon_mpn") ||
-		StrEqual(weaponName, "weapon_srm") ||
-		StrEqual(weaponName, "weapon_srm_s") ||
-		StrEqual(weaponName, "weapon_zr68c") ||
-		StrEqual(weaponName, "weapon_zr68s") ||
-		StrEqual(weaponName, "weapon_zr68l") ||
-		StrEqual(weaponName, "weapon_mx") ||
-		StrEqual(weaponName, "weapon_mx_silenced"))
-		return 8;
-
+	GetEntityClassname(weapon, weaponName, sizeof(weaponName));
 	if (StrEqual(weaponName, "weapon_srs"))
-		return 0;
-
-	// by default ignore all sequences above 0
-	return 0;
+		return true;
+	return false;
 }
 
 
@@ -866,44 +846,76 @@ void ToggleZoomState(int client, int weapon)
 
 public Action OnPlayerRunCmd(int client, int &buttons)
 {
+	#if DEBUG > 2
+	if (IsFakeClient(client))
+		return Plugin_Continue;
+	char classname[30];
+	if (giActiveWeapon[client] > MaxClients){
+		GetEntityClassname(giActiveWeapon[client], classname, sizeof(classname));
+	}
+	else{
+		int weapon = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
+		if (weapon > 0)
+			GetEntityClassname(weapon, classname, sizeof(classname));
+	}
+	PrintToChatAll("Active weapon for %d: %d %s", client, giActiveWeapon[client], classname);
+	#endif // DEBUG
+
+
 	if (!GetConVarBool(CVAR_PluginEnabled) || client == 0)
 		return Plugin_Continue;
 
-	if ((buttons & IN_GRENADE1) == IN_GRENADE1) // ZOOM key pressed
+	if ((buttons & IN_GRENADE1) == IN_GRENADE1) // ZOOM key
 	{
-		OnZoomKeyPressed(client);
+		if (giActiveWeapon[client] > 0)
+			OnZoomKeyPressed(client);
 	}
 
+	if ((buttons & IN_RELOAD) == IN_RELOAD)
+	{
+		if (giActiveWeapon[client] > 0)
+			OnReloadKeyPressed(client);
+	}
 
-	if ((buttons & IN_ATTACK2) == IN_ATTACK2) // Alt Fire mode key pressed
+	if ((buttons & IN_ATTACK) == IN_ATTACK)
+	{
+		#if DEBUG > 1
+		PrintToServer("[nt_lasersight] Key IN_ATTACK pressed.");
+		#endif
+
+		if (giActiveWeapon[client] > 0)
+		{
+			// FIXME if player holds attack, don't kill laser until release of button
+			if (gbActiveWeaponIsSRS[client] && gbInZoomState[client]){
+				gbInZoomState[client] = false;
+				ToggleLaser(client, true);
+				return Plugin_Continue;
+			}
+
+			if (ghTimerCheckSequence[client] == INVALID_HANDLE && gbInZoomState[client])
+			{
+				// check if we're automatically reloading due to empty clip
+				DataPack dp = CreateDataPack();
+				ghTimerCheckSequence[client] = CreateTimer(2.5,
+				timer_CheckSequence, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
+				WritePackCell(dp, client);
+				WritePackCell(dp, giActiveWeapon[client]);
+				WritePackCell(dp, GetIgnoredSequencesForWeapon(client)); // FIXME cache this!
+			}
+		}
+
+	}
+
+	if ((buttons & IN_ATTACK2) == IN_ATTACK2) // Alt Fire mode key (ie. tachi)
 	{
 		#if DEBUG
 		PrintToServer("[nt_lasersight] Key IN_ATTACK2 pressed (alt fire).");
 		#endif
 
-		int weapon = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon"); // FIXME: should be cached
-		if (IsAttachableWeapon(weapon)){
+		if (IsTrackedWeapon(giActiveWeapon[client])){
 			// toggle laser beam here for other than SRS
-			if (!IsActiveWeaponSRS(client))
+			if (!gbActiveWeaponIsSRS[client])
 				ToggleLaserCompletely(client);
-		}
-	}
-
-	if ((buttons & IN_RELOAD) == IN_RELOAD)
-	{
-		OnReloadKeyPressed(client);
-	}
-
-	if ((buttons & IN_ATTACK) == IN_ATTACK)
-	{
-		#if DEBUG > 2
-		PrintToServer("[nt_lasersight] Key IN_ATTACK pressed.");
-		#endif
-
-		//if SRS, toggle laser off after attack, other weapons, keep active (aimed down sight)
-		if (IsActiveWeaponSRS(client)){
-			gbInZoomState[client] = false;
-			ToggleLaser(client, true);
 		}
 	}
 
@@ -938,56 +950,33 @@ void ToggleLaser(int client, bool forceoff=false)
 
 void OnZoomKeyPressed(int client)
 {
-	#if DEBUG > 2
-	PrintToServer("[nt_lasersight] Key IN_GRENADE1 pressed.");
-	#endif
-
-	int weapon = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon"); // FIXME should be cached
-	int ViewModel = GetEntPropEnt(client, Prop_Send, "m_hViewModel");
-
 	#if DEBUG
+	int ViewModel = GetEntPropEnt(client, Prop_Send, "m_hViewModel");
 	PrintToServer("[nt_lasersight] viewmodel index: %d", ViewModel);
-
-	new bAimed = GetEntProp(weapon, Prop_Send, "bAimed");
-	PrintToServer("[nt_lasersight] bAimed: %d", bAimed);
 	#endif
 
-	if (IsAttachableWeapon(weapon))
+	if (giActiveWeapon[client] != -1)
 	{
-		// we have the timer running, so no need to change anything
-		if (gbInZoomState[client] && ghTimerCheckSequence[client] != INVALID_HANDLE){
-			gbInZoomState[client] = false;
-			g_bEmitsLaser[client] = false;
-			return;
-		}
+		#if DEBUG
+		new bAimed = GetEntProp(giActiveWeapon[client], Prop_Send, "bAimed");
+		PrintToServer("[nt_lasersight] bAimed: %d", bAimed);
+		#endif
 
-		if (ghTimerCheckSequence[client] == INVALID_HANDLE)
+		gbInZoomState[client] = !((GetEntProp(giActiveWeapon[client], Prop_Send, "bAimed") || GetEntProp(giActiveWeapon[client], Prop_Data, "m_bInReload")));
+
+		if (gbActiveWeaponIsSRS[client] && (GetEntProp(giActiveWeapon[client], Prop_Data, "m_nSequence", 4) > 0))
 		{
-			gbInZoomState[client] = true;
-			g_bEmitsLaser[client] = true;
-
-			DataPack dp = CreateDataPack();
-
-			ghTimerCheckSequence[client] = CreateTimer(0.1, timer_CheckSequence,
-			dp, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
-
-			WritePackCell(dp, client);
-			WritePackCell(dp, ViewModel);
-			WritePackCell(dp, GetIgnoredSequencesForWeapon(client));
-		}
-		else
-		{
+			// bolt reload between shots
 			return;
 		}
 
 		if (!gbInZoomState[client]){
 			ToggleLaser(client, true);
+			return;
 		}
-		else
-		{
-			g_bEmitsLaser[client] = true;
-			ToggleLaser(client);
-		}
+
+		g_bEmitsLaser[client] = true;
+		ToggleLaser(client);
 	}
 }
 
@@ -995,71 +984,91 @@ void OnZoomKeyPressed(int client)
 void OnReloadKeyPressed(int client)
 {
 	#if DEBUG
-	PrintToServer("[nt_lasersight] Key IN_RELOAD pressed.");
-	SetWeaponAmmo(client, AMMO_PRIMARY, 24);
+	int weapon = GetPlayerWeaponSlot(client, SLOT_PRIMARY);
+	PrintToServer("[nt_lasersight] Key IN_RELOAD pressed for weapon %d", weapon);
+	SetWeaponAmmo(client, GetAmmoType(GetActiveWeapon(client)), 90);
 	#endif
 
 	//check until "m_bInReload" in weapon_srs is released -> TODO in any weapon?
-	if (CheckInReload(client))
+	if (view_as<bool>(GetEntProp(giActiveWeapon[client], Prop_Data, "m_bInReload")))
 		ToggleLaser(client, true);
 }
 
 
-bool CheckInReload(int client)
+// return fire on empty sequences
+// FIXME: check these only on weapon_switch and weapon_equip
+// FIXME: it might be better to check view models?
+int GetIgnoredSequencesForWeapon(int client)
 {
-	int weapon = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon"); // FIXME: should be cached
-	if (GetEntProp(weapon, Prop_Data, "m_bInReload"))
-		return true;
+	decl String:weaponName[LONGEST_WEP_NAME+1];
+	GetClientWeapon(client, weaponName, sizeof(weaponName));
 
-	#if DEBUG
-	PrintToChatAll("[nt_lasersight] weapon %d is in reload!", weapon);
-	#endif
+	if (StrEqual(weaponName, "weapon_jitte") ||
+		StrEqual(weaponName, "weapon_jittescoped") ||
+		StrEqual(weaponName, "weapon_m41") ||
+		StrEqual(weaponName, "weapon_m41s") ||
+		StrEqual(weaponName, "weapon_pz"))
+		return 5;
 
-	return false;
+	if (StrEqual(weaponName, "weapon_mpn") ||
+		StrEqual(weaponName, "weapon_srm") ||
+		StrEqual(weaponName, "weapon_srm_s") ||
+		StrEqual(weaponName, "weapon_zr68c") ||
+		StrEqual(weaponName, "weapon_zr68s") ||
+		StrEqual(weaponName, "weapon_zr68l") ||
+		StrEqual(weaponName, "weapon_mx") ||
+		StrEqual(weaponName, "weapon_mx_silenced"))
+		return 6;
+
+	// by default ignore all sequences above 0
+	return 0;
 }
-
 
 // Tracks sequence to reset zoom state
 public Action timer_CheckSequence(Handle timer, DataPack datapack)
 {
 	ResetPack(datapack);
 	int client = ReadPackCell(datapack);
-	int weapon = ReadPackCell(datapack);
-	int reload_sequence = ReadPackCell(datapack);
+	int weapon = ReadPackCell(datapack); // FIXME weapon might have been dropped by now!
+	// int weapon = GetPlayerWeaponSlot(client, SLOT_PRIMARY);
+	int ignored_sequence = ReadPackCell(datapack);
 
-	PrintCenterTextAll("Client %d zoom is %s", client, (gbInZoomState[client] ? "active" : "inactive"));
-
-	if (!IsValidClient(client) || IsFakeClient(client)){
+	if (!IsValidClient(client)){
 		ghTimerCheckSequence[client] = INVALID_HANDLE;
 		return Plugin_Stop;
 	}
 
-	// int weapon = GetPlayerWeaponSlot(client, SLOT_PRIMARY);
-
-	if (!IsValidEdict(weapon))
-	{
+	if (!IsValidEdict(weapon)){
 		#if DEBUG
-		PrintToServer("!IsValidEdict: %i", weapon);
+		PrintToServer("[nt_lasersight] !IsValidEdict: %i", weapon);
 		#endif
 		ghTimerCheckSequence[client] = INVALID_HANDLE;
 		return Plugin_Stop;
 	}
 
 	// gbInZoomState[client] = GetInReload(weapon);
-	PrintToServer("m_nSequence: %d", GetEntProp(weapon, Prop_Data, "m_nSequence", 4));
+	#if DEBUG
+	PrintToServer("[nt_lasersight] m_nSequence: %d, ammo: %d",
+	GetEntProp(weapon, Prop_Data, "m_nSequence", 4),
+	GetWeaponAmmo(client, GetAmmoType(GetActiveWeapon(client))));
+	#endif
 
-	int iCurrentSequence = GetEntProp(weapon, Prop_Data, "m_nSequence", 4);
-	// For SRS: 3 shooting, 4 fire pressed continuously, 6 reloading, 11 bolt
-	// m_nSequence == 6 is equivalent to m_bInReload == 1, m_nSequence == 0 means stand-by
-	if (reload_sequence > 0)
+
+	if ((GetEntProp(weapon, Prop_Send, "m_iClip1") <= 0) // clip empty
+	&& GetWeaponAmmo(client, GetAmmoType(GetActiveWeapon(client))))  // but we still have ammo left in backpack
 	{
-		if (iCurrentSequence == reload_sequence)
-			gbInZoomState[client] = false;
+		int iCurrentSequence = GetEntProp(weapon, Prop_Data, "m_nSequence", 4);
+		// For SRS: 3 shooting, 4 fire pressed continuously, 6 reloading, 11 bolt
+		// m_nSequence == 6 is equivalent to m_bInReload == 1, m_nSequence == 0 means stand-by
+		if (ignored_sequence > 0)
+		{
+			if (iCurrentSequence != ignored_sequence)
+				gbInZoomState[client] = false;
+		}
+
+		// gbInZoomState[client] = false; // we're probably reloading by now
 	}
-	else{ // ignore everything that is not 0 (for weapon_srs)
-		if (iCurrentSequence > 0)
-			gbInZoomState[client] = false;
-	}
+
 
 	// PrintToServer("m_bInReload: %d", GetEntProp(weapon, Prop_Data, "m_bInReload", 1));
 	// gbInZoomState[client] = !view_as<bool>(GetEntProp(weapon, Prop_Data, "m_bInReload", 1));
@@ -1068,11 +1077,12 @@ public Action timer_CheckSequence(Handle timer, DataPack datapack)
 	{
 		g_bEmitsLaser[client] = false;
 		ToggleLaser(client, true);
-		ghTimerCheckSequence[client] = INVALID_HANDLE;
-		return Plugin_Stop;
 	}
-	return Plugin_Continue;
+
+	ghTimerCheckSequence[client] = INVALID_HANDLE;
+	return Plugin_Stop;
 }
+
 
 
 // for regular weapons, prevent automatic laser creation on aim down sight
