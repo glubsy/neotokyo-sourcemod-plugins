@@ -706,7 +706,7 @@ public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 
 public Action timer_SignalEndOfRound(Handle timer)
 {
-	
+
 	g_bEndOfRound = true;
 
 }
@@ -889,10 +889,9 @@ public void OnGhostPickUp(int client)
 	/* Due to timers being very inaccurate the longer the delay (due to engine ticks not being a constant rate or something)
 	we need short delays whenever possible, otherwise these delays become longer than they should be over time. */
 
-	if (g_hFuzzTimers != INVALID_HANDLE)
-		KillTimer(g_hFuzzTimers);
+	if (g_hFuzzTimers == INVALID_HANDLE)
+		g_hFuzzTimers = CreateTimer(g_fFuzzRepeatDelay + 15.0, timer_CreateFuzzTimers, _, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 
-	g_hFuzzTimers = CreateTimer(g_fFuzzRepeatDelay + 15.0, timer_CreateFuzzTimers, _, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 	g_fFuzzRepeatDelay = 10.0;
 
 	CreateTimer(0.1, timer_CreateFuzzTimers, _, TIMER_FLAG_NO_MAPCHANGE);
