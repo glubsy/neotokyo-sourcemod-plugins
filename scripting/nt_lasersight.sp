@@ -30,22 +30,34 @@ new const String:g_sLaserWeaponNames[][] = {
 	"weapon_zr68l",
 	"weapon_srs" }; // NOTE: the 2 last items must be actual sniper rifles!
 #define LONGEST_WEP_NAME 18
-int iAffectedWeapons[NEO_MAX_CLIENTS + 1]; // only primary weapons currently
+int iAffectedWeapons[NEO_MAX_CLIENTS + 1] = {-1, ...}; // only primary weapons currently
 int iAffectedWeapons_Head = 0;
 
 bool g_bNeedUpdateLoop;
 bool g_bEmitsLaser[NEO_MAX_CLIENTS+1];
 bool gbInZoomState[NEO_MAX_CLIENTS+1]; // laser can be displayed
 Handle ghTimerCheckSequence[NEO_MAX_CLIENTS+1] = { INVALID_HANDLE, ...};
+Handle ghTimerCheckAimed[NEO_MAX_CLIENTS+1] = { INVALID_HANDLE, ...};
 int giHideOwnBeam[NEO_MAX_CLIENTS+1];
-bool gbShouldTransmitDot[NEO_MAX_CLIENTS+1]
 bool gbLaserActive[NEO_MAX_CLIENTS+1];
 int giActiveWeapon[NEO_MAX_CLIENTS+1];
 bool gbActiveWeaponIsSRS[NEO_MAX_CLIENTS+1];
 bool gbFreezeTime[NEO_MAX_CLIENTS+1];
 bool gbIsRecon[NEO_MAX_CLIENTS+1];
-bool gbVisionKeyHeld[NEO_MAX_CLIENTS+1];
+bool gbCanSprint[NEO_MAX_CLIENTS+1];
+
+enum HeldKeys {
+	KEY_VISION,
+	KEY_ALTFIRE,
+	KEY_SPRINT,
+	KEY_ZOOM,
+	KEY_RELOAD,
+	KEY_ATTACK
+}
+
+bool gbHeldKeys[NEO_MAX_CLIENTS+1][HeldKeys];
 bool gbVisionActive[NEO_MAX_CLIENTS+1];
+bool gbIsObserver[NEO_MAX_CLIENTS+1];
 
 //OLD: each entity has an array of affected clients
 int giLaserBeam[NEO_MAX_CLIENTS+1]; // per weapon (not client)
@@ -61,22 +73,15 @@ public Plugin:myinfo =
 	url = "https://github.com/glubsy"
 };
 
-
-// OBJECTIVE: laser beam can only be seen as spectators, or through night vision (thicker & more visible if possible)
-// but not through motion nor thermal vsion (don't send to of those classes when vision active)
-// laser dot visible also only with bare eyes and night vision
-// laser beams are always visible to spectators
-
 // TODO: use return GetEntProp(weapon, Prop_Data, "m_iState") to check if weapon is being carried by a player (see smlib/weapons.inc)
 // TODO: make checking for in_zoom state a forward (for other plugins to use)?
 // TODO: Attach a prop to the muzzle of every srs, then raytrace a laser straight in front when tossed in the world
 // TODO: setup two beams, a normal one for spectators, a thicker one for night vision.
+// TODO: don't show laser dot to emitter because lag makes it looks distracting and ugly
 
-#define ATTACH 1
-#define CROTCH 2
-#define METHOD ATTACH
-// Method 0: teleport entity and get start of beam from it
-// Method 1: no need for (parented) invisible prop here, just trace a ray from a fixed point in front of player
+#define TEMP_ENT 1 // use TE every game frame, instead of actual env_beam
+#define METHOD 0
+
 
 public void OnPluginStart()
 {
@@ -163,6 +168,8 @@ public void OnEntityDestroyed(int entity)
 public void OnClientPutInServer(int client)
 {
 	g_bEmitsLaser[client] = false;
+	giHideOwnBeam[client] = -1;
+	gbIsObserver[client] = true;
 
 	SDKHook(client, SDKHook_SpawnPost, OnClientSpawned_Post);
 	SDKHook(client, SDKHook_WeaponSwitchPost, OnWeaponSwitch_Post);
@@ -186,8 +193,15 @@ public void OnClientDisconnect(int client)
 public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 {
 	int victim = GetClientOfUserId(GetEventInt(event, "userid"));
+
+	gbIsObserver[victim] = true;
+	gbVisionActive[victim] = true; //hack to enable showing beams
+
 	if (g_bEmitsLaser[victim])
-		ToggleLaser(victim, true);
+	{
+		g_bEmitsLaser[victim] = false;
+		ToggleLaser(victim);
+	}
 }
 
 
@@ -216,6 +230,9 @@ public Action timer_FreezeTimeOff(Handle timer, int client)
 	if (client > 0)
 	{
 		gbFreezeTime[client] = false;
+		#if DEBUG
+		PrintToServer("[nt_lasersight] Freezetime turned off for %N", client);
+		#endif
 
 		// reset our active weapon in case it was overwritten during respawn
 		UpdateActiveWeapon(client, GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon"));
@@ -225,19 +242,47 @@ public Action timer_FreezeTimeOff(Handle timer, int client)
 }
 
 
+// WARNING: this is called right after OnClientPutInServer for some reason!
+// Perhaps a workaround would be to use player_spawn event if that would make a difference?
 public void OnClientSpawned_Post(int client)
 {
 	#if DEBUG
 	PrintToServer("[nt_lasersight] OnClientSpawned_Post (%N)", client);
 	#endif
 
-	if (!IsPlayerReallyAlive(client)) // avoid potential spectator spawns
+	// avoid hooking first connection "spawn"
+	if (GetClientTeam(client) < 2)
+	{
+		#if DEBUG
+		PrintToServer("[nt_lasersight] OnClientSpawned_Post (%N) team is %d. Ignoring.",
+		client, GetClientTeam(client));
+		#endif
+		gbIsObserver[client] = true;
+		gbVisionActive[client] = true;
 		return;
+	}
+
+	// avoid hooking spectator spawns
+	if (IsPlayerObserving(client))
+	{
+		#if DEBUG
+		PrintToServer("[nt_lasersight] OnClientSpawned ignored because %N (%d) is a spectator.",
+		client, client);
+		#endif
+		gbIsObserver[client] = true;
+		gbVisionActive[client] = true;
+		return;
+	}
 
 	// stop checking for primary wpn after this delay
 	CreateTimer(0.5, timer_FreezeTimeOff, client, TIMER_FLAG_NO_MAPCHANGE);
 
-	gbIsRecon[client] = GetEntProp(client, Prop_Send, "m_iClassType") == 1 ? true : false ;
+	int iClass = GetEntProp(client, Prop_Send, "m_iClassType");
+	gbIsRecon[client] = iClass == 1 ? true : false;
+	gbCanSprint[client] = iClass == 3 ? false : true;
+	gbIsObserver[client] = false;
+	gbVisionActive[client] = false;
+	gbLaserActive[client] = true;
 }
 
 
@@ -272,7 +317,7 @@ void CreateLaserEntities(int client)
 // 	PrintToServer("[nt_lasersight] OnPlayerSpawn (%N)", client);
 // 	#endif
 
-// 	if (!IsPlayerReallyAlive(client)) // avoid potential spectator spawns
+// 	if (!IsPlayerObserving(client)) // avoid potential spectator spawns
 // 		return Plugin_Continue;
 
 // 	// need no delay in case player tosses primary weapon
@@ -421,11 +466,18 @@ public void OnWeaponSwitch_Post(int client, int weapon)
 	#endif
 
 	if (gbFreezeTime[client])
+	{
+		#if DEBUG
+		PrintToServer("[nt_lasersight] OnWeaponSwitch_Post ignored because freezetime for %N (%d)",
+		client, client);
+		#endif
 		return;
+	}
 
 	if (g_bEmitsLaser[client])
 	{
-		ToggleLaser(client, true);
+		g_bEmitsLaser[client] = false;
+		ToggleLaser(client);
 	}
 	UpdateActiveWeapon(client, weapon);
 }
@@ -506,15 +558,9 @@ void CreateFakeAttachedProp(int weapon, int client)
 
 	DispatchSpawn(giAttachment[weapon]);
 
-	float VecOrigin[3];
-	GetClientEyePosition(client, VecOrigin);
-
-	#if METHOD == ATTACH
 	MakeParent(giAttachment[weapon], iAffectedWeapons[weapon]);
 	CreateTimer(0.1, timer_SetAttachment, giAttachment[weapon]);
-	#endif
 
-	// TeleportEntity(giAttachment[weapon], VecOrigin, NULL_VECTOR, NULL_VECTOR);
 	TeleportEntity(giAttachment[weapon], NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
 }
 
@@ -549,8 +595,6 @@ void CreateLaserDot(int weapon)
 	if (giLaserDot[weapon] <= 0) // we have not already created a laser dot
 	{
 		giLaserDot[weapon] = CreateLaserDotEnt(weapon);
-		// gbShouldTransmitDot[client] = false;
-		// SDKHook(giLaserDot[weapon], SDKHook_SetTransmit, Hook_SetTransmitLaserDot);
 	}
 }
 
@@ -560,26 +604,24 @@ void DestroyLaserDot(int client)
 {
 	if (giLaserDot[giActiveWeapon[client]] > 0 && IsValidEntity(giLaserDot[giActiveWeapon[client]]))
 	{
-		// SDKUnhook(giLaserDot[client], SDKHook_SetTransmit, Hook_SetTransmitLaserDot)
 		AcceptEntityInput(giLaserDot[giActiveWeapon[client]], "kill");
-		giLaserDot[giActiveWeapon[client] = -1;
+		giLaserDot[giActiveWeapon[client]] = -1;
 	}
 }
 
 
-void ToggleLaserDot(int client)
+void ToggleLaserDot(int client, bool activate)
 {
-	if (giLaserDot[giActiveWeapon[client]] < 0
-	|| !IsValidEntity(giLaserDot[giActiveWeapon[client]]))
+	if (giLaserDot[giActiveWeapon[client]] < 0 || !IsValidEntity(giLaserDot[giActiveWeapon[client]]))
 		return;
 
 	#if DEBUG
 	PrintToServer("[nt_lasersight] %s laser dot for %N.",
-	g_bEmitsLaser[client] ? "Showing" : "Hiding", client);
+	activate ? "Showing" : "Hiding", client);
 	#endif
 
 	AcceptEntityInput(giLaserDot[giActiveWeapon[client]],
-	g_bEmitsLaser[client] ? "ShowSprite" : "HideSprite");
+	activate ? "ShowSprite" : "HideSprite");
 }
 
 
@@ -640,15 +682,20 @@ void CreateLaserBeam(int weapon)
 
 	giLaserBeam[weapon]	= CreateLaserBeamEnt(weapon);
 
+	#if !DEBUG
 	SDKHook(giLaserBeam[weapon], SDKHook_SetTransmit, Hook_SetTransmitLaserBeam);
+	#endif
 }
 
-void ToggleLaserBeam(int client)
+void ToggleLaserBeam(int client, bool activate)
 {
-	AcceptEntityInput(giLaserBeam[giActiveWeapon[client]], g_bEmitsLaser[client] ? "TurnOn" : "TurnOff");
+	AcceptEntityInput(giLaserBeam[giActiveWeapon[client]],
+	activate ? "TurnOn" : "TurnOff");
+
 	#if DEBUG
-	PrintToServer("[nt_lasersight] %s laser beam %d for %N",
-	g_bEmitsLaser[client] ? "Turned On" : "Turned Off", giLaserBeam[giActiveWeapon[client]], client);
+	PrintToServer("[nt_lasersight] laser beam %d for %N should be %s.",
+	giLaserBeam[giActiveWeapon[client]], client,
+	g_bEmitsLaser[client] ? "Turned On" : "Turned Off");
 	#endif
 }
 
@@ -730,16 +777,18 @@ int CreateLaserBeamEnt(int weapon)
 
 public void OnWeaponDrop(int client, int weapon)
 {
-	if(!IsValidEdict(weapon) || !IsValidClient(client))
+	if(!IsValidEdict(weapon))
 		return;
 
 	if (giActiveWeapon[client] > -1)
 	{
-		ToggleLaserDot(client);
-		ToggleLaser(client);
+		g_bEmitsLaser[client] = false;
+		gbInZoomState[client] = false;
+		ToggleLaserDot(client, false);
+		ToggleLaserBeam(client, false);
 	}
 
-	g_bEmitsLaser[client] = false;
+
 	NeedUpdateLoop();
 }
 
@@ -778,90 +827,52 @@ public OnGameFrame()
 	{
 		for (int client = 1; client <= MaxClients; ++client)
 		{
-			if(!g_bEmitsLaser[client] || !IsValidClient(client))
+			if(!IsClientInGame(client) || !g_bEmitsLaser[client])
 				continue;
 
-			float vecEnd[3], vecDir[3], vecVel[3];
+			float vecEnd[3];
 			GetEndPositionFromClient(client, vecEnd);
 
 			// Update Laser dot sprite position here
 			if (IsValidEntity(giLaserDot[giActiveWeapon[client]])){
 
 				// attempts to smooth out position updates by adding velocity?
+				float vecDir[3], vecVel[3];
+
+				// get previous position and apply velocity from new position difference
 				GetEntPropVector(giLaserDot[giActiveWeapon[client]], Prop_Send, "m_vecOrigin", vecDir);
 				SubtractVectors(vecEnd, vecDir, vecVel);
-				ScaleVector(vecVel, 100.0);
+				ScaleVector(vecVel, 1000.0);
 
 				TeleportEntity(giLaserDot[giActiveWeapon[client]], vecEnd, NULL_VECTOR, vecVel);
 			}
 
+
+			#if METHOD TEMP_ENT // not used anymore
+
 			float vecStart[3];
+			int startEnt, endEnt;
 			GetBeamPositions(client, vecStart, vecEnd);
 
-			#if METHOD == CROTCH
-			int startEnt, endEnt;
-			if (IsValidEntity(giAttachment[giActiveWeapon[client]])) // FiXME! will break if -1 (old logic)
+
+			if (IsValidEntity(giAttachment[giActiveWeapon[client]])) // FiXME old logic
 			{
 				vecStart = NULL_VECTOR;
 				startEnt = giAttachment[giActiveWeapon[client]];
 			}
-			if (IsValidEntity(giLaserDot[giActiveWeapon[client]])) // FiXME! will break
+			if (IsValidEntity(giLaserDot[giActiveWeapon[client]])) // FiXME will break
 			{
 				vecEnd = NULL_VECTOR;
 				endEnt = giLaserDot[giActiveWeapon[client]];
 			}
 
 			Create_TE_Beam(client, vecStart, vecEnd, startEnt, endEnt);
-			#endif // METHOD <= ATTACH
+			#endif // METHOD TEMP_ENT
 		}
 	}
 }
 
-
-void GetBeamPositions(int client, float[3] vecStart, float[3] vecEnd)
-{
-	GetClientEyePosition(client, vecStart);
-	vecStart[2] -= 28.0; 		// roughly starting from "center of mass"
-
-	#if METHOD < -1 // DEBUG temporarily disabled because OLD LOGIC!
-	float vecForward[3], vecVel[3], vecEyeAng[3];
-
-	if (giAttachment[client] > 0 && IsValidEntity(giAttachment[client])){
-		// GetEntPropVector(giAttachment[client], Prop_Send, "m_vecOrigin", origin);
-		// PrintToChatAll("vecStart: %f %f %f", vecStart[0], vecStart[1], vecStart[2]);
-		GetClientEyePosition(client, vecStart);
-		GetClientEyeAngles(client, vecEyeAng);
-		GetAngleVectors(vecEyeAng, vecForward, NULL_VECTOR, NULL_VECTOR);
-
-		vecStart[0]+=vecForward[0]*20.0;
-		vecStart[1]+=vecForward[1]*20.0;
-		vecStart[2]+=vecForward[2]*10.0;
-
-		SubtractVectors(vecStart, vecForward, vecVel);
-		TeleportEntity(giAttachment[client], vecStart, vecEyeAng, NULL_VECTOR);
-
-		GetEntPropVector(giAttachment[client], Prop_Send, "m_vecOrigin", vecStart);
-
-		#if DEBUG
-		PrintToChatAll("m_vecOrigin for attached %d: %f %f %f", giAttachment[client], vecStart[0], vecStart[1], vecStart[2]);
-		#endif
-
-		// from SM discord: do this OnGameFrame
-		// TeleportEntity(giAttachment[client], NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
-		GetEntPropVector(giAttachment[client], Prop_Data, "m_vecAbsOrigin", vecStart);
-		// AcceptEntityInput(giAttachment[client], "kill");
-
-		#if DEBUG
-		PrintToChatAll("m_vecAbsOrigin for attached %d: %f %f %f", giAttachment[client], vecStart[0], vecStart[1], vecStart[2]);
-		#endif
-	}
-
-	vecEnd = GetEndPositionFromWeapon(giAttachment[client], vecStart, vecEyeAng)
-	#endif // METHOD == ATTACH
-
-}
-
-
+#if METHOD TEMP_ENT
 void Create_TE_Beam(int client,
 const float[3] vecStart=NULL_VECTOR, const float[3] vecEnd=NULL_VECTOR,
 const int iStartEnt=0, const int iEndEnt=0)
@@ -896,34 +907,14 @@ const int iStartEnt=0, const int iEndEnt=0)
 	for(int j = 1; j <= sizeof(iBeamClients); ++j)
 	{
 		if(IsValidClient(j) && (client != j)){ // only draw for others
-			// if (IsNotUsingNightVision(j))   // TODO (only if using TE)
+			// if (!gbVisionActive(j))   // TODO (only if using TE)
 			//		continue;
 			iBeamClients[nBeamClients++] = j;
 		}
 	}
 	TE_Send(iBeamClients, nBeamClients);
 }
-
-
-// trace from weapon (for ATTACH method)
-float GetEndPositionFromWeapon(int entity, float[3] start, float[3] angle)
-{
-	// int client;
-	// client = GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity");
-
-	decl Float:end[3];
-
-	TR_TraceRayFilter(start, angle, MASK_SOLID, RayType_Infinite, TraceEntityFilterPlayer, entity);
-	if (TR_DidHit(INVALID_HANDLE))
-	{
-		TR_GetEndPosition(end, INVALID_HANDLE);
-	}
-	// adjusting alignment
-	end[0] += 5.0;
-	end[1] += 5.0;
-	end[2] += 5.0;
-	return end;
-}
+#endif // METHOD == TEMP_ENT
 
 
 // trace from client, return true on hit
@@ -937,53 +928,8 @@ stock bool GetEndPositionFromClient(int client, float[3] end)
 	if (TR_DidHit(INVALID_HANDLE))
 	{
 		TR_GetEndPosition(end, INVALID_HANDLE);
-
-		// FIXME: remove all this as it might be obsolete now?
-		int hit_entity = TR_GetEntityIndex(INVALID_HANDLE);
-		if (0 < hit_entity <= MaxClients) // we hit a player
-		{
-			float hit_normals[3];
-			TR_GetPlaneNormal(INVALID_HANDLE, hit_normals);
-
-			// TR_TraceRayFilter(start, angle, (CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_MONSTER|CONTENTS_DEBRIS|CONTENTS_HITBOX), RayType_Infinite, TraceEntityFilterPlayer, client);
-
-			#if DEBUG > 2
-			PrintToChatAll("We hit: %N, normals: %f %f %f", hit_entity, hit_normals[0], hit_normals[1], hit_normals[2]);
-			#endif
-
-			// filter the targeted player to avoid blinding them and filter out the rifle holder
-
-			int AffectedClients[NEO_MAX_CLIENTS+1], numClients;
-			for (int j = MaxClients; j > 0; j--)
-			{
-				if (j == hit_entity || !IsValidClient(j) || !IsClientConnected(j) /* || j == client*/) // DEBUG!
-					continue;
-				AffectedClients[numClients++] = j;
-			}
-
-			if (!numClients) // shouldn't happen
-				return false;
-
-			return true;
-		}
-		else
-		{
-
-			int AffectedClients[NEO_MAX_CLIENTS+1], numClients;
-			for (int j = 1; j <= MaxClients; ++j)
-			{
-				if (!IsValidClient(j) || !IsClientConnected(j) /*|| j == client*/) // can't draw for client due to latency :/
-					continue;
-				AffectedClients[numClients++] = j;
-			}
-
-			return true;
-		}
+		return true;
 	}
-	// adjusting alignment
-	// end[0] += 5.0;
-	// end[1] += 5.0;
-	// end[2] += 5.0;
 	return false;
 }
 
@@ -992,28 +938,6 @@ public bool:TraceEntityFilterPlayer(entity, contentsMask, any:data)
 {
 	// return entity > MaxClients;
 	return entity != data; // only avoid collision with ourself (or data)
-}
-
-
-
-//filter the client
-bool BuildArrayFilterClient(int clients[NEO_MAX_CLIENTS+1], int numClients)
-{
-	int clients[MaxClients];
-	int total = 0;
-
-	for (new i=1; i<=MaxClients; i++)
-	{
-		if (IsClientInGame(i) && i !)
-		{
-			clients[total++] = i;
-		}
-	}
-	if (!total)
-	{
-		return false;
-	}
-	return true
 }
 
 
@@ -1031,6 +955,7 @@ public Action Hook_SetTransmitLaserDot(int entity, int client)
 public Action Hook_SetTransmitLaserBeam(int entity, int client)
 {
 	// hide if not using night vision, or beam comes from our active weapon
+	// note: no need to test for observer state since VisionActive is true in that case
 	if (!gbVisionActive[client] || giHideOwnBeam[client] == entity)
 		return Plugin_Handled;
 
@@ -1048,52 +973,30 @@ bool IsActiveWeaponSRS(int weapon)
 }
 
 
-void ToggleZoomState(int client, int weapon)
-{
-	gbInZoomState[client] = !gbInZoomState[client];
-}
-
-
 public Action OnPlayerRunCmd(int client, int &buttons)
 {
-	#if DEBUG > 2
-	if (IsFakeClient(client))
+	if (client == 0 || gbIsObserver[client] || IsFakeClient(client) || !GetConVarBool(CVAR_PluginEnabled))
 		return Plugin_Continue;
-	char classname[30];
-	if (giActiveWeapon[client] > -1){
-		GetEntityClassname(iAffectedWeapons[giActiveWeapon[client]], classname, sizeof(classname));
-	}
-	else{
-		int weapon = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
-		if (weapon > 0)
-			GetEntityClassname(weapon, classname, sizeof(classname));
-	}
-	PrintToChatAll("Active weapon for %d: %d %s", client, iAffectedWeapons[giActiveWeapon[client]], classname);
-	#endif // DEBUG
-
-
-	if (!client || IsFakeClient(client) || !GetConVarBool(CVAR_PluginEnabled))
-		return Plugin_Continue;
-
-	if (buttons & IN_GRENADE1) // ZOOM key
-	{
-		if (giActiveWeapon[client] > -1)
-			OnZoomKeyPressed(client);
-	}
 
 	if (buttons & IN_RELOAD)
 	{
+		#if DEBUG > 1
+		char classname[30];
+		if (giActiveWeapon[client] > -1){
+			GetEntityClassname(iAffectedWeapons[giActiveWeapon[client]], classname, sizeof(classname));
+			PrintToChatAll("Active weapon for %d: %d %s", client, iAffectedWeapons[giActiveWeapon[client]], classname);
+		}
+		else{
+			int weapon = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
+			if (weapon > 0)
+				GetEntityClassname(weapon, classname, sizeof(classname));
+			PrintToChatAll("Active weapon for %d: %d %s", client, weapon, classname);
+		}
+		#endif // DEBUG
+
+
 		if (giActiveWeapon[client] > -1)
 			OnReloadKeyPressed(client);
-	}
-
-	if (buttons & IN_SPRINT)
-	{
-		gbInZoomState[client] = false;
-		if (giActiveWeapon[client] > -1 && g_bEmitsLaser[client])
-		{
-			ToggleLaser(client, true);
-		}
 	}
 
 	if (buttons & IN_ATTACK)
@@ -1108,7 +1011,7 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 			if (gbActiveWeaponIsSRS[client] && gbInZoomState[client])
 			{
 				gbInZoomState[client] = false;
-				ToggleLaser(client, true);
+				ToggleLaser(client);
 				return Plugin_Continue;
 			}
 
@@ -1125,21 +1028,35 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 		}
 	}
 
+
 	if (buttons & IN_ATTACK2) // Alt Fire mode key (ie. tachi)
 	{
-		#if DEBUG
-		PrintToServer("[nt_lasersight] Key IN_ATTACK2 pressed (alt fire).");
-		#endif
+		if (gbHeldKeys[client][KEY_ALTFIRE])
+		{
+			buttons &= ~IN_ATTACK2;
+		}
+		else
+		{
+			#if DEBUG > 1
+			PrintToServer("[nt_lasersight] Key IN_ATTACK2 pressed (alt fire).");
+			#endif
+			gbHeldKeys[client][KEY_ALTFIRE] = true;
 
-		if (giActiveWeapon[client] > -1 && !gbActiveWeaponIsSRS[client]){
-			// toggle laser beam here for other than SRS
-			TurnOffLaser(client);
+			if (giActiveWeapon[client] > -1 && !gbActiveWeaponIsSRS[client]){
+				// toggle laser beam here for other than SRS
+				ToggleLaserActivity(client);
+			}
 		}
 	}
+	else
+	{
+		gbHeldKeys[client][KEY_ALTFIRE] = false;
+	}
+
 
 	if ((buttons & IN_VISION) && gbIsRecon[client])
 	{
-		if(gbVisionKeyHeld[client])
+		if(gbHeldKeys[client][KEY_VISION])
 		{
 			buttons &= ~IN_VISION; // release
 		}
@@ -1150,46 +1067,63 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 				gbVisionActive[client] = false;
 			else
 				gbVisionActive[client] = true; // we assume vision is active client-side
-			gbVisionKeyHeld[client] = true;
+			gbHeldKeys[client][KEY_VISION] = true;
 		}
 	}
 	else if (gbIsRecon[client])
 	{
-		gbVisionKeyHeld[client] = false;
+		gbHeldKeys[client][KEY_VISION] = false;
 	}
 	#if DEBUG > 2
 	PrintToChatAll("Vision %s (%d), (recon: %d)", gbVisionActive[client] ? "ACTIVE" : "inactive",
 	GetEntProp(client, Prop_Send, "m_iVision"), gbIsRecon[client]);
 	#endif
 
+
+	if (buttons & IN_SPRINT)
+	{
+		if (gbCanSprint[client])
+		{
+			if (!gbHeldKeys[client][KEY_SPRINT])
+			{
+				if(OnSprintKeyPressed(buttons, client))
+					return Plugin_Continue; // block following zoom key commands
+			}
+			gbHeldKeys[client][KEY_SPRINT] = true; // avoid flooding
+		}
+	}
+	else if (gbCanSprint[client])
+	{
+		gbHeldKeys[client][KEY_SPRINT] = false;
+	}
+
+
+	if (buttons & IN_GRENADE1) // ZOOM key
+	{
+		OnZoomKeyPressed(client);
+	}
+
+
 	return Plugin_Continue;
 }
 
 
-
-void ToggleLaser(int client, bool forceoff=false)
+bool OnSprintKeyPressed(int buttons, int client)
 {
-	if (forceoff){
-		g_bEmitsLaser[client] = false;
-		ToggleLaserDot(client);
-		ToggleLaserBeam(client);
-		NeedUpdateLoop();
-		return;
-	}
-
-	if (!gbInZoomState[client])
+	// sprint key only causes zoom out if we move
+	if (buttons & IN_FORWARD
+	|| buttons & IN_BACK
+	|| buttons & IN_MOVELEFT
+	|| buttons & IN_MOVERIGHT)
 	{
-		g_bEmitsLaser[client] = false;
-		ToggleLaserDot(client);
-		ToggleLaserBeam(client);
+		gbInZoomState[client] = false;
+		if (giActiveWeapon[client] > -1)
+		{
+			ToggleLaser(client);
+		}
+		return true; // block keys normally handled after it
 	}
-	else
-	{
-		g_bEmitsLaser[client] = true;
-		ToggleLaserDot(client);
-		ToggleLaserBeam(client);
-	}
-	NeedUpdateLoop();
+	return false;
 }
 
 
@@ -1197,36 +1131,101 @@ void OnZoomKeyPressed(int client)
 {
 	#if DEBUG > 2
 	int ViewModel = GetEntPropEnt(client, Prop_Send, "m_hViewModel");
-	PrintToServer("[nt_lasersight] viewmodel index: %d", ViewModel);
+	PrintCenterTextAll("[nt_lasersight] viewmodel index: %d", ViewModel);
 	#endif
 
-	if (giActiveWeapon[client] > -1)
+	if (giActiveWeapon[client] < 0)
+		return;
+
+	#if DEBUG > 2
+	new bAimed = GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Send, "bAimed");
+	PrintToServer("[nt_lasersight] bAimed: %d", bAimed);
+	#endif
+
+	if (gbInZoomState[client]) // we are already zoomed in
 	{
-		#if DEBUG > 2
-		new bAimed = GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Send, "bAimed");
-		PrintToServer("[nt_lasersight] bAimed: %d", bAimed);
-		#endif
+		if (g_bEmitsLaser[client])
+			g_bEmitsLaser[client] = false;
+		gbInZoomState[client] = false;
+	}
+	else
+	{
+		if (gbLaserActive[client]) // explicitly disabled by player
+			g_bEmitsLaser[client] = true;
+		gbInZoomState[client] = !IsWeaponReloading(iAffectedWeapons[giActiveWeapon[client]]);
+	}
 
-		gbInZoomState[client] = !((GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Send, "bAimed") ||
-		GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Data, "m_bInReload")));
 
-		if (gbActiveWeaponIsSRS[client] && (GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Data, "m_nSequence", 4) > 0))
-		{
-			// bolt reload between shots
-			return;
-		}
+	if (gbActiveWeaponIsSRS[client]
+		&& (GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Data, "m_nSequence", 4) > 0))
+		return; // avoid toggling during bolt reload sequence (between shots)
 
-		if (!gbInZoomState[client]){
-			ToggleLaser(client, true);
-			return;
-		}
-		#if DEBUG
-		PrintToServer("[nt_lasersight] %N is toggling laser.", client);
-		#endif
+	#if DEBUG
+	PrintToServer("[nt_lasersight] ZoomState for %N is %s -> toggling laser %s.",
+	client, gbInZoomState[client] ? "true" : "false", gbInZoomState[client] ? "on" : "off");
+	#endif
 
-		ToggleLaser(client);
+	ToggleLaser(client);
+
+	// keep checking in case we missed a beat due to their shitty input handling
+	if (ghTimerCheckAimed[client] == INVALID_HANDLE && g_bEmitsLaser[client])
+	{
+		CreateTimer(0.5, timer_CheckForAimed, client, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 	}
 }
+
+
+// in case we are emitting beam while not actually aimed anymore
+public Action timer_CheckForAimed(Handle timer, int client)
+{
+	#if DEBUG
+	PrintToServer("[nt_lasersight] TIMER CHECK for %N (%d) bAimed: %d bInReload: %d",
+	client, client,
+	GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Send, "bAimed"),
+	GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Data, "m_bInReload"));
+	#endif
+
+	if (g_bEmitsLaser[client])
+	{
+		if (!IsWeaponAimed(iAffectedWeapons[giActiveWeapon[client]]) || IsWeaponReloading(iAffectedWeapons[giActiveWeapon[client]]))
+			gbInZoomState[client] = false;
+	}
+	else // ok we've turned it off already
+	{
+		ghTimerCheckAimed[client] = INVALID_HANDLE;
+		return Plugin_Stop;
+	}
+
+	if (gbInZoomState[client])
+		return Plugin_Continue; // keep checking while we still emit
+	else
+	{
+		ToggleLaser(client);
+		ghTimerCheckAimed[client] = INVALID_HANDLE;
+		return Plugin_Stop;
+	}
+}
+
+
+bool IsWeaponAimed(int weapon)
+{
+	#if DEBUG
+	PrintToServer("[nt_lasersight] Weapon %d bAimed is: %d.", weapon,
+	GetEntProp(weapon, Prop_Send, "bAimed"));
+	#endif
+
+	if (GetEntProp(weapon, Prop_Send, "bAimed") == 1)
+		return true;
+	return false;
+}
+
+bool IsWeaponReloading(int weapon)
+{
+	if (GetEntProp(weapon, Prop_Data, "m_bInReload") == 1)
+		return true;
+	return false;
+}
+
 
 
 void OnReloadKeyPressed(int client)
@@ -1239,13 +1238,17 @@ void OnReloadKeyPressed(int client)
 
 	//check until "m_bInReload" in weapon_srs is released -> TODO in any weapon?
 	if (view_as<bool>(GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Data, "m_bInReload")))
-		ToggleLaser(client, true);
+	{
+		gbInZoomState[client] = false;
+		g_bEmitsLaser[client] = false;
+		ToggleLaser(client);
+	}
 }
 
 
 // return fire on empty sequences
 // FIXME: check these only on weapon_switch and weapon_equip
-// FIXME: it might be better to check view models?
+// note: it might be better to check view models?
 int GetIgnoredSequencesForWeapon(int client)
 {
 	decl String:weaponName[LONGEST_WEP_NAME+1];
@@ -1316,49 +1319,101 @@ public Action timer_CheckSequence(Handle timer, DataPack datapack)
 
 		// gbInZoomState[client] = false; // we're probably reloading by now
 	}
-
-
 	// PrintToServer("m_bInReload: %d", GetEntProp(weapon, Prop_Data, "m_bInReload", 1));
 	// gbInZoomState[client] = !view_as<bool>(GetEntProp(weapon, Prop_Data, "m_bInReload", 1));
 
-	if (!gbInZoomState[client])
-	{
-		ToggleLaser(client, true);
-	}
+	ToggleLaser(client);
 
 	ghTimerCheckSequence[client] = INVALID_HANDLE;
 	return Plugin_Stop;
 }
 
 
-
-// for regular weapons, prevent automatic laser creation on aim down sight
-void TurnOffLaser(int client)
+void ToggleLaser(int client)
 {
-	gbLaserActive[client] = !gbLaserActive[client];
-	#if DEBUG
-	PrintToChatAll("[nt_lasersight] Laser toggled %s.", gbLaserActive[client] ? "on" : "off");
-	#endif
+	if (gbInZoomState[client])
+	{
+		ToggleLaserDot(client, g_bEmitsLaser[client] ? true : false);
+		ToggleLaserBeam(client, g_bEmitsLaser[client] ? true : false);
+	}
+	else
+	{
+		ToggleLaserDot(client, false);
+		ToggleLaserBeam(client, false);
+	}
+
+	NeedUpdateLoop();
 }
 
 
-bool IsPlayerReallyAlive(int client)
+// for regular weapons, prevent automatic laser creation on aim down sight
+void ToggleLaserActivity(int client)
+{
+	gbLaserActive[client] = !gbLaserActive[client];
+	#if DEBUG
+	PrintToChatAll("[nt_lasersight] Laser sight toggled %s.", gbLaserActive[client] ? "on" : "off");
+	#endif
+
+	// check if we're zoomed currently
+	// if (!IsWeaponAimed(iAffectedWeapons[giActiveWeapon[client]]) || IsWeaponReloading(iAffectedWeapons[giActiveWeapon[client]]))
+	// {
+	// 	gbInZoomState[client] = false;
+	// 	g_bEmitsLaser[client] = false;
+	// }
+	if (gbInZoomState[client])
+	{
+		#if DEBUG
+		PrintToChatAll("in zoom?");
+		PrintToServer("in zoom?");
+		#endif
+		g_bEmitsLaser[client] = gbLaserActive[client] ? true : false;
+	}
+	else
+	{
+		#if DEBUG
+		PrintToChatAll("not in zoom?");
+		PrintToServer("not in zoom?");
+		#endif
+		g_bEmitsLaser[client] = false;
+	}
+
+	ToggleLaser(client);
+}
+
+
+// Warning: upcon first connection, Health = 100, observermode = 0, and deadflag = 0!
+bool IsPlayerObserving(int client)
 {
 	#if DEBUG
-	PrintToServer("[nt_lasersight] Client %N (%d) has %d health.", client, client, GetEntProp(client, Prop_Send, "m_iHealth"));
+	PrintToServer("[nt_lasersight] IsPlayerObserving: %N (%d) m_iObserverMode = %d, deadflag = %d, Health = %d",
+	client, client,
+	GetEntProp(client, Prop_Send, "m_iObserverMode"),
+	GetEntProp(client, Prop_Send, "deadflag"),
+	GetEntProp(client, Prop_Send, "m_iHealth"));
 	#endif
 
 	// For some reason, 1 health point means dead, but checking deadflag is probably more reliable!
 	// Note: CPlayerResource also seems to keep track of players alive state (netprop)
-	if (GetEntProp(client, Prop_Send, "m_iHealth") <= 1 || GetEntProp(client, Prop_Send, "deadflag") || GetEntProp(client, Prop_Send, "m_iObserverMode") > 0)
+	if (GetEntProp(client, Prop_Send, "m_iObserverMode") > 0 || IsPlayerReallyDead(client))
 	{
 		#if DEBUG
-		PrintToServer("[nt_lasersight] Determined that %N is not alive right now.", client);
+		PrintToServer("[nt_lasersight] Determined that %N is observing right now. \
+m_iObserverMode = %d, deadflag = %d, Health = %d", client,
+		GetEntProp(client, Prop_Send, "m_iObserverMode"),
+		GetEntProp(client, Prop_Send, "deadflag"),
+		GetEntProp(client, Prop_Send, "m_iHealth"));
 		#endif
-		return false;
+		return true;
 	}
+	return false;
+}
 
-	return true;
+
+bool IsPlayerReallyDead(int client)
+{
+	if (GetEntProp(client, Prop_Send, "deadflag") || GetEntProp(client, Prop_Send, "m_iHealth") <= 1)
+		return true;
+	return false;
 }
 
 
