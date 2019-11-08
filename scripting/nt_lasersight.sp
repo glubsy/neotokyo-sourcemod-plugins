@@ -11,7 +11,7 @@
 
 int g_modelLaser, g_modelHalo, g_imodelLaserDot;
 Handle CVAR_PluginEnabled, CVAR_LaserAlpha, CVAR_AllWeapons;
-int laser_color[4] = {210, 10, 0, 20};
+int laser_color[4] = {210, 30, 0, 200};
 
 // Weapons where laser makes sense
 new const String:g_sLaserWeaponNames[][] = {
@@ -59,11 +59,15 @@ bool gbHeldKeys[NEO_MAX_CLIENTS+1][HeldKeys];
 bool gbVisionActive[NEO_MAX_CLIENTS+1];
 bool gbIsObserver[NEO_MAX_CLIENTS+1];
 
-//OLD: each entity has an array of affected clients
-int giViewModelLaserBeam[NEO_MAX_CLIENTS+1]; // per client
 int giLaserBeam[NEO_MAX_CLIENTS+1]; // per weapon (not client)
 int giLaserDot[NEO_MAX_CLIENTS+1]; // per weapon (not client)
 int giAttachment[NEO_MAX_CLIENTS+1]; // per weapon (not client)
+
+// Viewmodel entities
+int giViewModelLaserStart[NEO_MAX_CLIENTS+1]; // per client
+int giViewModelLaserEnd[NEO_MAX_CLIENTS+1]; // per client
+int giViewModelLaserBeam[NEO_MAX_CLIENTS+1];
+int giViewModel[NEO_MAX_CLIENTS+1];
 
 public Plugin:myinfo =
 {
@@ -78,10 +82,12 @@ public Plugin:myinfo =
 // TODO: make checking for in_zoom state a forward (for other plugins to use)?
 // TODO: Attach a prop to the muzzle of every srs, then raytrace a laser straight in front when tossed in the world
 // TODO: setup two beams, a normal one for spectators, a thicker one for night vision.
-// TODO: don't show laser dot to emitter because lag makes it looks distracting and ugly
+// TODO: don't show laser dot to emitter because lag makes it looks distracting and ugly, but show fake laser beam on viewmodel
 
 //TODO: fire changemode or fireempty animations on toggle laser command
-//TODO: attach additional static laser to viewmodel
+//TODO: look at what texture the L4D2 SDK uses for laser beams (particles)
+//TODO: show the entire laser beam to players hit by traceray when pointed directly at their head
+//TODO: have laser color / alpha in a convar
 
 #define TEMP_ENT 1 // use TE every game frame, instead of actual env_beam (obsolete)
 #define METHOD 0
@@ -155,6 +161,7 @@ public OnMapStart()
 
 	// laser dot
 	g_imodelLaserDot = PrecacheDecal("materials/sprites/laserdot.vmt"); // works!
+	g_imodelLaserDot = PrecacheDecal("materials/sprites/redglow1.vmt"); // works!
 	// g_imodelLaserDot = PrecacheModel("materials/sprites/laser.vmt");
 	// g_imodelLaserDot = PrecacheDecal("materials/decals/Blood5.vmt");
 }
@@ -222,11 +229,57 @@ public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 
 public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
-	for (int i = 1; i <= MaxClients; ++i)
+	for (int i = 1; i <= MaxClients; ++i){
 		gbFreezeTime[i] = true;
 
+		#if DEBUG
+		if (giViewModelLaserBeam[i] > 0)
+		{
+			AcceptEntityInput(giViewModelLaserBeam[i], "kill");
+			giViewModelLaserBeam[i] = 0;
+		}
+		if (giViewModelLaserStart[i] > 0)
+		{
+			AcceptEntityInput(giViewModelLaserStart[i], "kill");
+			giViewModelLaserStart[i] = 0;
+		}
+		if (giViewModelLaserEnd[i] > 0)
+		{
+			AcceptEntityInput(giViewModelLaserEnd[i], "kill");
+			giViewModelLaserEnd[i] = 0;
+		}
+		#endif
+	}
+
+	PrintToChatAll("OnRoundStart");
 	// CreateTimer(20.0, timer_FreezeTimeOff, -1, TIMER_FLAG_NO_MAPCHANGE);
 }
+
+#if DEBUG
+public void OnPluginEnd(){
+	for (int i = 1; i <= MaxClients; ++i){
+		if (!IsClientInGame(i) || IsFakeClient(i))
+			continue;
+		if (giViewModelLaserStart[i] > 0)
+		{
+			AcceptEntityInput(giViewModelLaserStart[i], "kill");
+		}
+		if (giViewModelLaserEnd[i] > 0)
+		{
+			AcceptEntityInput(giViewModelLaserEnd[i], "kill");
+		}
+		if (giViewModelLaserBeam[i] > 0)
+		{
+			AcceptEntityInput(giViewModelLaserBeam[i], "kill");
+		}
+		int ViewModel = GetEntPropEnt(i, Prop_Send, "m_hViewModel");
+		AcceptEntityInput(ViewModel, "Killhierarchy");
+
+		SDKUnhook(giViewModel[i], SDKHook_SetTransmit, Hook_SetTransmitViewModel);
+		SDKUnhook(giViewModelLaserBeam[i], SDKHook_SetTransmit, Hook_SetTransmitViewModel);
+	}
+}
+#endif
 
 
 public Action timer_FreezeTimeOff(Handle timer, int client)
@@ -292,10 +345,10 @@ public void OnClientSpawned_Post(int client)
 
 public Action timer_CreateLaserEntities(Handle timer, int client)
 {
-	if (!IsClientInGame(client))
+	if (!IsClientInGame(client) || IsFakeClient(client))
 		return Plugin_Stop;
 
-	CreateLaserEntities(client);
+	CreateViewModelLaserBeam(client);
 	return Plugin_Stop;
 }
 
@@ -307,10 +360,12 @@ void CreateLaserEntities(int client)
 	if (weapon_index < 0)
 		ThrowError("[nt_lasersight] Primary weapon returned index -1. Failed creating laser entities!");
 
-	CreateFakeAttachedProp(weapon_index, client);
-	CreateLaserDot(weapon_index);
-	CreateLaserBeam(weapon_index);
-	// CreateViewModelLaserBeam(client);
+	if (CreateFakeAttachedProp(weapon_index, client))
+		if (CreateLaserDot(weapon_index))
+			CreateLaserBeam(weapon_index);
+
+	CreateTimer(0.1, timer_CreateLaserEntities, client);
+
 }
 
 // // Redundant with SDKHook's OnClientSpawned_Post
@@ -454,7 +509,7 @@ int GetTrackedWeaponIndex(int weapon)
 		#endif
 	}
 
-	#if DEBUG
+	#if DEBUG > 2
 	PrintToServer("[nt_lasersight] GetTrackedWeaponIndex(%i) returns -1.", weapon);
 	#endif
 	return -1;
@@ -484,7 +539,9 @@ public void OnWeaponSwitch_Post(int client, int weapon)
 		g_bEmitsLaser[client] = false;
 		ToggleLaser(client);
 	}
-	UpdateActiveWeapon(client, weapon);
+
+	if (UpdateActiveWeapon(client, weapon))
+		ToggleViewModelLaserBeam(client, 1);
 }
 
 
@@ -516,7 +573,6 @@ public void OnWeaponEquip(int client, int weapon)
 	}
 
 	g_bEmitsLaser[client] = false;
-	// UpdateActiveWeapon(client, weapon); // removed
 }
 
 
@@ -540,15 +596,18 @@ void NeedUpdateLoop()
 }
 
 
-void CreateFakeAttachedProp(int weapon, int client)
+bool CreateFakeAttachedProp(int weapon, int client)
 {
 	if (giAttachment[weapon] > 0){
 		#if DEBUG
-		PrintToServer("[nt_lasersight] Attachment already exists for weapon %d", iAffectedWeapons[weapon]);
+		PrintToServer("[nt_lasersight] Attachment already exists for weapon %d",
+		iAffectedWeapons[weapon]);
 		#endif
-		return;
+		return false;
 	}
+
 	giAttachment[weapon] = CreateEntityByName("info_target");
+
 	#if DEBUG
 	// giAttachment[weapon] = CreateEntityByName("prop_dynamic_ornament");
 	// giAttachment[weapon] = CreateEntityByName("prop_physics");
@@ -568,6 +627,7 @@ void CreateFakeAttachedProp(int weapon, int client)
 	CreateTimer(0.1, timer_SetAttachment, giAttachment[weapon], TIMER_FLAG_NO_MAPCHANGE);
 
 	TeleportEntity(giAttachment[weapon], NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
+	return true;
 }
 
 
@@ -575,7 +635,7 @@ void MakeParent(int entity, int weapon)
 {
 	char buffer[64];
 	Format(buffer, sizeof(buffer), "weapon%d", weapon);
-	DispatchKeyValue(weapon, "targetname", buffer); // redundant?
+	DispatchKeyValue(weapon, "targetname", buffer); // FIXME this seems useless. REMOVE
 
 	SetVariantString("!activator");
 	AcceptEntityInput(entity, "SetParent", weapon, weapon, 0);
@@ -608,12 +668,14 @@ public Action timer_SetAttachment(Handle timer, int info_target)
 
 
 // index of affected weapon in array
-void CreateLaserDot(int weapon)
+bool CreateLaserDot(int weapon)
 {
 	if (giLaserDot[weapon] <= 0) // we have not already created a laser dot
 	{
 		giLaserDot[weapon] = CreateLaserDotEnt(weapon);
+		return true;
 	}
+	return false;
 }
 
 
@@ -659,7 +721,8 @@ int CreateLaserDotEnt(int weapon)
 	PrintToServer("[nt_lasersight] Created laser dot \"%s\" for weapon %d.", dot_name, weapon );
 	#endif
 
-	DispatchKeyValue(ent, "model", "materials/sprites/laserdot.vmt");
+	// DispatchKeyValue(ent, "model", "materials/sprites/laserdot.vmt");
+	DispatchKeyValue(ent, "model", "materials/sprites/redglow1.vmt");
 	DispatchKeyValueFloat(ent, "scale", 0.1); // doesn't seem to work
 	// SetEntPropFloat(ent, Prop_Data, "m_flSpriteScale", 0.2); // doesn't seem to work
 	DispatchKeyValue(ent, "rendermode", "9"); // 3 glow, makes it smaller?, 9 world space glow 5 additive,
@@ -684,7 +747,7 @@ int CreateLaserDotEnt(int weapon)
 
 
 // index of weapon in affected weapons array to tie the beam to
-void CreateLaserBeam(int weapon)
+bool CreateLaserBeam(int weapon)
 {
 	if (weapon < 0)
 		ThrowError("[nt_lasersight] Weapon -1 in CreateLaserBeam!");
@@ -695,7 +758,7 @@ void CreateLaserBeam(int weapon)
 		ThrowError("[nt_lasersight] Laser beam already existed for weapon %d!",
 		iAffectedWeapons[weapon]);
 		#endif
-		return;
+		return false;
 	}
 
 	giLaserBeam[weapon]	= CreateLaserBeamEnt(weapon);
@@ -703,6 +766,7 @@ void CreateLaserBeam(int weapon)
 	#if !DEBUG
 	SDKHook(giLaserBeam[weapon], SDKHook_SetTransmit, Hook_SetTransmitLaserBeam);
 	#endif
+	return true;
 }
 
 
@@ -720,11 +784,182 @@ void CreateViewModelLaserBeam(int client)
 		return;
 	}
 
-	giViewModelLaserBeam[client] = CreateLaserBeamEnt(weapon);
+	giViewModel[client] = GetEntPropEnt(client, Prop_Send, "m_hViewModel");
+	#if DEBUG
+	PrintToServer("[nt_lasersight] viewmodel index: %d", giViewModel[client]);
+	#endif
 
-	// #if !DEBUG
-	// SDKHook(giLaserBeam[weapon], SDKHook_SetTransmit, Hook_SetTransmitLaserBeam);
-	// #endif
+	giViewModelLaserStart[client] = CreateFakeAttachedPropViewModel(giViewModel[client], client, "startbeam");
+	giViewModelLaserEnd[client] = CreateFakeAttachedPropViewModel(giViewModel[client], client, "endbeam");
+	giViewModelLaserBeam[client] = CreateViewModelLaserBeamEnt(giViewModel[client], client);
+
+	// AcceptEntityInput(giViewModelLaserBeam[client], "TurnOn");
+	#if !DEBUG
+	SDKHook(giViewModel[client], SDKHook_SetTransmit, Hook_SetTransmitViewModel);
+	SDKHook(giViewModelLaserBeam[client], SDKHook_SetTransmit, Hook_SetTransmitViewModel);
+	#endif
+}
+
+
+int CreateFakeAttachedPropViewModel(int ViewModel, int client, char[] tag)
+{
+	int iEnt = CreateEntityByName("info_target");
+	// int iEnt = CreateEntityByName("prop_physics");
+	// DispatchKeyValue(iEnt, "model", "models/nt/a_lil_tiger.mdl");
+
+	char ent_name[20];
+	Format(ent_name, sizeof(ent_name), "%s%d", tag, GetClientUserId(client)); // tag
+	DispatchKeyValue(iEnt, "targetname", ent_name);
+
+	PrintToServer("[nt_lasersight] Created info_target on %N VM (%d) :%d %s",
+	client, ViewModel, iEnt, ent_name);
+
+	DispatchSpawn(iEnt);
+
+	MakeParent(iEnt, ViewModel);
+
+	DataPack dp = CreateDataPack();
+	WritePackCell(dp, iEnt);
+	WritePackString(dp, tag);
+
+	CreateTimer(0.1, timer_SetAttachmentViewModel, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
+
+	TeleportEntity(iEnt, NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
+	return iEnt;
+}
+
+
+public Action timer_SetAttachmentViewModel(Handle timer, DataPack dp)
+{
+	ResetPack(dp);
+	int info_target = ReadPackCell(dp);
+	char type[15];
+	ReadPackString(dp, type, sizeof(type));
+
+	#if DEBUG
+	PrintToServer("[nt_lasersight] SetParentAttachment to muzzle for info_target %d.", info_target);
+	#endif
+
+	SetVariantString("muzzle"); // "muzzle" works for when attaching to weapon
+	AcceptEntityInput(info_target, "SetParentAttachment");
+
+	if (StrContains(type, "start") != -1)
+	{
+		PrintToServer("Start beam entity");
+		// adjusting to avoid coming out of barrel
+		float origin[3];
+		GetEntPropVector(info_target, Prop_Send, "m_vecOrigin", origin);
+		DispatchSpawn(info_target);
+
+		origin[0] -= 1.0; // forward axis
+		origin[1] -= 4.9; // up down axis
+		origin[2] += 1.5; // horizontal
+
+		SetEntPropVector(info_target, Prop_Send, "m_vecOrigin", origin);
+
+	}
+	else
+	{
+		PrintToServer("End beam entity");
+		// adjusting to avoid coming out of barrel
+		float origin[3];
+		GetEntPropVector(info_target, Prop_Send, "m_vecOrigin", origin);
+		DispatchSpawn(info_target);
+
+		origin[0] += 12.0; // forward axis
+		origin[1] += 2.9; // up down axis
+		origin[2] -= 5.5; // horizontal
+
+		SetEntPropVector(info_target, Prop_Send, "m_vecOrigin", origin);
+
+	}
+
+
+	return Plugin_Handled;
+}
+
+
+
+int CreateViewModelLaserBeamEnt(int ViewModel, int client)
+{
+	int laser_entity = CreateEntityByName("env_beam");
+
+	#if DEBUG
+	PrintToServer("[nt_lasersight] Created laser BEAM for VM %d.", ViewModel);
+	#endif
+
+	char ent_name[20];
+	IntToString(ViewModel, ent_name, sizeof(ent_name));
+	DispatchKeyValue(laser_entity, "targetname", ent_name);
+
+	ent_name[0] = '\0';
+	Format(ent_name, sizeof(ent_name), "startbeam%d", GetClientUserId(client));
+	DispatchKeyValue(laser_entity, "LightningStart", ent_name);
+
+	// Note: there is no "targetpoint" key value like mentioned on the wiki in NT!
+	ent_name[0] = '\0';
+	Format(ent_name, sizeof(ent_name), "endbeam%d", GetClientUserId(client));
+	DispatchKeyValue(laser_entity, "LightningEnd", ent_name);
+
+	// Positioning
+	// DispatchKeyValueVector(laser_entity, "origin", mine_pos);
+	TeleportEntity(laser_entity, NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
+	// SetEntPropVector(laser_entity, Prop_Data, "m_vecEndPos", beam_end_pos);
+
+	// Setting Appearance
+	DispatchKeyValue(laser_entity, "texture", "materials/sprites/laser.vmt");
+	// DispatchKeyValue(laser_entity, "model", "materials/sprites/laser.vmt"); // seems unnecessary
+	// SetEntityModel(laser_entity,  "materials/sprites/laser.vmt"); // seems unnecessary
+	DispatchKeyValue(laser_entity, "decalname", "redglowalpha"); // FIXME
+
+	DispatchKeyValue(laser_entity, "renderamt", "120"); // TODO(?): low renderamt, increase when activate
+	DispatchKeyValue(laser_entity, "renderfx", "15");
+	DispatchKeyValue(laser_entity, "rendercolor", "200 25 25 128");
+	DispatchKeyValue(laser_entity, "BoltWidth", "2.0");
+	DispatchKeyValue(laser_entity, "spawnflags", "256");
+
+	DispatchKeyValue(laser_entity, "life", "0.0");
+	DispatchKeyValue(laser_entity, "StrikeTime", "0");
+	DispatchKeyValue(laser_entity, "TextureScroll", "35");
+	// DispatchKeyValue(laser_entity, "TouchType", "3");
+
+	DispatchSpawn(laser_entity);
+
+	ActivateEntity(laser_entity); // not sure what that is (for texture animation?)
+
+	// Link between weapon and laser indirectly. NEEDS TESTING
+	// SetEntPropEnt(client, Prop_Send, "m_hEffectEntity", laser_entity);
+	// SetEntPropEnt(laser_entity, Prop_Data, "m_hMovePeer", client); // should it be the attachment prop or weapon even?
+
+	return laser_entity;
+}
+
+void ToggleViewModelLaserBeam(int client, int activate=0)
+{
+	if (giViewModelLaserBeam[client] <= 0)
+	{
+		#if DEBUG
+		PrintToServer("[nt_lasersight] ToggleViewModelLaserBeam() laser beam for %N is invalid!", client);
+		#endif
+		return;
+	}
+
+	if (activate)
+	{
+		AcceptEntityInput(giViewModelLaserBeam[client], "TurnOn");
+	}
+	else if (activate == -1)
+	{
+		AcceptEntityInput(giViewModelLaserBeam[client], "Toggle");
+	}
+	else // 0
+		AcceptEntityInput(giViewModelLaserBeam[client], "TurnOff");
+
+	#if DEBUG
+	PrintToServer("[nt_lasersight] VM laser beam %d for %N: m_active = %d.",
+	giViewModelLaserBeam[client], client,
+	GetEntProp(giViewModelLaserBeam[client], Prop_Data, "m_active"));
+	#endif
 }
 
 
@@ -785,7 +1020,7 @@ int CreateLaserBeamEnt(int weapon)
 
 	// Setting Appearance
 	DispatchKeyValue(laser_entity, "texture", "materials/sprites/laser.vmt");
-	DispatchKeyValue(laser_entity, "model", "materials/sprites/laser.vmt"); // ??
+	DispatchKeyValue(laser_entity, "model", "materials/sprites/laser.vmt"); // ?
 	DispatchKeyValue(laser_entity, "decalname", "redglowalpha");
 
 	DispatchKeyValue(laser_entity, "renderamt", "120"); // TODO(?): low renderamt, increase when activate
@@ -840,13 +1075,12 @@ public void OnWeaponDrop(int client, int weapon)
 		ToggleLaserBeam(client, false);
 	}
 
-
 	NeedUpdateLoop();
 }
 
 
-// Tracks and caches active weapon
-void UpdateActiveWeapon(int client, int weapon)
+// Tracks and caches active weapon, returns true if tracked weapon is active weapon
+bool UpdateActiveWeapon(int client, int weapon)
 {
 	// if(!IsValidEdict(weapon) || !IsValidClient(client))
 	// 	return;
@@ -866,10 +1100,11 @@ void UpdateActiveWeapon(int client, int weapon)
 		#endif
 
 		gbActiveWeaponIsSRS[client] = true;
-		return;
+		return true;
 	}
 
 	gbActiveWeaponIsSRS[client] = false;
+	return giActiveWeapon[client] > -1 ? true : false;
 }
 
 
@@ -902,37 +1137,23 @@ public OnGameFrame()
 
 			#if METHOD TEMP_ENT // not used anymore
 
-			float vecStart[3];
-			int startEnt, endEnt;
-			GetBeamPositions(client, vecStart, vecEnd);
-
-
-			if (IsValidEntity(giAttachment[giActiveWeapon[client]])) // FiXME old logic
-			{
-				vecStart = NULL_VECTOR;
+			if (IsValidEntity(giAttachment[giActiveWeapon[client]]))
 				startEnt = giAttachment[giActiveWeapon[client]];
-			}
-			if (IsValidEntity(giLaserDot[giActiveWeapon[client]])) // FiXME will break
-			{
-				vecEnd = NULL_VECTOR;
+			if (IsValidEntity(giLaserDot[giActiveWeapon[client]]))
 				endEnt = giLaserDot[giActiveWeapon[client]];
-			}
 
-			Create_TE_Beam(client, vecStart, vecEnd, startEnt, endEnt);
+			Create_TE_Beam(client, startEnt, endEnt);
 			#endif // METHOD TEMP_ENT
 		}
 	}
 }
 
-#if METHOD TEMP_ENT
-void Create_TE_Beam(int client,
-const float[3] vecStart=NULL_VECTOR, const float[3] vecEnd=NULL_VECTOR,
-const int iStartEnt=0, const int iEndEnt=0)
+void Create_TE_Beam(int client, int iStartEnt, int iEndEnt)
 {
 	// TE_Start("BeamPoints");
 	TE_Start("BeamEntPoint");
-	TE_WriteVector("m_vecStartPoint", vecStart);
-	TE_WriteVector("m_vecEndPoint", vecEnd);
+	// TE_WriteVector("m_vecStartPoint", vecStart);
+	// TE_WriteVector("m_vecEndPoint", vecEnd);
 	TE_WriteNum("m_nFlags", FBEAM_HALOBEAM|FBEAM_FADEOUT|FBEAM_SHADEOUT|FBEAM_FADEIN|FBEAM_SHADEIN);
 
 	// specific to BeamEntPoint TE
@@ -944,9 +1165,9 @@ const int iStartEnt=0, const int iEndEnt=0)
 	TE_WriteNum("m_nStartFrame", 0);
 	TE_WriteNum("m_nFrameRate", 1);
 	TE_WriteFloat("m_fLife", 0.0);
-	TE_WriteFloat("m_fWidth", 0.9);
-	TE_WriteFloat("m_fEndWidth", 0.1);
-	TE_WriteFloat("m_fAmplitude", 0.1);
+	TE_WriteFloat("m_fWidth", 1.9);
+	TE_WriteFloat("m_fEndWidth", 1.1);
+	TE_WriteFloat("m_fAmplitude", 1.1);
 	TE_WriteNum("r", laser_color[0]);
 	TE_WriteNum("g", laser_color[1]);
 	TE_WriteNum("b", laser_color[2]);
@@ -958,7 +1179,7 @@ const int iStartEnt=0, const int iEndEnt=0)
 	int iBeamClients[NEO_MAX_CLIENTS+1], nBeamClients;
 	for(int j = 1; j <= sizeof(iBeamClients); ++j)
 	{
-		if(IsValidClient(j) && (client != j)){ // only draw for others
+		if(IsValidClient(j) /*&& (client != j)*/){ // only draw for others
 			// if (!gbVisionActive(j))   // TODO (only if using TE)
 			//		continue;
 			iBeamClients[nBeamClients++] = j;
@@ -966,7 +1187,6 @@ const int iStartEnt=0, const int iEndEnt=0)
 	}
 	TE_Send(iBeamClients, nBeamClients);
 }
-#endif // METHOD == TEMP_ENT
 
 
 // trace from client, return true on hit
@@ -1012,6 +1232,15 @@ public Action Hook_SetTransmitLaserBeam(int entity, int client)
 		return Plugin_Handled;
 
 	return Plugin_Continue;
+}
+
+// workaround for viewmodel appearing at {0, 0, 0} when attaching laser to its hierarchy
+public Action Hook_SetTransmitViewModel(int entity, int client)
+{
+	if (entity == giViewModel[client] || entity == giViewModelLaserBeam[client])
+		return Plugin_Continue;
+
+	return Plugin_Handled;
 }
 
 
@@ -1139,9 +1368,12 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 			if (!gbHeldKeys[client][KEY_SPRINT])
 			{
 				if(OnSprintKeyPressed(buttons, client))
+				{
+					gbHeldKeys[client][KEY_SPRINT] = true; // avoid flooding
 					return Plugin_Continue; // block following zoom key commands
+				}
+				gbHeldKeys[client][KEY_SPRINT] = true; // avoid flooding
 			}
-			gbHeldKeys[client][KEY_SPRINT] = true; // avoid flooding
 		}
 	}
 	else if (gbCanSprint[client])
@@ -1181,7 +1413,7 @@ bool OnSprintKeyPressed(int buttons, int client)
 
 void OnZoomKeyPressed(int client)
 {
-	#if DEBUG > 2
+	#if DEBUG > 1
 	int ViewModel = GetEntPropEnt(client, Prop_Send, "m_hViewModel");
 	PrintCenterTextAll("[nt_lasersight] viewmodel index: %d", ViewModel);
 	#endif
@@ -1393,13 +1625,24 @@ void ToggleLaser(int client)
 {
 	if (gbInZoomState[client])
 	{
-		ToggleLaserDot(client, g_bEmitsLaser[client] ? true : false);
-		ToggleLaserBeam(client, g_bEmitsLaser[client] ? true : false);
+		if (g_bEmitsLaser[client])
+		{
+			ToggleLaserDot(client, true);
+			ToggleLaserBeam(client, true);
+			ToggleViewModelLaserBeam(client, 1)
+		}
+		else
+		{
+			ToggleLaserDot(client, false);
+			ToggleLaserBeam(client, false);
+			ToggleViewModelLaserBeam(client, 0)
+		}
 	}
 	else
 	{
 		ToggleLaserDot(client, false);
 		ToggleLaserBeam(client, false);
+		ToggleViewModelLaserBeam(client, 0)
 	}
 
 	NeedUpdateLoop();
@@ -1410,9 +1653,7 @@ void ToggleLaser(int client)
 void ToggleLaserActivity(int client)
 {
 	gbLaserActive[client] = !gbLaserActive[client];
-	#if DEBUG
-	PrintToChatAll("[nt_lasersight] Laser sight toggled %s.", gbLaserActive[client] ? "on" : "off");
-	#endif
+	PrintCenterText(client, "Laser sight toggled %s", gbLaserActive[client] ? "on" : "off");
 
 	// check if we're zoomed currently
 	// if (!IsWeaponAimed(iAffectedWeapons[giActiveWeapon[client]]) || IsWeaponReloading(iAffectedWeapons[giActiveWeapon[client]]))
@@ -1423,16 +1664,16 @@ void ToggleLaserActivity(int client)
 	if (gbInZoomState[client])
 	{
 		#if DEBUG
-		PrintToChatAll("in zoom?");
-		PrintToServer("in zoom?");
+		PrintToChatAll("%N in zoom?", client);
+		PrintToServer("%N in zoom?", client);
 		#endif
 		g_bEmitsLaser[client] = gbLaserActive[client] ? true : false;
 	}
 	else
 	{
 		#if DEBUG
-		PrintToChatAll("not in zoom?");
-		PrintToServer("not in zoom?");
+		PrintToChatAll("%N not in zoom?", client);
+		PrintToServer("%N not in zoom?", client);
 		#endif
 		g_bEmitsLaser[client] = false;
 	}

@@ -1,0 +1,182 @@
+#include <sourcemod>
+#include <sdktools>
+#include <sdkhooks>
+#include <neotokyo>
+#define NEO_MAX_CLIENTS 32
+#if !defined DEBUG
+	#define DEBUG 0
+#endif
+bool gbIsSupport[NEO_MAX_CLIENTS+1];
+bool gbFreezeTime;
+bool gbHeldKey[NEO_MAX_CLIENTS+1];
+bool gbCanCloak[NEO_MAX_CLIENTS+1];
+float flRoundStartTime;
+
+public Plugin:myinfo =
+{
+	name = "NEOTOKYO cloak tweaks",
+	author = "glub",
+	description = "Adds a one-time cloaking ability to supports.",
+	version = "0.1",
+	url = "https://github.com/glubsy"
+};
+
+
+// Supports get one cloak use, which lasts forever.
+// However, it gets disabled permanently once they take ennemy damage.
+
+
+public void OnPluginStart()
+{
+	HookEvent("player_spawn", OnPlayerSpawn);
+	HookEvent("player_death", OnPlayerDeath);
+	HookEvent("game_round_start", OnRoundStart);
+	HookEvent("player_hurt", OnPlayerHurt, EventHookMode_Pre);
+}
+
+
+public Action OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
+{
+	int client = GetClientOfUserId(GetEventInt(event, "userid"));
+
+	// avoid hooking first connection "spawn"
+	if (GetClientTeam(client) < 2)
+	{
+		return Plugin_Continue;
+	}
+
+	// avoid hooking spectator spawns
+	if (IsPlayerObserving(client))
+	{
+		return Plugin_Continue;
+	}
+
+	int iClass = GetEntProp(client, Prop_Send, "m_iClassType");
+
+	if (iClass == 3)
+	{
+		gbIsSupport[client] = true;
+		gbCanCloak[client] = true;
+		return Plugin_Continue;
+	}
+
+	gbIsSupport[client] = false;
+	gbCanCloak[client] = false; // not necessary
+	return Plugin_Continue;
+}
+
+
+
+public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
+{
+	int victim = GetClientOfUserId(GetEventInt(event, "userid"));
+
+	gbIsSupport[victim] = false;
+}
+
+
+public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
+{
+	gbFreezeTime = true;
+	flRoundStartTime = GetGameTime();
+}
+
+
+
+// Prevent accidentally hitting cloak while in freezetime
+public void OnGameFrame()
+{
+	if(gbFreezeTime)
+	{
+		float gametime = GetGameTime();
+
+		if((gametime - flRoundStartTime) >= 15.0)
+			gbFreezeTime = false;
+		else
+			return;
+	}
+}
+
+
+public Action OnPlayerHurt(Event event, const char[] name, bool dontbroadcast)
+{
+	int client = GetClientOfUserId(GetEventInt(event, "userid"));
+	// int health = GetEventInt(event, "health");
+
+	if (!gbIsSupport[client])
+		return Plugin_Continue;
+
+	int attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
+
+	if (!attacker || !IsValidClient(attacker))
+		return Plugin_Continue;
+
+	if (GetClientTeam(client) == GetClientTeam(attacker))
+		return Plugin_Continue;
+
+	SetEntProp(client, Prop_Send, "m_iThermoptic", 0);
+	return Plugin_Continue;
+}
+
+
+public Action OnPlayerRunCmd(int client, int &buttons)
+{
+	if (client == 0 || gbFreezeTime || !gbIsSupport[client] || !gbCanCloak[client])
+		return Plugin_Continue;
+
+	if (buttons & IN_THERMOPTIC)
+	{
+		if (gbHeldKey[client])
+		{
+			buttons &= ~IN_THERMOPTIC;
+		}
+		else
+		{
+			gbHeldKey[client] = true;
+
+			#if DEBUG
+			int prop = GetEntProp(client, Prop_Send, "m_iThermoptic");
+			SetEntProp(client, Prop_Send, "m_iThermoptic", prop ? 0 : 1);
+			#endif
+
+			#if !DEBUG
+			SetEntProp(client, Prop_Send, "m_iThermoptic", 1);
+			gbCanCloak[client] = false;
+			#endif
+
+			PrintCenterText(client, "You have used your one-time only cloak.");
+		}
+	}
+	else
+	{
+		gbHeldKey[client] = false;
+	}
+	return Plugin_Continue;
+}
+
+// Warning: upcon first connection, Health = 100, observermode = 0, and deadflag = 0!
+bool IsPlayerObserving(int client)
+{
+	// For some reason, 1 health point means dead, but checking deadflag is probably more reliable!
+	// Note: CPlayerResource also seems to keep track of players alive state (netprop)
+	if (GetEntProp(client, Prop_Send, "m_iObserverMode") > 0 || IsPlayerReallyDead(client))
+	{
+		#if DEBUG
+		PrintToServer("[nt_cloak] Determined that %N is observing right now. \
+m_iObserverMode = %d, deadflag = %d, Health = %d", client,
+		GetEntProp(client, Prop_Send, "m_iObserverMode"),
+		GetEntProp(client, Prop_Send, "deadflag"),
+		GetEntProp(client, Prop_Send, "m_iHealth"));
+		#endif
+		return true;
+	}
+	return false;
+}
+
+
+bool IsPlayerReallyDead(int client)
+{
+	if (GetEntProp(client, Prop_Send, "deadflag") || GetEntProp(client, Prop_Send, "m_iHealth") <= 1)
+		return true;
+	return false;
+}

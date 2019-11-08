@@ -39,6 +39,10 @@
 
 **nt_pain_sfx**: sound effects emitted when a player gets hurt.
 
+**nt_cloak**: adds a one-time use cloak for support class, which gets turned off if the player gets damaged.
+
+**nt_ghostpos**: anti-griefing measure that checks for ghost position on certain maps, teleports it back to valid coordinates, prevents ghost-hopping.
+
 Donger model here: https://www.mediafire.com/?6y352ceczvs3oc1
 
 ~~**Funvotes-NT**: Modified Sourcemod default "funvote" plugin with a specific neotokyo public vote to restart the game. Obsolete (merged in nt_votes.sp for nt_teamdeathmatch)~~
