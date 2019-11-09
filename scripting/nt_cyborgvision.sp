@@ -6,7 +6,7 @@ public Plugin:myinfo =
 	name = "Neotokyo Cyborg Vision",
 	author = "glub",
 	description = "Places an overlay on players' field of view",
-	version = "0.2",
+	version = "0.3",
 	url = "https://github.com/glubsy"
 };
 
@@ -16,7 +16,9 @@ bool g_OverlayDisabled[MAXPLAYERS+1];
 bool g_OverlayActive[MAXPLAYERS+1];
 bool g_bPluginEnabled;
 Handle convar_cyborgvision_enabled = INVALID_HANDLE;
-Handle g_cookies[1];
+Handle ghcookie = INVALID_HANDLE;
+
+//NOTE: this plugin is outdated, terribly done and would need to be redone if it wasn't so superflous and useless
 
 public OnPluginStart(){
 	RegConsoleCmd("sm_vision", Command_ToggleVision, "Toggles cyborg vision on/off.")
@@ -28,7 +30,10 @@ public OnPluginStart(){
 	if(!AddCommandListener(Command_JoinTeam, "jointeam"))
 		PrintToServer("jointeam listening not available in this mod!")
 	
-	g_cookies[0] = RegClientCookie("overlay-disabled","cyborg vision disable status", CookieAccess_Public);
+
+	ghcookie = FindClientCookie("overlay-disabled");
+	if (ghcookie == INVALID_HANDLE)
+		ghcookie = RegClientCookie("overlay-disabled", "cyborg vision disable status", CookieAccess_Protected);
 }
 
 public OnConfigsExecuted()
@@ -53,54 +58,49 @@ public OnClientPostAdminCheck(int client)
 	{
 		ProcessCookies(client);
 	}
-	if(IsClientInGame(client) && client > 0 && !IsFakeClient(client) && IsClientConnected(client))
+	if(client > 0 && IsClientInGame(client) && !IsFakeClient(client))
 	{
+		// Active by default!
 		ClientCommand(client, "r_screenoverlay off");
 		g_OverlayActive[client] = false;
 	}
 }
 
-public ProcessCookies(int client)
+public void ProcessCookies(int client)
 {
-	//if(FindClientCookie("overlay-disabled"))
-	//{
-	decl String:cookie[10];
-	GetClientCookie(client, g_cookies[0], cookie, sizeof(cookie));
+	char cookie[2];
+	GetClientCookie(client, ghcookie, cookie, sizeof(cookie));
 
-	if (StrEqual(cookie, "enabled"))
+	if (cookie[0] != '\0') // we have a cookie
 	{
-		g_OverlayDisabled[client] = false;
-		CreateTimer(22.0, DisplayNotification, client);
-		return;
-	}
-	if (StrEqual(cookie, "disabled"))
-	{
-		g_OverlayDisabled[client] = true;
-		CreateTimer(22.0, DisplayNotification, client);
-		return;
+		g_OverlayDisabled[client] = view_as<bool>(StringToInt(cookie));
+		CreateTimer(22.0, DisplayNotification, GetClientUserId(client));
 	}
 	else
 	{
-		CreateTimer(22.0, DisplayNotification, client);
+		CreateTimer(22.0, DisplayNotification, GetClientUserId(client));
 	}
-	return;
 }
 
-public Action DisplayNotification(Handle timer, int client)
+public Action DisplayNotification(Handle timer, int userid)
 {
-	if(client > 0 && IsClientConnected(client) && IsClientInGame(client))
+	int client = GetClientOfUserId(userid);
+
+	if (client <= 0 || !IsClientInGame(client))
+		return Plugin_Stop;
+
+	if(g_OverlayDisabled[client] == true)
 	{
-		if(g_OverlayDisabled[client] == false)
-		{
-			PrintToChat(client, "[SM] You can disable Cyborg vision by typing !vision");
-			PrintToConsole(client, "\n[SM] You can disable Cyborg vision by typing sm_vision\n");
-		}
-		if(g_OverlayDisabled[client] == true)
-		{
-			PrintToChat(client, "[SM] You can re-enable Cyborg vision by typing !vision");
-			PrintToConsole(client, "\n[SM] You can re-enable Cyborg vision by typing sm_vision\n");
-		}
+		PrintToChat(client, "[SM] You can re-enable Cyborg vision by typing !vision");
+		PrintToConsole(client, "\n[SM] You can re-enable Cyborg vision by typing sm_vision\n");
 	}
+	else
+	{
+		PrintToChat(client, "[SM] You can disable Cyborg vision by typing !vision");
+		PrintToConsole(client, "\n[SM] You can disable Cyborg vision by typing sm_vision\n");
+	}
+
+	return Plugin_Handled;
 }
 
 public Action Command_ToggleVision(int client, args)
@@ -126,7 +126,7 @@ public Action EnableVision(int client)
 		g_OverlayActive[client] = true;
 	} 
 	PrintToChat(client, "[SM] Cyborg vision re-enabled.");
-	SetClientCookie(client, g_cookies[0], "enabled");
+	SetClientCookie(client, ghcookie, "0");
 }
 
 public Action DisableVision(int client)
@@ -135,7 +135,7 @@ public Action DisableVision(int client)
 	g_OverlayActive[client] = false;
 	g_OverlayDisabled[client] = true;
 	PrintToChat(client, "[SM] Cyborg vision now disabled.");
-	SetClientCookie(client, g_cookies[0], "disabled");
+	SetClientCookie(client, ghcookie, "1");
 }
 
 public OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
@@ -155,12 +155,14 @@ public OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
 		return;
 	}
 	
-	if(g_OverlayDisabled[client] == true && IsPlayerAlive(client) && !IsFakeClient(client))
+	if(g_OverlayDisabled[client] && IsPlayerAlive(client) && !IsFakeClient(client))
 	{
 		//do nothing
 		return;
 	}
-	if (g_OverlayDisabled[client] == false && clientTeam >= 2 && IsPlayerAlive(client) && g_OverlayActive[client] == false && !IsClientObserver(client) && !IsFakeClient(client) && IsClientInGame(client))
+	if (!g_OverlayDisabled[client] && clientTeam >= 2 
+	&& IsPlayerAlive(client) && g_OverlayActive[client] == false 
+	&& !IsClientObserver(client) && !IsFakeClient(client))
 	{
 		ClientCommand(client, "r_screenoverlay effects/combine_binocoverlay.vmt");
 		g_OverlayActive[client] = true;
