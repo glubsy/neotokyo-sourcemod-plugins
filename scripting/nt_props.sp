@@ -117,16 +117,18 @@ TODO:
 → save credits in sqlite db for longer term?
 → figure out how to make attached props change their material to cloak (need prop_ornament? flags? DispatchEffect? m_hEffectEntity!? apparently CTEEffectDispatch is unrelated)
 → use ProcessTargetString to target a player by name
+
 KNOWN ISSUES:
 -> AFAIK the TE cannot be destroyed by timer, so client preference is very limited, ie. if someone asks for a big scale model that is supposed to be auto-removed
    we can't use a TE because they don't get affected by timers, so regular physics_prop take precedence. Same for dynamic props, cannot have them as TempEnts.
 FIXME: debug why player are not spawning TE when opted-out clients are around
 TODO: Trigger_multiple
-TODO: use tempent Sprite Spray (for Marterzon)
+TODO: use tempent Sprite Spray or simply env_spritetrail (for Marterzon)
 TODO: move from sm_downloader to downloadtables here
 TODO: parse available models from a text file
-TODO: make sure props (d too) are not solid to avoid obstructing bullets -> use a refactored create_entity functions 
+TODO: make sure props (d too) are not solid to avoid obstructing bullets -> use a refactored create_entity functions
 also make sure they don't block line of fire while being grabbed
+FIXME: improve static props menu, not enough items!
 */
 
 public OnPluginStart()
@@ -907,17 +909,21 @@ public OnClientPostAdminCheck(int client)
 	{
 		ReadCookies(client);
 		if (!GetConVarBool(g_cvar_opt_in_mode))
-			CreateTimer(120.0, DisplayNotification, client);
+			CreateTimer(120.0, DisplayNotification, GetClientUserId(client));
 		return;
 	}
 }
 
 
-public Action timer_AdvertiseHelp(Handle timer, int client)
+public Action timer_AdvertiseHelp(Handle timer, int userid)
 {
+	int client = GetClientOfUserId(userid);
+
 	if (!IsValidClient(client) || !IsClientConnected(client))
-		return;
+		return Plugin_Stop;
+
 	PrintToChat(client, "[nt_props] You can print available commands with !props_help or get the menu with !menu");
+	return Plugin_Stop;
 }
 
 
@@ -930,10 +936,10 @@ public OnClientDisconnect(int client)
 
 
 // returns true only if previous cookies were found
-ReadCookies(int client)
+void ReadCookies(int client)
 {
-	if (!IsValidClient(client))
-		return;
+	// if (!IsValidClient(client))
+	// 	return;
 
 	char cookie[2];
 
@@ -947,7 +953,7 @@ ReadCookies(int client)
 	g_bClientWantsProps[client] = (cookie[0] != '\0' && StringToInt(cookie));
 
 	if (!GetConVarBool(g_cvar_opt_in_mode))
-		CreateTimer(10.0, DisplayNotification, client);
+		CreateTimer(10.0, DisplayNotification, GetClientUserId(client));
 }
 
 
@@ -970,8 +976,10 @@ void ToggleCookiePreference(int client)
 
 
 // Obsolete command but kept in case of opt-in mode
-public Action DisplayNotification(Handle timer, int client)
+public Action DisplayNotification(Handle timer, int userid)
 {
+	int client = GetClientOfUserId(userid);
+
 	if(client > 0 && IsClientConnected(client) && IsClientInGame(client))
 	{
 		if(!g_bClientWantsProps[client] && !GetConVarBool(g_cvar_opt_in_mode))
@@ -1108,7 +1116,7 @@ public OnClientPutInServer(int client)
 {
 	if(client && !IsFakeClient(client))
 	{
-		CreateTimer(60.0, timer_AdvertiseHelp, client);
+		CreateTimer(60.0, timer_AdvertiseHelp, GetClientUserId(client));
 
 		for (int i = 0; i < sizeof(g_PropHistory[]); i++)
 		{
@@ -2687,7 +2695,7 @@ public void SpawnAndStrapDongToSelf(int client)
 		MakeParent(client, g_AttachmentEnt[client]);
 
 		#if !DEBUG
-		SDKHook(g_AttachmentEnt[client], SDKHook_SetTransmit, Hide_SetTransmit);SDKHook(g_AttachmentEnt[client], SDKHook_SetTransmit, Hide_SetTransmit);
+		SDKHook(g_AttachmentEnt[client], SDKHook_SetTransmit, Hide_SetTransmit);
 		#endif
 
 		#if DEBUG
@@ -2804,7 +2812,7 @@ stock int Create_Prop_For_Attachment(int client, const char[] modelname, int hea
 }
 
 
-MakeParent_Spec(int client, int entity)
+void MakeParent_Spec(int client, int entity)
 {
 	char tName[128];
 	Format(tName, sizeof(tName), "target%i", client);
@@ -2862,7 +2870,7 @@ MakeParent_Spec(int client, int entity)
 	#if DEBUG
 	PrintToConsole(client, "DEBUG: MakeParent_Spec() origin(%f %f %f) angles(%f %f %f) client(%N)", origin[0], origin[1], origin[2], angle[0], angle[1], angle[2], client);
 	#endif
-	#endif //DEBUG >10
+	#endif //DEBUG > 9000
 }
 
 
@@ -3007,13 +3015,21 @@ void ToggleNoDrawForAttachmentOfClient(int client)
 
 	if (gNoDrawTimer[client] == INVALID_HANDLE)
 		// we check if player is still cloaked every second from then on
-		gNoDrawTimer[client] = CreateTimer(1.0, timer_CheckIfCloaked, client, TIMER_REPEAT);
+		gNoDrawTimer[client] = CreateTimer(1.0, timer_CheckIfCloaked, GetClientUserId(client), TIMER_REPEAT);
 }
 
 
 // reset NODRAW flag on attached prop if we are not cloaked anymore
-public Action timer_CheckIfCloaked(Handle timer, int client)
+public Action timer_CheckIfCloaked(Handle timer, int userid)
 {
+	int client = GetClientOfUserId(userid);
+
+	if (!IsValidClient(client))
+	{
+		gNoDrawTimer[client] = INVALID_HANDLE;
+		return Plugin_Stop;
+	}
+
 	if (GetEntProp(client, Prop_Send, "m_iThermoptic"))
 		return Plugin_Continue; // we are cloaked, keep nodraw, repeat timer
 
@@ -3522,20 +3538,20 @@ void GetEntityRenderColorFuture(int entity, int &r, int &g, int &b, int &a)
 // bool IsAreaClearOfPlayers(int MovingEnt, float pos[3])
 // {
 //     float vecMins[3], vecMaxs[3];
-    
+
 //     GetEntPropVector(MovingEnt, Prop_Send, "m_vecMins", vecMins);
 //     GetEntPropVector(MovingEnt, Prop_Send, "m_vecMaxs", vecMaxs);
 
 //     TR_TraceHull(pos, pos, vecMins, vecMaxs, MASK_SOLID);
 //     TR_TraceHullFilter(pos, pos, vecMins, vecMaxs, MASK_SOLID, Filter_OnlyPlayers);
-    
+
 //     if(!TR_DidHit())
 //         return true;
-    
+
 //     return false;
 // }
 
 // public bool Filter_OnlyPlayers(int entity, int contentsMask, any data)
 // {
 //     return (entity > 0) && (entity <= MaxClients);
-// } 
+// }

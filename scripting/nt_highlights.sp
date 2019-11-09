@@ -37,6 +37,7 @@ TopMenuObject g_hTopMainMenu_topmenuobj = INVALID_TOPMENUOBJECT;
 TopMenuObject g_tmo_prefs = INVALID_TOPMENUOBJECT;
 TopMenu g_hTopMenu; // handle to the nt_menu plugin topmenu
 Handle g_hPrefsMenu;
+bool gbHasMenuPlugin;
 
 public Plugin:myinfo =
 {
@@ -65,7 +66,7 @@ public void OnPluginStart()
 	HookConVarChange(CVAR_BulletTrailTTL, OnConVarChanged);
 	HookConVarChange(CVAR_GrenadeTrailTTL, OnConVarChanged);
 
-	RegConsoleCmd("sm_highlights_prefs", ConCommand_MenuPrefs, "Access menu for highlights preferences.");
+	RegConsoleCmd("sm_highlights", ConCommand_MenuPrefs, "Access menu for highlights preferences.");
 	RegConsoleCmd("sm_highlights_bullets_prefs", ConCommand_ToggleBulletPrefs, "Toggle seeing highlighted bullet trails as a spectator.");
 	RegConsoleCmd("sm_highlights_grenade_prefs", ConCommand_ToggleGrenadePrefs, "Toggle seeing highlighted grenade trails as a spectator.");
 
@@ -112,6 +113,7 @@ public void OnPluginStart()
 	TopMenu topmenu;
 	if (LibraryExists("nt_menu") && ((topmenu = GetNTTopMenu()) != null))
 	{
+		gbHasMenuPlugin = true;
 		OnNTMenuReady(topmenu);
 	}
 	else
@@ -324,11 +326,11 @@ void TogglePrefs(int client, int type)
 
 public OnMapStart()
 {
-/* 
+/*
 "materials/sprites/laserdot.vmt"
 "materials/sprites/redglow2.vmt"
 
-NOTE: in order for the trails to show through walls, 
+NOTE: in order for the trails to show through walls,
 we need a "ingorez" in the .vmt (ie. orangelight1)
 
 "materials/sprites/orangelight1.vmt"
@@ -391,12 +393,14 @@ public OnClientPostAdminCheck(int client)
 }
 
 
-public Action timer_AdvertiseHelp(Handle timer, int client)
+public Action timer_AdvertiseHelp(Handle timer, int userid)
 {
-	if (!IsValidClient(client) || !IsClientConnected(client))
+	int client = GetClientOfUserId(userid);
+	if (!IsValidClient(client))
 		return Plugin_Stop;
 
-	PrintToChat(client, "[nt_highlights] You can toggle bullet trails for spectators with !highlights_prefs");
+	PrintToChat(client, "[nt_highlights] You can toggle bullet trails for spectators with !highlights%s.",
+	gbHasMenuPlugin ? " or !menu" : "");
 	return Plugin_Stop;
 }
 
@@ -504,20 +508,20 @@ public void OnClientPutInServer(int client)
 	g_bClientWantsBulletTrails[client] = true;
 	g_bClientWantsGrenadeTrails[client] = true;
 	UpdateAffectedClientsArray(client);
-	CreateTimer(180.0, timer_AdvertiseHelp, client, TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(180.0, timer_AdvertiseHelp, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 }
 
 
 public Action Event_OnPlayerDeath(Event event, const char[] name, bool dontbroadcast)
 {
-	int victim = GetClientOfUserId(GetEventInt(event, "userid"));
+	int userid = GetEventInt(event, "userid");
+	int victim = GetClientOfUserId(userid);
 
 	if (!g_bClientWantsBulletTrails[victim] && !g_bClientWantsGrenadeTrails[victim])
-		// no need for update
-		return Plugin_Continue;
+		return Plugin_Continue; // no need to update anything
 
 	// need short delay to read deadflag; also fade to black is blocking view anyway
-	CreateTimer(5.0, timer_RefreshAffectedArray, victim, TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(5.0, timer_RefreshAffectedArray, userid, TIMER_FLAG_NO_MAPCHANGE);
 
 	return Plugin_Continue;
 }
@@ -565,13 +569,16 @@ public Action Event_OnRoundStart(Event event, const char[] name, bool dontbroadc
 
 
  // FIXME what if we call once with valid client, then block remaining -1 calls!!!!!!!!!!!!!!!????
-public Action timer_RefreshAffectedArray(Handle timer, int client)
+public Action timer_RefreshAffectedArray(Handle timer, int userid)
 {
 	#if DEBUG
 	PrintToServer("[nt_highlights] Timer is now calling UpdateAffectedClientsArray(%d).", client);
 	#endif
 
-	UpdateAffectedClientsArray(client); // should be -1 here, forcing refresh for all arrays
+	if (userid == -1)
+		UpdateAffectedClientsArray(-1); // should be -1 here, forcing refresh for all arrays
+	else
+		UpdateAffectedClientsArray(GetClientOfUserId(userid));
 
 	g_RefreshArrayTimer = INVALID_HANDLE;
 	return Plugin_Stop;
@@ -756,7 +763,7 @@ void UpdateAffectedClientsArray(int client)
 		g_nGrenadeTrailClients = 0;
 		for(int j = 1; j <= MaxClients; j++)
 		{
-			if(!IsValidClient(j) || !IsClientInGame(j) || IsFakeClient(j))
+			if(!IsValidClient(j) || IsFakeClient(j))
 				continue;
 
 			if (!IsPlayerObserving(j) || !(GetEntProp(j, Prop_Send, "m_iHealth") <= 1) || !GetEntProp(j, Prop_Send, "deadflag")) // only draw for specs here

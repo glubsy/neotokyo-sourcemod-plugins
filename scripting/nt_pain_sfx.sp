@@ -320,7 +320,8 @@ public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int p
 public Action ConCommand_Prefs(int client, int args)
 {
 	ToggleCookiePreference(client);
-	PrintToChat(client, "[nt_pain_sfx] You have %s hear sound effects when players get hurt.", (g_bClientWantsSFX[client] ? "opted to" : "opted not to"));
+	PrintToChat(client, "[nt_pain_sfx] You have %s hear sound effects when players get hurt.", 
+	(g_bClientWantsSFX[client] ? "opted to" : "opted not to"));
 }
 
 
@@ -346,11 +347,13 @@ public OnClientPostAdminCheck(int client)
 }
 
 
-public Action timer_AdvertiseHelp(Handle timer, int client)
+public Action timer_AdvertiseHelp(Handle timer, int userid)
 {
-	if (!IsValidClient(client) || !IsClientConnected(client))
+	int client = GetClientOfUserId(userid);
+
+	if (!IsValidClient(client))
 		return Plugin_Stop;
-	PrintToChat(client, "[nt_pain_sfx] You can toggle hurt sound effects with !hurt_sounds");
+	PrintToChat(client, "[nt_pain_sfx] You can toggle pain sound effects with !pain_sounds");
 	return Plugin_Stop;
 }
 
@@ -410,15 +413,17 @@ void ToggleCookiePreference(int client)
 
 public Action Event_OnPlayerSpawn(Event event, const char[] name, bool dontbroadcast)
 {
-	int client = GetClientOfUserId(GetEventInt(event, "userid"));
-	if (!IsValidClient(client))
-		return Plugin_Continue;
+	int userid = GetEventInt(event, "userid");
+	int client = GetClientOfUserId(userid);
+	// if (!IsValidClient(client))
+	// 	return Plugin_Continue;
 
 	#if DEBUG
 	PrintToServer("[nt_pain_sfx] Event_OnPlayerSpawn(%d) (%N)", client, client);
 	#endif
 
-	if (GetEntProp(client, Prop_Send, "m_iHealth") <= 1 || GetEntProp(client, Prop_Send, "deadflag"))
+	if (GetEntProp(client, Prop_Send, "m_iHealth") <= 1 
+	|| GetEntProp(client, Prop_Send, "deadflag"))
 	{
 		#if DEBUG
 		PrintToServer("[nt_pain_sfx] client %N spawned but is actually dead!", client);
@@ -429,18 +434,20 @@ public Action Event_OnPlayerSpawn(Event event, const char[] name, bool dontbroad
 
 	// for players spawning after freeze time has already ended
 	if (g_RefreshArrayTimer == INVALID_HANDLE)
-		g_RefreshArrayTimer = CreateTimer(10.0, timer_RefreshArraysForAll, -1, TIMER_FLAG_NO_MAPCHANGE);
+		g_RefreshArrayTimer = CreateTimer(10.0, timer_RefreshArraysForAll, -1, 
+		TIMER_FLAG_NO_MAPCHANGE);
 
 	#if DEBUG
-	CreateTimer(20.0, timer_PrintArray, client);
+	CreateTimer(20.0, timer_PrintArray, userid);
 	#endif
 
 	return Plugin_Continue;
 }
 
 
-public Action timer_PrintArray(Handle timer, int client)
+public Action timer_PrintArray(Handle timer, int userid)
 {
+	int client = GetClientOfUserId(userid);
 	for (int i = 0; i < g_iAffectedNumPlayers[client]; i++)
 		PrintToServer("[nt_pain_sfx] timer_PrintArray() g_iAffectedPlayers[%N][%i] affected client index %d (%N)",
 		client, i, g_iAffectedPlayers[client][i], g_iAffectedPlayers[client][i]);
@@ -458,14 +465,16 @@ public Action Event_OnRoundStart(Event event, const char[] name, bool dontbroadc
 }
 
 
-public Action timer_RefreshArraysForAll(Handle timer, int client)
+public Action timer_RefreshArraysForAll(Handle timer, int userid)
 {
 	#if DEBUG
-	PrintToServer("[nt_pain_sfx] Timer is now calling UpdateAffectedArrayForAlivePlayers(%d).", client);
+	PrintToServer("[nt_pain_sfx] Timer now calling UpdateAffectedArrayForAlivePlayers(%d).", userid);
 	#endif
 
-	// force update for all arrays
-	UpdateAffectedArrayForAlivePlayers(client); // should be -1 here, forcing refresh for all arrays
+	if (userid > 0)
+		UpdateAffectedArrayForAlivePlayers(GetClientOfUserId(userid));
+	else
+		UpdateAffectedArrayForAlivePlayers(-1) // should be -1 here, forcing refresh for all arrays
 
 	if (g_RefreshArrayTimer != INVALID_HANDLE)
 		g_RefreshArrayTimer = INVALID_HANDLE;
@@ -486,12 +495,15 @@ public Action Event_OnPlayerHurt(Event event, const char[] name, bool dontbroadc
 		return Plugin_Continue;
 	}
 
-	if (g_hCurrentlyPlaying[client] == INVALID_HANDLE && g_iSoundInstances <= MAX_SND_INSTANCES)
+	if (g_hCurrentlyPlaying[client] == INVALID_HANDLE && 
+		g_iSoundInstances <= MAX_SND_INSTANCES)
 	{
 		EmitHurtSoundFromClientPos(client);
 		++g_iSoundInstances;
-		// we allow playing one sound clip every amount of seconds
-		g_hCurrentlyPlaying[client] = CreateTimer(GetConVarFloat(CVAR_hurt_sounds_delay), ResetPlayingFlag, client);
+		// we allow playing one sound clip every range of seconds
+		g_hCurrentlyPlaying[client] = CreateTimer(
+		GetConVarFloat(CVAR_hurt_sounds_delay), timer_ResetPlayingFlag, client, 
+		TIMER_FLAG_NO_MAPCHANGE);
 	}
 	return Plugin_Continue;
 }
@@ -499,14 +511,16 @@ public Action Event_OnPlayerHurt(Event event, const char[] name, bool dontbroadc
 
 public Action Event_OnPlayerDeath(Event event, const char[] name, bool dontbroadcast)
 {
-	int victim = GetClientOfUserId(GetEventInt(event, "userid"));
+	int userid = GetEventInt(event, "userid");
 
 	#if DEBUG
-	PrintToServer("[nt_pain_sfx] %N died, asking to update arrays.", victim);
+	PrintToServer("[nt_pain_sfx] %N died, asking to update arrays.", 
+	GetClientOfUserId(userid));
 	#endif
 
 	if (g_RefreshArrayTimer == INVALID_HANDLE)
-		g_RefreshArrayTimer = CreateTimer(1.5, timer_RefreshArraysForAll, victim, TIMER_FLAG_NO_MAPCHANGE);
+		g_RefreshArrayTimer = CreateTimer(1.5, timer_RefreshArraysForAll, userid, 
+		TIMER_FLAG_NO_MAPCHANGE);
 
 	return Plugin_Continue;
 }
@@ -515,17 +529,20 @@ public Action Event_OnPlayerDeath(Event event, const char[] name, bool dontbroad
 public void OnClientPutInServer(int client)
 {
 	g_bClientWantsSFX[client] = false; // by default, we need to opt-in to be affected
+	int userid = GetClientUserId(client);
 
 	if (g_RefreshArrayTimer == INVALID_HANDLE)
-		g_RefreshArrayTimer = CreateTimer(3.5, timer_RefreshArraysForAll, client, TIMER_FLAG_NO_MAPCHANGE);
+		g_RefreshArrayTimer = CreateTimer(3.5, timer_RefreshArraysForAll, userid, 
+		TIMER_FLAG_NO_MAPCHANGE);
 
-	CreateTimer(160.0, timer_AdvertiseHelp, client, TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(160.0, timer_AdvertiseHelp, userid, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 
 public Action Event_OnPlayerDisconnect(Event event, const char[] name, bool dontbroadcast)
 {
-	int disconnected = GetClientOfUserId(GetEventInt(event, "userid"));
+	int userid = GetEventInt(event, "userid");
+	int disconnected = GetClientOfUserId(userid);
 
 	#if DEBUG
 	PrintToServer("[nt_pain_sfx] Client %d just disconnected. Asking for array refresh.", disconnected);
@@ -536,7 +553,7 @@ public Action Event_OnPlayerDisconnect(Event event, const char[] name, bool dont
 
 	if (g_RefreshArrayTimer == INVALID_HANDLE)
 		// delay because when disconnecting, player is respawning and considered still "alive", which is wrong!
-		g_RefreshArrayTimer = CreateTimer(1.0, timer_RefreshArraysForAll, disconnected, TIMER_FLAG_NO_MAPCHANGE);
+		g_RefreshArrayTimer = CreateTimer(0.5, timer_RefreshArraysForAll, disconnected, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 
@@ -544,7 +561,7 @@ public Action Event_OnPlayerDisconnect(Event event, const char[] name, bool dont
 public void UpdateAffectedArrayForAlivePlayers(int updated_client)
 {
 	// WARNING: updated_client can be -1 here!
-	for (int client = 1; client <= MaxClients; client++)
+	for (int client = 1; client <= MaxClients; ++client)
 	{
 		if (!IsValidClient(client) || !IsClientConnected(client) || !IsClientInGame(client))
 		{
@@ -561,8 +578,7 @@ public void UpdateAffectedArrayForAlivePlayers(int updated_client)
 		if (!IsPlayerReallyAlive(client)) // dead players wouldn't emit any sound
 			continue;
 
-		if (!IsValidClient(updated_client) || !IsClientConnected(updated_client) 
-		|| (updated_client > 0 && !g_bClientWantsSFX[updated_client]))
+		if (!IsValidClient(updated_client) || (updated_client > 0 && !g_bClientWantsSFX[updated_client]))
 		{
 			#if DEBUG
 			PrintToServer("[nt_pain_sfx] A player has to be removed, rebuilding array for %N.", client);
@@ -665,10 +681,11 @@ void EmitHurtSoundFromClientPos(int client)
 }
 
 
-public Action ResetPlayingFlag(Handle timer, int client)
+public Action timer_ResetPlayingFlag(Handle timer, int client)
 {
 	g_hCurrentlyPlaying[client] = INVALID_HANDLE;
 	--g_iSoundInstances;
+	return Plugin_Stop;
 }
 
 #if DEBUG > 1
