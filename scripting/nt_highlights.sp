@@ -53,6 +53,8 @@ public Plugin:myinfo =
 };
 
 // TODO: change thickness of beam depending on damage done
+// FIXME: showing TE for alive player still
+// TODO attempt to show trail through walls
 
 public void OnPluginStart()
 {
@@ -85,7 +87,7 @@ public void OnPluginStart()
 	HookEvent("player_hurt", Event_OnPlayerHurt, EventHookMode_Pre);
 	HookEvent("player_death", Event_OnPlayerDeath);
 	// HookEvent("game_round_start", Event_OnRoundStart);
-	HookEvent("player_spawn", Event_OnPlayerSpawn);
+	HookEvent("player_spawn", Event_OnPlayerSpawn, EventHookMode_Post);
 
 	// HookEvent("player_shoot", Event_OnPlayerShoot); // doesn't work in NT
 
@@ -392,7 +394,7 @@ public void OnClientDisconnect(int client)
 	// might not be needed since we check and set on connect
 	g_bClientWantsBulletTrails[client] = true;
 	g_bClientWantsGrenadeTrails[client] = true;
-	CreateTimer(1.0, timer_RefreshAffectedArray, -1, TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(0.1, timer_RefreshAffectedArray, -1, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 
@@ -503,13 +505,13 @@ public Action Event_OnPlayerDeath(Event event, const char[] name, bool dontbroad
 		return Plugin_Continue;
 
 	// need short delay to read deadflag; also fade to black is blocking view anyway
-	if (g_RefreshArrayTimer == INVALID_HANDLE)
-		g_RefreshArrayTimer = CreateTimer(5.0, timer_RefreshAffectedArray, victim, TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(5.0, timer_RefreshAffectedArray, victim, TIMER_FLAG_NO_MAPCHANGE);
 
 	return Plugin_Continue;
 }
 
 
+// NOTE: this is called on client first connection, and alive checks will FAIL
 public Action Event_OnPlayerSpawn(Event event, const char[] name, bool dontbroadcast)
 {
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
@@ -548,6 +550,7 @@ public Action Event_OnRoundStart(Event event, const char[] name, bool dontbroadc
 }
 
 
+ // FIXME what if we call once with valid client, then block remaining -1 calls!!!!!!!!!!!!!!!????
 public Action timer_RefreshAffectedArray(Handle timer, int client)
 {
 	#if DEBUG
@@ -786,7 +789,10 @@ void UpdateAffectedClientsArray(int client)
 		PrintToServer("[nt_highlights] UpdateAffectedClientsArray(%d) %N asked to be updated and has deadflag bit %s.",
 		client, client, (GetEntProp(client, Prop_Send, "deadflag") ? "set" : "not set"));
 		#endif
-		if(GetClientTeam(client) < 2 || IsPlayerObserving(client) || (GetEntProp(client, Prop_Send, "m_iHealth") <= 1) || GetEntProp(client, Prop_Send, "deadflag")) // only draw for specs here
+		if (GetClientTeam(client) < 2
+		|| IsPlayerObserving(client)
+		|| (GetEntProp(client, Prop_Send, "m_iHealth") <= 1)
+		|| GetEntProp(client, Prop_Send, "deadflag")) // only draw for specs here
 		{
 			if (g_bClientWantsBulletTrails[client])
 				g_iBulletTrailClient[g_nBulletTrailClients++] = client;
@@ -799,7 +805,9 @@ void UpdateAffectedClientsArray(int client)
 
 void GetEndPositionFromClient(int client, float[3] start, float[3] angle, float[3] end)
 {
-	TR_TraceRayFilter(start, angle, (CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_MONSTER|CONTENTS_DEBRIS|CONTENTS_HITBOX), RayType_Infinite, TraceEntityFilterPlayer, client);
+	TR_TraceRayFilter(start, angle,
+	(CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_MONSTER|CONTENTS_DEBRIS|CONTENTS_HITBOX),
+	RayType_Infinite, TraceEntityFilterPlayer, client);
 	if (TR_DidHit(INVALID_HANDLE))
 	{
 		TR_GetEndPosition(end, INVALID_HANDLE);
@@ -821,14 +829,14 @@ public bool:TraceEntityFilterPlayer(entity, contentsMask, any:data)
 
 bool IsPlayerObserving(int client)
 {
-	int mode = GetEntProp(client, Prop_Send, "m_iObserverMode");
-
 	#if DEBUG
 	// note movetype is most likely 10 too
-	PrintToServer("[nt_highlights] %N %s observing: m_iObserverMode %d", client, (mode ? "is" : "is not"), mode);
+	int mode = GetEntProp(client, Prop_Send, "m_iObserverMode");
+	PrintToServer("[nt_highlights] %N %s observing: m_iObserverMode %d",
+	client, mode ? "is" : "is not", mode);
 	#endif
 
-	if(mode) // 0 means most likely alive
+	if(GetEntProp(client, Prop_Send, "m_iObserverMode")) // 0 means most likely alive
 		return true;
 	return false;
 }
