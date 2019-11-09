@@ -11,6 +11,7 @@ bool gbFreezeTime;
 bool gbHeldKey[NEO_MAX_CLIENTS+1];
 bool gbCanCloak[NEO_MAX_CLIENTS+1];
 float flRoundStartTime;
+int giReceivingClients[NEO_MAX_CLIENTS];
 
 public Plugin:myinfo =
 {
@@ -25,9 +26,13 @@ public Plugin:myinfo =
 // Supports get one cloak use, which lasts forever.
 // However, it gets disabled permanently once they take ennemy damage.
 
+//TODO: play a denying sound when attempting to cloak after charge has been used
+
 
 public void OnPluginStart()
 {
+	PrecacheSound("buttons/combine_button2.wav");
+
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("game_round_start", OnRoundStart);
@@ -103,7 +108,7 @@ public Action OnPlayerHurt(Event event, const char[] name, bool dontbroadcast)
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
 	// int health = GetEventInt(event, "health");
 
-	if (!gbIsSupport[client])
+	if (!gbIsSupport[client] || !gbCanCloak[client])
 		return Plugin_Continue;
 
 	int attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
@@ -121,7 +126,7 @@ public Action OnPlayerHurt(Event event, const char[] name, bool dontbroadcast)
 
 public Action OnPlayerRunCmd(int client, int &buttons)
 {
-	if (client == 0 || gbFreezeTime || !gbIsSupport[client] || !gbCanCloak[client])
+	if (client == 0 || gbFreezeTime || !gbIsSupport[client])
 		return Plugin_Continue;
 
 	if (buttons & IN_THERMOPTIC)
@@ -139,12 +144,38 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 			SetEntProp(client, Prop_Send, "m_iThermoptic", prop ? 0 : 1);
 			#endif
 
-			#if !DEBUG
-			SetEntProp(client, Prop_Send, "m_iThermoptic", 1);
-			gbCanCloak[client] = false;
-			#endif
+			if (gbCanCloak[client])
+			{
+				#if !DEBUG
+				SetEntProp(client, Prop_Send, "m_iThermoptic", 1);
+				gbCanCloak[client] = false;
+				#endif
+				PrintCenterText(client, "You have used your one-time only cloak.");
+			}
+			else
+			{
+				PrintCenterText(client, "You have aleady used your one-time only cloak.");
+				giReceivingClients[0] = client;
+				EmitSound(giReceivingClients, 1, "buttons/combine_button2.wav",
+				SOUND_FROM_PLAYER, SNDCHAN_AUTO, 50,
+				SND_NOFLAGS, SNDVOL_NORMAL, SNDPITCH_NORMAL);
 
-			PrintCenterText(client, "You have used your one-time only cloak.");
+				int total = 0;
+				for (int i = 1; i <= MaxClients; ++i)
+				{
+					if (!IsClientInGame(i) || i == client)
+						continue;
+					giReceivingClients[total++] = i;
+				}
+				if (!total)
+					return Plugin_Continue;
+
+				EmitSound(giReceivingClients, total, "buttons/combine_button2.wav",
+				SOUND_FROM_PLAYER, SNDCHAN_AUTO, 50,
+				SND_NOFLAGS, SNDVOL_NORMAL, SNDPITCH_NORMAL);
+			}
+
+
 		}
 	}
 	else
