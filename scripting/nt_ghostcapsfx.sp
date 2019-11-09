@@ -42,6 +42,7 @@ TopMenuObject g_hTopMainMenu_topmenuobj = INVALID_TOPMENUOBJECT;
 TopMenuObject g_tmo_prefs = INVALID_TOPMENUOBJECT;
 TopMenu g_hTopMenu; // handle to the nt_menu plugin topmenu
 Handle g_hPrefsMenu;
+bool gbHasMenuPlugin;
 
 // caching of affected players
 int g_iAffectedAlivePlayers[3][NEO_MAX_PLAYERS+1]; // one array for each team
@@ -159,6 +160,7 @@ public void OnPluginStart()
 	TopMenu topmenu;
 	if (LibraryExists("nt_menu") && ((topmenu = GetNTTopMenu()) != null))
 	{
+		gbHasMenuPlugin = true;
 		OnNTMenuReady(topmenu);
 	}
 	else
@@ -365,16 +367,18 @@ public int PropsPrefsMenuHandler(Menu menu, MenuAction action, int param1, int p
 
 public void OnClientPutInServer(int client)
 {
-	CreateTimer(50.0, timer_AdvertiseHelp, client);
+	CreateTimer(50.0, timer_AdvertiseHelp, GetClientUserId(client));
 }
 
 
-public Action timer_AdvertiseHelp(Handle timer, int client)
+public Action timer_AdvertiseHelp(Handle timer, int userid)
 {
-	if (!IsValidClient(client) || !IsClientConnected(client) || !IsClientInGame(client))
+	int client = GetClientOfUserId(userid);
+	if (!IsClientInGame(client))
 		return Plugin_Stop;
 
-	PrintToChat(client, "[nt_ghostcapsfx] You can disable extra ghost warning sounds with !ghostsounds");
+	PrintToChat(client, "[nt_ghostcapsfx] You can disable extra ghost warning sounds with !ghostsounds%s.", 
+	gbHasMenuPlugin ? " or !menu." : "");
 	return Plugin_Stop;
 }
 
@@ -396,7 +400,7 @@ public void OnClientPostAdminCheck(int client)
 	if (AreClientCookiesCached(client))
 	{
 		ProcessCookies(client);
-		//CreateTimer(120.0, DisplayNotification, client);
+		//CreateTimer(120.0, DisplayNotification, GetClientUserId(client));
 		return;
 	}
 }
@@ -416,8 +420,6 @@ public void OnClientDisconnect(int client)
 public Action OnPlayerSpawn(Event event, const char[] name, bool dontbroadcast)
 {
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
-	if (!IsValidClient(client))
-		return Plugin_Continue;
 
 	#if DEBUG
 	PrintToServer("[nt_ghostcapsfx] OnPlayerSpawn(%d) (%N)", client, client);
@@ -594,9 +596,12 @@ void UpdateDeadArray(int client)
 		return;
 	}
 
-	// remove from alive array -> rebuild alive array!
+	// note: we cannot just remove from alive arrays, we need to rebuild them!
+	// Don't forget to call BuildAffectedTeamArray() anytime a player died.
 	g_iAffectedDeadPlayers[g_iNumAffectedDead++] = client;
+
 }
+
 
 
 void BuildAffectedTeamArray()
@@ -850,24 +855,26 @@ public void OnGhostCapture(int client)
 
 	CreateTimer(8.0, timer_ExplodeGhost, -1);
 
-	CreateTimer(6.1, timer_EmitRadioChatterSound, client);
-	CreateTimer(6.4, timer_EmitRadioChatterSound, client);
-	CreateTimer(6.7, timer_EmitRadioChatterSound, client);
-	CreateTimer(6.9, timer_EmitRadioChatterSound, client);
-	CreateTimer(7.3, timer_EmitRadioChatterSound, client);
-	CreateTimer(7.6, timer_EmitRadioChatterSound, client);
+	int userid = GetClientUserId(client);
 
-	CreateTimer(1.0, timer_DoSparks, client);
-	CreateTimer(1.5, timer_DoSparks, client);
-	CreateTimer(2.0, timer_DoSparks, client);
-	CreateTimer(2.2, timer_DoSparks, client);
-	CreateTimer(2.5, timer_DoSparks, client);
-	CreateTimer(2.9, timer_DoSparks, client);
-	CreateTimer(6.1, timer_DoSparks, client);
-	CreateTimer(7.0, timer_DoSparks, client);
-	CreateTimer(7.5, timer_DoSparks, client);
-	CreateTimer(8.0, timer_DoSparks, client);
-	CreateTimer(8.5, timer_DoSparks, client);
+	CreateTimer(6.1, timer_EmitRadioChatterSound, userid);
+	CreateTimer(6.4, timer_EmitRadioChatterSound, userid);
+	CreateTimer(6.7, timer_EmitRadioChatterSound, userid);
+	CreateTimer(6.9, timer_EmitRadioChatterSound, userid);
+	CreateTimer(7.3, timer_EmitRadioChatterSound, userid);
+	CreateTimer(7.6, timer_EmitRadioChatterSound, userid);
+
+	CreateTimer(1.0, timer_DoSparks, userid);
+	CreateTimer(1.5, timer_DoSparks, userid);
+	CreateTimer(2.0, timer_DoSparks, userid);
+	CreateTimer(2.2, timer_DoSparks, userid);
+	CreateTimer(2.5, timer_DoSparks, userid);
+	CreateTimer(2.9, timer_DoSparks, userid);
+	CreateTimer(6.1, timer_DoSparks, userid);
+	CreateTimer(7.0, timer_DoSparks, userid);
+	CreateTimer(7.5, timer_DoSparks, userid);
+	CreateTimer(8.0, timer_DoSparks, userid);
+	CreateTimer(8.5, timer_DoSparks, userid);
 }
 
 
@@ -1013,9 +1020,9 @@ void CreateAnnouncerTimers()
 // 		origin, dir, updatePos, soundtime);
 
 
-public Action timer_EmmitPickupSound2(Handle timer, int timerindex) //warning
+public Action timer_EmmitPickupSound2(Handle timer, int iTimerIndex) //warning
 {
-	AnnouncerTimer[timerindex] = INVALID_HANDLE;
+	AnnouncerTimer[iTimerIndex] = INVALID_HANDLE;
 
 	if(!g_bGhostIsHeld || g_bEndOfRound)
 		return Plugin_Stop;
@@ -1027,9 +1034,9 @@ public Action timer_EmmitPickupSound2(Handle timer, int timerindex) //warning
 }
 
 
-public Action timer_EmmitPickupSound3(Handle timer, int timerindex) //automatic target aquisition system
+public Action timer_EmmitPickupSound3(Handle timer, int iTimerIndex) //automatic target aquisition system
 {
-	AnnouncerTimer[timerindex] = INVALID_HANDLE;
+	AnnouncerTimer[iTimerIndex] = INVALID_HANDLE;
 
 	if(!g_bGhostIsHeld || g_bEndOfRound)
 		return Plugin_Stop;
@@ -1041,9 +1048,9 @@ public Action timer_EmmitPickupSound3(Handle timer, int timerindex) //automatic 
 }
 
 
-public Action timer_EmmitPickupSound4(Handle timer, int timerindex) //acquired
+public Action timer_EmmitPickupSound4(Handle timer, int iTimerIndex) //acquired
 {
-	AnnouncerTimer[timerindex] = INVALID_HANDLE;
+	AnnouncerTimer[iTimerIndex] = INVALID_HANDLE;
 
 	if(!g_bGhostIsHeld || g_bEndOfRound)
 		return Plugin_Stop;
@@ -1182,9 +1189,11 @@ public void EmitExplosionSound(int entity, float position[3])
 
 
 
-public Action timer_EmitRadioChatterSound(Handle timer, int client)
+public Action timer_EmitRadioChatterSound(Handle timer, int userid)
 {
-	if(!IsValidEntity(client) || !IsClientConnected(client))
+	int client = GetClientOfUserId(userid);
+
+	if(!IsValidEntity(client))
 		return Plugin_Stop;
 
 	float vecOrigin[3];
@@ -1204,7 +1213,7 @@ public Action timer_EmitRadioChatterSound(Handle timer, int client)
 
 void EmmitCapSound(int client)
 {
-	if(!IsValidEntity(client) || !IsClientConnected(client))
+	if(!IsValidEntity(client))
 		return;
 
 	float vecOrigin[3];
