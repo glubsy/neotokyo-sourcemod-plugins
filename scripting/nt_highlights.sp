@@ -10,18 +10,13 @@
 	#define DEBUG 0
 #endif
 
-String:g_sModelName[][] = {
-	"materials/sprites/laser.vmt",
-	"materials/sprites/halo01.vmt",
-	"materials/sprites/laserdot.vmt"
-}
-int blue_laser_color[3] = {20, 20, 210};
+int blue_laser_color[3] = {20, 60, 210};
 int green_laser_color[3] = {10, 210, 10};
 int iBulletTrailAlphaAmount = 180;
 float fBulletTrailTTL = 0.3;
 int iProjectileTrailAlphaAmount = 180;
-float fProjectileTrailTTL = 3.0;
-int g_modelLaser, g_modelHalo;
+float fProjectileTrailTTL = 4.0;
+int g_modelLaser, g_modelLaserGrenade, g_modelHalo;
 
 // Handle CVAR_hurt_trails, CVAR_grenade_trails = INVALID_HANDLE;
 Handle CVAR_BulletTrailAlpha, CVAR_GrenadeTrailAlpha, CVAR_BulletTrailTTL, CVAR_GrenadeTrailTTL = INVALID_HANDLE;
@@ -54,7 +49,7 @@ public Plugin:myinfo =
 
 // TODO: change thickness of beam depending on damage done
 // FIXME: showing TE for alive player still
-// TODO attempt to show trail through walls
+
 
 public void OnPluginStart()
 {
@@ -329,12 +324,29 @@ void TogglePrefs(int client, int type)
 
 public OnMapStart()
 {
-	// laser beam
-	// g_modelLaser = PrecacheModel("sprites/laser.vmt");
-	g_modelLaser = PrecacheModel(g_sModelName[0]);
+/* 
+"materials/sprites/laserdot.vmt"
+"materials/sprites/redglow2.vmt"
 
-	// laser halo
-	g_modelHalo = PrecacheModel(g_sModelName[1]);
+NOTE: in order for the trails to show through walls, 
+we need a "ingorez" in the .vmt (ie. orangelight1)
+
+"materials/sprites/orangelight1.vmt"
+"materials/sprites/blueflare1_noz.vmt"
+"materials/sprites/physcannon_bluelight1b.vmt" -> good but looks like lightning
+"materials/sprites/physcannon_bluecore2.vmt"
+"materials/sprites/lgtning_noz.vmt"
+"materials/sprites/glow04_noz.vmt" ok but dotted
+"materials/sprites/light_glow02_noz.vmt"
+"materials/sprites/ar2_muzzle4b.vmt"
+"materials/sprites/white.vmt" -> good but a bit flat
+*/
+	// laser beam // "materials/sprites/laser.vmt",
+	g_modelLaser = PrecacheModel("materials/sprites/laserbeam.vmt");
+	g_modelLaserGrenade = PrecacheModel("materials/sprites/white.vmt");
+
+	// laser halo // "materials/sprites/halo01.vmt"
+	g_modelHalo = PrecacheModel("materials/sprites/halo01.vmt");
 }
 
 
@@ -527,6 +539,8 @@ public Action Event_OnPlayerSpawn(Event event, const char[] name, bool dontbroad
 		#if DEBUG
 		PrintToServer("[nt_highlights] client %N spawned but is actually dead!", client);
 		#endif
+		if (GetClientTeam(client) < 2)
+			UpdateAffectedClientsArray(client);
 		return Plugin_Continue;
 	}
 
@@ -655,14 +669,14 @@ void DrawBeamFromProjectile(int entity, bool jinrai=true)
 
 	TE_Start("BeamFollow");
 	TE_WriteEncodedEnt("m_iEntIndex", entity);
-	// TE_WriteNum("m_nFlags", FBEAM_HALOBEAM|FBEAM_FADEOUT|FBEAM_SHADEOUT|FBEAM_FADEIN|FBEAM_SHADEIN);
-	TE_WriteNum("m_nModelIndex", g_modelLaser);
+	// TE_WriteNum("m_nFlags", FBEAM_HALOBEAM|FBEAM_FADEOUT|FBEAM_SHADEOUT|FBEAM_FADEIN|FBEAM_SHADEIN|FBEAM_STARTVISIBLE|FBEAM_ENDVISIBLE);
+	TE_WriteNum("m_nModelIndex", g_modelLaserGrenade);
 	TE_WriteNum("m_nHaloIndex", g_modelHalo);
 	TE_WriteNum("m_nStartFrame", 0);
-	TE_WriteNum("m_nFrameRate", 0);
+	TE_WriteNum("m_nFrameRate", 1);
 	TE_WriteFloat("m_fLife", fProjectileTrailTTL);
 	TE_WriteFloat("m_fWidth", 2.0);
-	TE_WriteFloat("m_fEndWidth", 1.0);
+	TE_WriteFloat("m_fEndWidth", 2.0);
 	TE_WriteNum("m_nFadeLength", 1);
 	if (jinrai)
 	{
