@@ -15,6 +15,7 @@
 #define CARRYING_TEAM 0 // team holding the ghost
 #define OPPOSING_TEAM 1 // team not holding the ghost
 #define ALL_ALIVE 2 // all alive players
+#define RESET_ALL -1
 
 int g_iGhost, g_iGhostCarrier, g_iGhostCarrierTeam;
 bool g_bGhostIsCaptured, g_bGhostIsHeld, g_bEndOfRound;
@@ -97,15 +98,11 @@ public Plugin myinfo =
 	url = "https://github.com/glubsy"
 };
 
-//FIXME: ghost doesn't explode when carried AND not currently primary weapon AND neo_disable_tie is 1 (probably not really important)
-// NOTE: actually it doesn't explode when neo_restart_this 1 is called, as the ghost entity is not properly reported by OnGhostSpawn()
-
-//FIXME: seems that a remnant timer is activated as soon as the ghost gets picked up, or it's just the game delaying the orignal alarm sound.
+// NOTE: ghost doesn't explode when carried AND not currently primary weapon AND neo_disable_tie is 1 (probably not really important)
+// -> actually it doesn't explode when neo_restart_this 1 is called, as the ghost entity is not properly reported by OnGhostSpawn()
 
 // TODO: sound/gameplay/ghost_idle_loop.wav while being carried
 // TODO: use sound/player/CPcaptured.wav for ghost capture sound
-// TODO: redo all the emitgamesounds to use an array of affected clients instead (for the haters)
-// TODO: add menu to toggle cookies
 
 
 public void OnPluginStart()
@@ -124,7 +121,7 @@ public void OnPluginStart()
 	convar_nt_doublecap_version = FindConVar("nt_doublecap_version");
 	convar_nt_ghostcap_version = FindConVar("sm_ntghostcap_version");
 
-	RegConsoleCmd("nt_ghostcapsfx_prefs", Command_Hate_Sounds_Toggle, "Toggle your preference to not hear custom ghost capture sound effect.");
+	RegConsoleCmd("sm_ghostsounds", Command_Hate_Sounds_Toggle, "Toggle your preference to not hear custom ghost capture sound effects.");
 
 	g_hPrefCookie = FindClientCookie("wants-ghostcapfx");
 	if (g_hPrefCookie == INVALID_HANDLE)
@@ -253,14 +250,14 @@ void BuildTopMenu()
 	if (g_hTopMainMenu_topmenuobj != INVALID_TOPMENUOBJECT)
 	{
 		// AddToTopMenu(g_hTopMenu, "nt_menu", TopMenuObject_Item, TopCategory_Handler, g_hTopMainMenu_topmenuobj, "nt_menu", 0);
-		g_tmo_prefs = g_hTopMenu.AddItem("sm_ghostcapsfx_prefs", TopMenuCategory_Handler, g_hTopMainMenu_topmenuobj, "sm_ghostcapsfx_prefs");
+		g_tmo_prefs = g_hTopMenu.AddItem("nt_ghostsounds", TopMenuCategory_Handler, g_hTopMainMenu_topmenuobj, "nt_ghostsounds");
 		return;
 	}
 
 	// didn't find categories, must be missing nt_menu plugin, so build our own category and attach to it
 	g_hTopMainMenu_topmenuobj = g_hTopMenu.AddCategory("Various effects", TopMenuCategory_Handler);
 
-	g_tmo_prefs = AddToTopMenu(g_hTopMenu, "sm_ghostcapsfx_prefs", TopMenuObject_Item, TopMenuCategory_Handler, g_hTopMainMenu_topmenuobj, "sm_ghostcapsfx_prefs");
+	g_tmo_prefs = AddToTopMenu(g_hTopMenu, "nt_ghostsounds", TopMenuObject_Item, TopMenuCategory_Handler, g_hTopMainMenu_topmenuobj, "nt_ghostsounds");
 }
 
 
@@ -377,7 +374,7 @@ public Action timer_AdvertiseHelp(Handle timer, int client)
 	if (!IsValidClient(client) || !IsClientConnected(client) || !IsClientInGame(client))
 		return Plugin_Stop;
 
-	PrintToChat(client, "[nt_ghostcapsfx] You can disable extra ghost warning sounds with !ghostcapsfx_prefs");
+	PrintToChat(client, "[nt_ghostcapsfx] You can disable extra ghost warning sounds with !ghostsounds");
 	return Plugin_Stop;
 }
 
@@ -407,7 +404,7 @@ public void OnClientPostAdminCheck(int client)
 
 public void OnClientDisconnect(int client)
 {
-	if(GetConVarBool(convar_ghost_sounds_enabled))
+	if (GetConVarBool(convar_ghost_sounds_enabled))
 	{
 		g_bWantsGhostSFX[client] = false;
 		CreateTimer(0.2, timer_UpdateArrays, -1, TIMER_FLAG_NO_MAPCHANGE);
@@ -415,6 +412,7 @@ public void OnClientDisconnect(int client)
 }
 
 
+// NOTE: this is called on client first connection, and the checks for alive status will fail!
 public Action OnPlayerSpawn(Event event, const char[] name, bool dontbroadcast)
 {
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
@@ -425,6 +423,7 @@ public Action OnPlayerSpawn(Event event, const char[] name, bool dontbroadcast)
 	PrintToServer("[nt_ghostcapsfx] OnPlayerSpawn(%d) (%N)", client, client);
 	#endif
 
+	// these will fail on first connection -> spawn!
 	if (GetEntProp(client, Prop_Send, "m_iHealth") <= 1 || GetEntProp(client, Prop_Send, "deadflag"))
 	{
 		#if DEBUG
@@ -436,7 +435,7 @@ public Action OnPlayerSpawn(Event event, const char[] name, bool dontbroadcast)
 
 	// for players spawning after freeze time has already ended
 	if (g_RefreshArrayTimer == INVALID_HANDLE)
-		g_RefreshArrayTimer = CreateTimer(10.0, timer_UpdateArrays, -1, TIMER_FLAG_NO_MAPCHANGE);
+		g_RefreshArrayTimer = CreateTimer(5.0, timer_UpdateArrays, -1, TIMER_FLAG_NO_MAPCHANGE);
 
 	return Plugin_Continue;
 }
@@ -460,8 +459,15 @@ void ProcessCookies(int client)
 		g_bWantsGhostSFX[client] = true;
 	}
 
-	UpdateAffectedArrays(client, !IsPlayerReallyAlive(client));
-	return;
+	if (!IsPlayerReallyAlive(client))
+	{
+		UpdateDeadArray(client);
+		BuildAffectedTeamArray();
+	}
+	else
+	{
+		BuildAffectedTeamArray();
+	}
 }
 
 
@@ -477,7 +483,11 @@ public Action Command_Hate_Sounds_Toggle(int client, int args)
 	ReplyToCommand(client, "[nt_ghostcapsfx] You have %s sound effects while ghost is held.",
 	g_bWantsGhostSFX[client] ? "opted to hear" : "opted out of hearing");
 
-	UpdateAffectedArrays(client, !IsPlayerReallyAlive(client));
+	if (!IsPlayerReallyAlive(client))
+		UpdateDeadArray(client);
+
+	BuildAffectedTeamArray();
+
 	ShowActivity2(client, "[nt_ghostcapsfx] ", "%N opted %s.", client, g_bWantsGhostSFX[client] ? "back in" : "out" );
 	LogAction(client, -1, "[nt_ghostcapsfx] \"%L\" opted %s.", client, g_bWantsGhostSFX[client] ? "back in" : "out");
 
@@ -514,13 +524,28 @@ bool HasAnyoneOptedOut()
 public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 {
 	int victim = GetClientOfUserId(GetEventInt(event, "userid"));
-	UpdateAffectedArrays(victim, true);
+
+	// make sure flags have been updated by the game
+	CreateTimer(0.1, timer_UpdateArrays, victim, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 
 public Action timer_UpdateArrays(Handle timer, int client)
 {
-	UpdateAffectedArrays(client, !IsPlayerReallyAlive(client));
+	if (client == -1)
+	{
+		UpdateDeadArray(-1);
+		BuildAffectedTeamArray();
+
+		g_RefreshArrayTimer = INVALID_HANDLE;
+		return Plugin_Stop;
+	}
+
+	if (!IsPlayerReallyAlive(client))
+		UpdateDeadArray(client);
+	
+	BuildAffectedTeamArray();
+
 	g_RefreshArrayTimer = INVALID_HANDLE;
 	return Plugin_Stop;
 }
@@ -528,15 +553,18 @@ public Action timer_UpdateArrays(Handle timer, int client)
 
 bool IsPlayerReallyAlive(int client)
 {
-	if (client <= 0)
+	if (client <= 0 || !IsClientInGame(client))
 		return false;
 
 	#if DEBUG
 	PrintToServer("[nt_ghostcapsfx] Client %N (%d) has %d health.", client, client, GetEntProp(client, Prop_Send, "m_iHealth"));
 	#endif
 
-	// For some reason, 1 health point means dead, but checking deadflag is probably more reliable!
-	if (GetEntProp(client, Prop_Send, "m_iHealth") <= 1 || GetEntProp(client, Prop_Send, "deadflag") || GetEntProp(client, Prop_Send, "m_iObserverMode") > 0)
+	// For some reason, 1 health point means dead, but checking deadflag is probably more reliable
+	if (GetEntProp(client, Prop_Send, "m_iHealth") <= 1 
+	|| GetEntProp(client, Prop_Send, "deadflag") 
+	|| GetEntProp(client, Prop_Send, "m_iObserverMode") > 0
+	|| GetClientTeam(client) < 2)
 	{
 		#if DEBUG
 		PrintToServer("[nt_ghostcapsfx] Determined that %N is not alive right now.", client);
@@ -545,27 +573,6 @@ bool IsPlayerReallyAlive(int client)
 	}
 
 	return true;
-}
-
-
-void UpdateAffectedArrays(int client, bool isDead=false)
-{
-	if (isDead) // assume player is dead, only upd
-	{
-		UpdateDeadArray(client);
-	}
-	if (client <= -1) // blank out arrays, start of round
-	{
-		g_iNumAffectedAlive[CARRYING_TEAM] = 0;
-		g_iNumAffectedAlive[OPPOSING_TEAM] = 0;
-		g_iNumAffectedDead = 0;
-		UpdateDeadArray(-1);
-		BuildAffectedTeamArray();
-		return;
-	}
-
-	// we do need to rebuild everytime
-	BuildAffectedTeamArray();
 }
 
 
@@ -587,15 +594,11 @@ void UpdateDeadArray(int client)
 		return;
 	}
 
-	// checks here
-	BuildAffectedTeamArray();
-
 	// remove from alive array -> rebuild alive array!
 	g_iAffectedDeadPlayers[g_iNumAffectedDead++] = client;
 }
 
 
-// type is carrying team or not
 void BuildAffectedTeamArray()
 {
 	g_iNumAffectedAlive[CARRYING_TEAM] = 0;
@@ -603,7 +606,7 @@ void BuildAffectedTeamArray()
 	g_iNumAffectedAlive[ALL_ALIVE] = 0;
 	for (int thisClient = 1; thisClient <= MaxClients; thisClient++)
 	{
-		if (!IsValidClient(thisClient) || !IsClientConnected(thisClient))
+		if (!IsValidClient(thisClient) || !IsClientInGame(thisClient))
 			continue;
 
 		if (!IsPlayerAlive(thisClient) || IsPlayerObserving(thisClient))
@@ -640,7 +643,7 @@ public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 	g_iLastCarryingTeam = 0;
 
 	if (g_RefreshArrayTimer == INVALID_HANDLE)
-		g_RefreshArrayTimer = CreateTimer(15.0, timer_UpdateArrays, -2, TIMER_FLAG_NO_MAPCHANGE);
+		g_RefreshArrayTimer = CreateTimer(15.0, timer_UpdateArrays, -1, TIMER_FLAG_NO_MAPCHANGE);
 
 	if(!GetConVarBool(convar_ghostexplodes))
 		return;
@@ -865,9 +868,6 @@ public void OnGhostCapture(int client)
 	CreateTimer(7.5, timer_DoSparks, client);
 	CreateTimer(8.0, timer_DoSparks, client);
 	CreateTimer(8.5, timer_DoSparks, client);
-
-
-
 }
 
 
@@ -881,7 +881,10 @@ public void OnGhostPickUp(int client)
 
 	if (g_iGhostCarrierTeam != g_iLastCarryingTeam) // first pick up will always be true
 	{
-		UpdateAffectedArrays(-1); // affects team but not carrier
+		// affects team but not carrier
+		UpdateDeadArray(-1);
+		BuildAffectedTeamArray();
+
 		CreateAnnouncerTimers(); // avoids recalling this if same team picks it up again, only do announcements once
 	}
 	g_iLastCarryingTeam = g_iGhostCarrierTeam;
