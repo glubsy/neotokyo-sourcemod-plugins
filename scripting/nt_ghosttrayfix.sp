@@ -59,7 +59,7 @@ public void OnPropSpawn(int entity)
 		#endif
 
 		// Collision data isn't properly set yet so we will have to do it later
-		CreateTimer(5.0, ChangePropCollisionGroup, EntIndexToEntRef(entity));
+		CreateTimer(0.2, ChangePropCollisionGroup, EntIndexToEntRef(entity));
 
 		return;
 	}

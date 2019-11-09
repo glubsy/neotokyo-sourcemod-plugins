@@ -18,16 +18,13 @@ public Plugin:myinfo =
 	name = "NEOTOKYO cloak tweaks",
 	author = "glub",
 	description = "Adds a one-time cloaking ability to supports.",
-	version = "0.1",
+	version = "0.2",
 	url = "https://github.com/glubsy"
 };
 
 
 // Supports get one cloak use, which lasts forever.
 // However, it gets disabled permanently once they take ennemy damage.
-
-//TODO: play a denying sound when attempting to cloak after charge has been used
-
 
 public void OnPluginStart()
 {
@@ -71,7 +68,6 @@ public Action OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
 }
 
 
-
 public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 {
 	int victim = GetClientOfUserId(GetEventInt(event, "userid"));
@@ -85,7 +81,6 @@ public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 	gbFreezeTime = true;
 	flRoundStartTime = GetGameTime();
 }
-
 
 
 // Prevent accidentally hitting cloak while in freezetime

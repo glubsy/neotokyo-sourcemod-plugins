@@ -21,6 +21,8 @@ public Plugin:myinfo = {
 	url = "http://github.com/glubsy"
 };
 
+//TODO: replace models in the map
+
 public OnMapStart()
 {
 	for(new item = 0; item < sizeof(g_GrenadeModel); item++)

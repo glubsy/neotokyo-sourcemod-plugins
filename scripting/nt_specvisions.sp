@@ -7,6 +7,9 @@ bool g_bLeanLHeld[MAXPLAYERS+1];
 bool g_bLeanRHeld[MAXPLAYERS+1];
 bool g_bCantUseVisions[MAXPLAYERS+1];
 
+// TODO: simplify code according to Soft's version https://github.com/softashell/neotokyo-sourcemod-plugins/blob/master/scripting/nt_specvisions.sp
+// the only change needed is the timer on death event to prevent spamming vision key for a few seconds
+
 public Plugin:myinfo = 
 {
 	name = "NEOTOKYO° Vision modes for spectators",
