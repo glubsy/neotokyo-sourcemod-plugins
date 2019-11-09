@@ -4,7 +4,7 @@
 
 public Plugin:myinfo = {
         name	= "Console opening helper",
-        description	= "Open client console with !console in chat.",
+        description	= "Open console with !console in chat, block self-harming commands for non-admins.",
         version	= PLUGIN_VERSION,
         author	= "Rain, glub",
         url	 	= "github.com/rainyan"
