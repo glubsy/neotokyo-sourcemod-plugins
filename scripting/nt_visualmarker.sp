@@ -7,22 +7,18 @@
 	#define DEBUG 0
 #endif
 
-int laser_color[4] = {210, 210, 0, 200};
-bool gbRoundStarted;
+int laser_color[4] = {210, 210, 0, 128};
 int giBeaconSprite[NEO_MAX_CLIENTS+1][2];
 int giBeaconBeam[NEO_MAX_CLIENTS+1] = {-1, ...};
 int giHeadTarget[NEO_MAX_CLIENTS+1] = {-1, ...};
 int giTargetStart[NEO_MAX_CLIENTS+1] = {-1, ...};
 int giTargetEnd[NEO_MAX_CLIENTS+1] = {-1, ...};
-int giBeaconModel, g_modelHalo, g_modelLaser;
+int g_modelHalo, g_modelLaser, giCircleModel, giQmarkModel;
 bool gbIsObserver[NEO_MAX_CLIENTS+1];
 bool gbCanUpdatePos[NEO_MAX_CLIENTS+1];
 int giRadiusInc[NEO_MAX_CLIENTS+1];
 
-enum SpriteType {
-	QMARK = 0,
-	CIRCLE
-}
+enum SpriteType { QMARK = 0, CIRCLE };
 
 public Plugin:myinfo =
 {
@@ -35,13 +31,15 @@ public Plugin:myinfo =
 
 /*
 TODO:
-- display a small halo ring upon creation
-- have a ignorez laser between ping point and player
-- have their name displayed at the ping location?
-- emit a brief sound when placed?
-- share spotted beacon from ghost carrier when aiming and clicking at a beacon/player
+- have a "ignore z" laser
+- have their name displayed at the ping location? (visual clutter?)
+- emit a brief sound when placed
+- share spotted beacon from ghost carrier when clicking while aiming at a beacon/player
 - only show visual pings from people in same squad
+- display a small halo ring upon creation
 */
+
+#define USE_TE 1
 
 public void OnPluginStart()
 {
@@ -55,16 +53,18 @@ public void OnPluginStart()
 	}
 }
 
+// #define LASERMDL "custom/radio.vmt"
+// #define LASERMDL "materials/sprites/laser.vmt"
+#define LASERMDL "materials/sprites/redglow1.vmt" // good for animation
+
 public OnMapStart()
 {
-	g_modelLaser = PrecacheModel("sprites/laserdot.vmt");
-
+	// g_modelLaser = PrecacheModel("materials/sprites/laser.vmt");
+	g_modelLaser = PrecacheModel(LASERMDL);
 	g_modelHalo = PrecacheModel("materials/sprites/halo01.vmt");
 
-	giBeaconModel = PrecacheModel("materials/sprites/dot.vmt");
-
-	PrecacheModel("materials/vgui/hud/cp/cp_none.vmt"); // question mark
-	PrecacheModel("materials/vgui/hud/ctg/g_beacon_circle.vmt"); // circle
+	giQmarkModel = PrecacheModel("materials/vgui/hud/cp/cp_none.vmt"); // question mark
+	giCircleModel = PrecacheModel("materials/vgui/hud/ctg/g_beacon_circle.vmt"); // circle
 }
 
 
@@ -205,24 +205,24 @@ int CreateBeamEnt(int client)
 	// SetEntPropVector(iLaserEnt, Prop_Data, "m_vecEndPos", beam_end_pos);
 
 	// Setting Appearance
-	DispatchKeyValue(iLaserEnt, "texture", "materials/sprites/laser.vmt");
-	DispatchKeyValue(iLaserEnt, "model", "materials/sprites/laser.vmt"); // ?
+	DispatchKeyValue(iLaserEnt, "texture", LASERMDL);
+	DispatchKeyValue(iLaserEnt, "model", LASERMDL); // ?
 	DispatchKeyValue(iLaserEnt, "decalname", "redglowalpha");
 
-	DispatchKeyValue(iLaserEnt, "renderamt", "120"); // TODO(?): low renderamt, increase when activate
+	DispatchKeyValue(iLaserEnt, "renderamt", "30"); // TODO(?): low renderamt, increase when activate
 	DispatchKeyValue(iLaserEnt, "renderfx", "15"); // distort?
-	DispatchKeyValue(iLaserEnt, "rendercolor", "200 25 25 100");
+	DispatchKeyValue(iLaserEnt, "rendercolor", "200 25 25 30");
 	DispatchKeyValue(iLaserEnt, "BoltWidth", "1.0");
 	DispatchKeyValue(iLaserEnt, "spawnflags", "256"); // fade towards ending entity
 
 	// something else..
-	DispatchKeyValue(iLaserEnt, "life", "0.0");
+	DispatchKeyValue(iLaserEnt, "life", "0.7");
 	DispatchKeyValue(iLaserEnt, "StrikeTime", "0");
 	DispatchKeyValue(iLaserEnt, "TextureScroll", "35");
 	// DispatchKeyValue(iLaserEnt, "TouchType", "3");
 
 	DispatchSpawn(iLaserEnt);
-	SetEntityModel(iLaserEnt,  "materials/sprites/laser.vmt");
+	SetEntityModel(iLaserEnt, LASERMDL);
 
 	ActivateEntity(iLaserEnt); // not sure what that is (for texture animation?)
 
@@ -300,7 +300,7 @@ public Action timer_SetAttachment(Handle timer, DataPack dp)
 int CreateTargetForBeacon(char[] sTag, int client, int parent_entity=0)
 {
 	int iEnt = CreateEntityByName("info_target");
-	// int iEnt = CreateEntityByName("prop_physics");
+	// int iEnt = CreateEntityByName("prop_physics_override");
 	// DispatchKeyValue(iEnt, "model", "models/nt/a_lil_tiger.mdl");
 
 	char ent_name[20];
@@ -368,36 +368,55 @@ public Action timer_ClearBlockingFlag(Handle timer, int userid)
 
 void PlaceBeacon(int client)
 {
-	if (giBeaconSprite[client][QMARK] <= 0) // FIXME more tests please
+	float vecEnd[3], vecStart[3];
+	GetClientEyePosition(client, vecStart);
+	GetEndPositionFromClient(client, vecEnd);
+
+	// OBSOLETE TESTING
+	// SpawnTESprite(vecEnd, giQmarkModel, 0.2);
+	// SpawnTESprite(vecEnd, giCircleModel, 0.5);
+
+	if (giBeaconSprite[client][QMARK] <= 0) // FIXME more tests?
 	{
 		giBeaconSprite[client][QMARK] = CreateBeaconEnt(QMARK);
 		giBeaconSprite[client][CIRCLE] = CreateBeaconEnt(CIRCLE);
-		giHeadTarget[client] = CreateTarget(client, "headtarget");
 
+		// giHeadTarget[client] = CreateTarget(client, "headtarget");
+
+		/* OBSOLETE used for SpawnRing()
 		// NOTE parenting an info_target to the sprite works
 		giTargetStart[client] = CreateTargetForBeacon("targetstart",
 		client, giBeaconSprite[client][QMARK]);
 
-		// used for SpawnRing()
+		// OBSOLETE used for SpawnRing()
 		// giTargetEnd[client] = CreateTargetForBeacon("targetend",
 		// client, giBeaconSprite[client]);
+		*/
 
+		#if !USE_TE
 		giBeaconBeam[client] = CreateBeamEnt(client);
+		#endif
 	}
 
 	AcceptEntityInput(giBeaconSprite[client][QMARK], "ShowSprite");
 	AcceptEntityInput(giBeaconSprite[client][CIRCLE], "ShowSprite");
+
+	#if !USE_TE
 	AcceptEntityInput(giBeaconBeam[client], "TurnOn");
+	#else
+	TELaserBeam(client, giBeaconSprite[client][QMARK]);
+	SendTE(GetClientTeam(client));
+	#endif
+
 	#if DEBUG
 	PrintToServer("TurnOn sprite\nTurnOn BEAM");
 	#endif
 
-	float vecEnd[3];
-	GetEndPositionFromClient(client, vecEnd);
 	TeleportEntity(giBeaconSprite[client][QMARK], vecEnd, NULL_VECTOR, NULL_VECTOR);
 	TeleportEntity(giBeaconSprite[client][CIRCLE], vecEnd, NULL_VECTOR, NULL_VECTOR);
 	// TeleportEntity(giTargetStart[client], vecEnd, NULL_VECTOR, NULL_VECTOR);
 	// TeleportEntity(giTargetEnd[client], vecEnd, NULL_VECTOR, NULL_VECTOR);
+
 
 	// attempt to draw a circle in increasing radius around target: FAIL
 	// SpawnRing(client, giBeaconSprite[client][QMARK], giTargetEnd[client]);
@@ -453,10 +472,13 @@ void ToggleBeacon(int client)
 	#endif
 	AcceptEntityInput(giBeaconSprite[client][QMARK], "HideSprite");
 	AcceptEntityInput(giBeaconSprite[client][CIRCLE], "HideSprite");
+
+	#if !USE_TE
 	#if DEBUG
 	PrintToServer("TurnOff BEAM");
 	#endif
 	AcceptEntityInput(giBeaconBeam[client], "TurnOff");
+	#endif
 }
 
 
@@ -471,8 +493,91 @@ void DestroyBeacon(int client)
 }
 
 
+void TELaserBeam(int iStartEnt=0, int iEndEnt=0,
+float[3] vecStart=NULL_VECTOR, float[3] vecEnd=NULL_VECTOR)
+{
+	#if DEBUG
+	PrintToServer("TELaserBeam(%d, %d, {%f %f %f}, {%f %f %f})",
+	iStartEnt, iEndEnt, vecStart[0], vecStart[1], vecStart[2], vecEnd[0], vecEnd[1], vecEnd[2]);
+	#endif
+	// TE_Start("BeamPoints");
+	// TE_Start("BeamEntPoint");
+	TE_Start("BeamEnts");
+	// TE_WriteVector("m_vecStartPoint", vecStart);
+	// TE_WriteVector("m_vecEndPoint", vecEnd);
+	TE_WriteNum("m_nFlags", FBEAM_NOTILE|FBEAM_FOREVER|FBEAM_ISACTIVE|FBEAM_SINENOISE|
+	FBEAM_STARTENTITY|FBEAM_ENDENTITY|FBEAM_HALOBEAM|FBEAM_FADEOUT|FBEAM_SHADEOUT);
+
+	// specific to BeamEntPoint TE
+	TE_WriteEncodedEnt("m_nStartEntity", iEndEnt); // inverted to allow animation in the proper direction
+	TE_WriteEncodedEnt("m_nEndEntity", iStartEnt);
+
+	TE_WriteNum("m_nModelIndex", g_modelLaser);
+	TE_WriteNum("m_nHaloIndex", g_modelHalo); 	// NOTE: Halo can be set to "0"!
+	TE_WriteNum("m_nStartFrame", 1);
+	TE_WriteNum("m_nFrameRate", 2);
+	TE_WriteFloat("m_fLife", 0.7);
+	TE_WriteFloat("m_fWidth", 1.5);
+	TE_WriteFloat("m_fEndWidth", 0.2);
+	TE_WriteFloat("m_fAmplitude", 0.0);
+	TE_WriteNum("r", laser_color[0]);
+	TE_WriteNum("g", laser_color[1]);
+	TE_WriteNum("b", laser_color[2]);
+	TE_WriteNum("a", laser_color[3]);
+	TE_WriteNum("m_nSpeed", 35);
+	TE_WriteNum("m_nFadeLength", 10);
+}
+
+// Doesn't seem to work with info_target? Shame. Only work on physics props with model?
+void TELaserBeamFollow(int entity)
+{
+	TE_Start("BeamFollow");
+	TE_WriteEncodedEnt("m_iEntIndex", entity);
+	TE_WriteNum("m_nFlags", FBEAM_HALOBEAM|FBEAM_FADEOUT|FBEAM_SHADEOUT|FBEAM_STARTVISIBLE|FBEAM_ENDVISIBLE);
+	TE_WriteNum("m_nModelIndex", g_modelLaser);
+	TE_WriteNum("m_nHaloIndex", g_modelHalo);
+	TE_WriteNum("m_nStartFrame", 0);
+	TE_WriteNum("m_nFrameRate", 1);
+	TE_WriteFloat("m_fLife", 1.1);
+	TE_WriteFloat("m_fWidth", 3.0);
+	TE_WriteFloat("m_fEndWidth", 2.0);
+	TE_WriteNum("m_nFadeLength", 2);
+	TE_WriteNum("r", laser_color[0]);
+	TE_WriteNum("g", laser_color[1]);
+	TE_WriteNum("b", laser_color[2]);
+	TE_WriteNum("a", laser_color[3]);
+}
+
+// Not ideal: can't change color, size changes with distance and is too big
+// however, it does ignore the z buffer properly
+void SpawnTESprite(float[3] Pos, int Model, float Size)
+{
+	TE_Start("GlowSprite");
+	TE_WriteVector("m_vecOrigin", Pos);
+	TE_WriteNum("m_nModelIndex", Model);
+	TE_WriteFloat("m_fScale", Size);
+	TE_WriteFloat("m_fLife", 5.0);
+	TE_WriteNum("m_nBrightness", 30);
+}
+
+// filter out team iTeam
+void SendTE(int iTeam)
+{
+	// FIXME do this elsewhere and cache it
+	int iTEClients[NEO_MAX_CLIENTS+1], nTEClients;
+	for(int j = 1; j <= sizeof(iTEClients); ++j)
+	{
+		if(!IsValidClient(j) || GetClientTeam(j) != iTeam) // only draw for others
+			continue;
+		iTEClients[nTEClients++] = j;
+	}
+	TE_Send(iTEClients, nTEClients);
+}
+
+
 // This doesn't seem to display anything with info_target, only with physics_prop with model :(
 // BeamRingPoint works but can't be facing the player (rotated) so not a perfect alternative
+// TODO: use env_beam with spawnflag 8 to draw a ring!
 void SpawnRing(int client, int StartEntity, int EndEntity)
 {
 	#if DEBUG
@@ -507,16 +612,6 @@ START m_vecAbsOrigin %f %f %f",
 	TE_WriteNum("m_nSpeed", 10);
 	TE_WriteNum("m_nFadeLength", 0);
 	TE_WriteNum("m_nFlags", FBEAM_STARTENTITY|FBEAM_ENDENTITY);
-
-	// FIXME do this elsewhere and cache it
-	int iBeamClients[NEO_MAX_CLIENTS+1], nBeamClients;
-	for(int j = 1; j <= sizeof(iBeamClients); ++j)
-	{
-		if(!IsValidClient(j) /*&& (client == j)*/) // only draw for others
-			continue;
-		iBeamClients[nBeamClients++] = j;
-	}
-	TE_Send(iBeamClients, nBeamClients);
 }
 
 

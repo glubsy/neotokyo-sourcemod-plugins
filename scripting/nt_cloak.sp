@@ -84,6 +84,7 @@ public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 
 
 // Prevent accidentally hitting cloak while in freezetime
+// TODO: try to check m_bFreezePeriod on neo_gamerules instead?
 public void OnGameFrame()
 {
 	if(gbFreezeTime)

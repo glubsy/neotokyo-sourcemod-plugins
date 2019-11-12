@@ -43,7 +43,7 @@
 
 **nt_ghostpos**: anti-griefing measure that checks for ghost position on certain maps, teleports it back to valid coordinates, prevents ghost-hopping.
 
-**nt_visualping**: places a visual marker in the world to indicate a point of interest to your team mates, like a spotted opponent.
+**nt_visualmarker**: places a marker in the world to indicate a point of interest to your team mates, like a spotted opponent.
 
 Donger model here: https://www.mediafire.com/?6y352ceczvs3oc1
 

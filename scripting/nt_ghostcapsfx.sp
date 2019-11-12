@@ -201,7 +201,7 @@ public void OnConfigsExecuted()
 	// Late loading, players should head by default
 	for (int i = 1; i <= MaxClients; i++)
 	{
-		if (!IsValidClient(i) || !IsClientConnected(i) | IsFakeClient(i))
+		if (!IsValidClient(i) || IsFakeClient(i))
 			continue;
 		ProcessCookies(i);
 	}
@@ -374,7 +374,7 @@ public void OnClientPutInServer(int client)
 public Action timer_AdvertiseHelp(Handle timer, int userid)
 {
 	int client = GetClientOfUserId(userid);
-	if (!IsClientInGame(client))
+	if (!IsValidClient(client))
 		return Plugin_Stop;
 
 	PrintToChat(client, "[nt_ghostcapsfx] You can disable extra ghost warning sounds with !ghostsounds%s.", 
@@ -586,7 +586,7 @@ void UpdateDeadArray(int client)
 		g_iNumAffectedDead = 0;
 		for (int thisClient = 1; thisClient <= MaxClients; thisClient++)
 		{
-			if (!IsValidClient(thisClient) || !IsClientConnected(thisClient) || IsFakeClient(thisClient))
+			if (!IsValidClient(thisClient) || IsFakeClient(thisClient))
 				continue;
 
 			// check if observing mode
@@ -611,7 +611,7 @@ void BuildAffectedTeamArray()
 	g_iNumAffectedAlive[ALL_ALIVE] = 0;
 	for (int thisClient = 1; thisClient <= MaxClients; thisClient++)
 	{
-		if (!IsValidClient(thisClient) || !IsClientInGame(thisClient))
+		if (!IsValidClient(thisClient))
 			continue;
 
 		if (!IsPlayerAlive(thisClient) || IsPlayerObserving(thisClient))
@@ -1063,23 +1063,22 @@ public Action timer_EmmitPickupSound4(Handle timer, int iTimerIndex) //acquired
 
 
 
-public Action timer_DoSparks(Handle timer, int client)
+public Action timer_DoSparks(Handle timer, int userid)
 {
-	DoSparkleEffect(client);
+	DoSparkleEffect(GetClientOfUserId(userid));
+	return Plugin_Stop;
 }
 
 
 public void DoSparkleEffect(int client)
 {
-	if(!IsClientInGame(client) || !IsClientConnected(client))
+	if(!IsValidClient(client))
 		return;
 
 	float vecOrigin[3], vecEyeAngles[3];
 	GetClientEyePosition(client, vecOrigin);
 	vecOrigin[2] += 10.0;
 	vecEyeAngles[2] = 1.0;
-
-	//TE_SetupSparks(vecOrigin, vecEyeAngles, 1, 1);
 
 	TE_Start("Sparks");
 	TE_WriteFloat("m_vecOrigin[0]", vecOrigin[0]);
