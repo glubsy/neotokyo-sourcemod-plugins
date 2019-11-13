@@ -9,8 +9,10 @@
 
 #define USE_TE 1
 
+enum SpriteType { QMARK = 0, CIRCLE, TARGET, LABEL, MAX };
+
 int laser_color[4] = {210, 210, 0, 128};
-int giBeaconSprite[NEO_MAX_CLIENTS+1][3];
+int giBeaconSprite[NEO_MAX_CLIENTS+1][MAX];
 #if !USE_TE
 int giBeaconBeam[NEO_MAX_CLIENTS+1] = {-1, ...};
 int giHeadTarget[NEO_MAX_CLIENTS+1] = {-1, ...};
@@ -22,14 +24,12 @@ int g_modelHalo, g_modelLaser, giCircleModel, giQmarkModel;
 bool gbIsObserver[NEO_MAX_CLIENTS+1];
 bool gbCanUpdatePos[NEO_MAX_CLIENTS+1];
 int giRadiusInc[NEO_MAX_CLIENTS+1];
-int giHiddenEnts[NEO_MAX_CLIENTS+1][3][NEO_MAX_CLIENTS+1]; // assuming opposing team will never have more than 20 players
+int giHiddenEnts[NEO_MAX_CLIENTS+1][MAX][NEO_MAX_CLIENTS+1]; // assuming opposing team will never have more than 20 players
 Handle gCVARTimeToLive;
 Handle ghToggleTimer[NEO_MAX_CLIENTS+1] = INVALID_HANDLE;
 bool gbKeyHeld[NEO_MAX_CLIENTS+1];
 
-enum SpriteType { QMARK = 0, CIRCLE, TARGET };
-
-#define LASERMDL "materials/sprites/redglow1.vmt" // good for animation, but no ignorez and red
+#define LASERMDL "materials/sprites/redglow1.vmt" // good for animation, but no ignorez and only red
 #define BEEPSND "buttons/button15.wav"
 // #define LASERMDL "custom/radio.vmt"
 // #define LASERMDL "materials/sprites/laser.vmt"
@@ -69,6 +69,7 @@ public void OnPluginStart()
 		giBeaconSprite[i][TARGET] = -1;
 		giBeaconSprite[i][QMARK] = -1;
 		giBeaconSprite[i][CIRCLE] = -1;
+		// giBeaconSprite[i][LABEL] = -1;
 	}
 }
 
@@ -139,6 +140,7 @@ public Action OnRoundEnd(Event event, const char[] name, bool dontbroadcast)
 		giBeaconSprite[i][TARGET] = -1;
 		giBeaconSprite[i][QMARK] = -1;
 		giBeaconSprite[i][CIRCLE] = -1;
+		// giBeaconSprite[i][LABEL] = -1;
 
 		#if DEBUG > 2
 		if (IsValidEntity(giBeaconBeam[i])){
@@ -178,7 +180,7 @@ int CreateSpriteEnt(SpriteType type)
 	{
 		DispatchKeyValue(iEnt, "model", "materials/vgui/hud/cp/cp_none.vmt");
 
-		DispatchKeyValue(iEnt, "rendermode", "1"); // 3 glow keeps size, 9 doesn't, 1 ignores z buffer
+		DispatchKeyValue(iEnt, "rendermode", "5"); // 3 glow keeps size, 9 doesn't, 1,5,8 ignore z buffer
 		DispatchKeyValueFloat(iEnt, "GlowProxySize", 2.0);
 		// DispatchKeyValueFloat(iEnt, "HDRColorScale", 1.0); // needs testing
 		DispatchKeyValue(iEnt, "renderamt", "255"); // transparency
@@ -198,7 +200,7 @@ int CreateSpriteEnt(SpriteType type)
 	{
 		DispatchKeyValue(iEnt, "model", "materials/vgui/hud/ctg/g_beacon_circle.vmt");
 
-		DispatchKeyValue(iEnt, "rendermode", "1"); // 3 glow keeps size, 9 doesn't, 1 ignores z buffer
+		DispatchKeyValue(iEnt, "rendermode", "5"); // 3 glow keeps size, 9 doesn't, 1,5,8 ignore z buffer
 		DispatchKeyValueFloat(iEnt, "GlowProxySize", 2.0);
 		// DispatchKeyValueFloat(iEnt, "HDRColorScale", 1.0); // needs testing
 		DispatchKeyValue(iEnt, "renderamt", "255"); // transparency
@@ -306,7 +308,7 @@ int CreateTargetProp(int client, char[] sTag, int parent=0, bool attachtoclient=
 	DispatchKeyValue(iEnt, "targetname", ent_name);
 
 	#if DEBUG
-	PrintToServer("[nt_visualping] Created target on %N (%d) :%s",
+	PrintToServer("[visualmarker] Created target on %N (%d) :%s",
 	client, iEnt, ent_name);
 	#endif
 
@@ -358,7 +360,7 @@ public Action timer_SetAttachment(Handle timer, DataPack dp)
 	ReadPackString(dp, type, sizeof(type));
 
 	#if DEBUG
-	PrintToServer("[nt_visualping] SetParentAttachment to eyes for info_target %d.",
+	PrintToServer("[visualmarker] SetParentAttachment to eyes for info_target %d.",
 	iEnt);
 	#endif
 
@@ -426,6 +428,29 @@ void MakeParent(int child, int parent)
 }
 
 
+// doesn't seem to work in NT?
+int CreateLabelProp(int client, char[] message)
+{
+	int iEnt = CreateEntityByName("point_message");
+
+	#if DEBUG
+	PrintToServer("[visualmarker] created point_message %d", iEnt);
+	#endif
+
+	DispatchKeyValue(iEnt, "message", message);
+	DispatchKeyValue(iEnt, "radius", "1000");
+	DispatchKeyValue(iEnt, "developeronly", "0");
+	SetEntProp(iEnt, Prop_Data, "m_drawText", 1);
+	SetEntProp(iEnt, Prop_Data, "m_bEnabled", 1);
+	AcceptEntityInput(iEnt, "Enable");
+
+	DispatchSpawn(iEnt);
+	// ActivateEntity(iEnt);
+	TeleportEntity(iEnt, NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
+	return iEnt;
+
+}
+
 void PlaceBeacon(int client)
 {
 	float vecEnd[3], vecStart[3], vecAngle[3];
@@ -442,9 +467,12 @@ void PlaceBeacon(int client)
 		giBeaconSprite[client][TARGET] = CreateTargetProp(client, "pmarker", 0, false);
 		giBeaconSprite[client][QMARK] = CreateSpriteEnt(QMARK);
 		giBeaconSprite[client][CIRCLE] = CreateSpriteEnt(CIRCLE);
+		// giBeaconSprite[client][LABEL] = CreateLabelProp(client, "TEST_LABEL");
+		// TeleportEntity(giBeaconSprite[client][LABEL], vecEnd, NULL_VECTOR, NULL_VECTOR);
 
 		MakeParent(giBeaconSprite[client][QMARK], giBeaconSprite[client][TARGET]);
 		MakeParent(giBeaconSprite[client][CIRCLE], giBeaconSprite[client][TARGET]);
+		// MakeParent(giBeaconSprite[client][LABEL], giBeaconSprite[client][TARGET]);
 
 		BuildFilter(client, giBeaconSprite[client][TARGET], TARGET);
 		BuildFilter(client, giBeaconSprite[client][QMARK], QMARK);
@@ -472,6 +500,7 @@ void PlaceBeacon(int client)
 
 	AcceptEntityInput(giBeaconSprite[client][QMARK], "ShowSprite");
 	AcceptEntityInput(giBeaconSprite[client][CIRCLE], "ShowSprite");
+	// AcceptEntityInput(giBeaconSprite[client][LABEL], "Enable");
 
 	// filter out team if not same team
 	int iTEClients[NEO_MAX_CLIENTS+1];
@@ -566,6 +595,7 @@ void ToggleBeacon(int client)
 	#endif
 	AcceptEntityInput(giBeaconSprite[client][QMARK], "HideSprite");
 	AcceptEntityInput(giBeaconSprite[client][CIRCLE], "HideSprite");
+	// AcceptEntityInput(giBeaconSprite[client][LABEL], "Disable");
 
 	#if !USE_TE
 	#if DEBUG
@@ -645,6 +675,7 @@ void TELaserBeam(int iStartEnt=0, int iEndEnt=0, float[3] vecStart=NULL_VECTOR, 
 // Doesn't seem to work with info_target. Shame. Only work on networked entity with model?
 // TODO: try with prop_dynamic and velocity!
 // TODO: try with info_target but with flag to transmit in PVS!
+// TODO: try env_tracer too, or env_spritetrail
 stock void TELaserBeamFollow(int entity)
 {
 	TE_Start("BeamFollow");
@@ -745,8 +776,10 @@ stock void SpawnRing(int client, int StartEntity, int EndEntity)
 	GetEntPropVector(StartEntity, Prop_Send, "m_vecOrigin", vecStart);
 	GetEntPropVector(EndEntity, Prop_Send, "m_vecOrigin", vecEnd);
 	GetEntPropVector(StartEntity, Prop_Data, "m_vecAbsOrigin", vecAbsStart);
-	PrintToServer("SpawnRing: START m_vecOrigin %f %f %f END m_vecOrigin %f %f %f, \
-START m_vecAbsOrigin %f %f %f",
+	PrintToServer("SpawnRing: \
+START m_vecOrigin %.2f %.2f %.2f \
+END m_vecOrigin %.2f %.2f %.2f, \
+START m_vecAbsOrigin %.2f %.2f %.2f",
 	vecStart[0], vecStart[1], vecStart[2],
 	vecEnd[0], vecEnd[1], vecEnd[2],
 	vecAbsStart[0], vecAbsStart[1], vecAbsStart[2]);
