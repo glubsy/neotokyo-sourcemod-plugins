@@ -256,7 +256,7 @@ public void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] 
 		giAttachment[i] = 0;
 		giLaserDot[i] = 0;
 		giLaserBeam[i] = 0;
-		
+
 		if (giViewModelLaserBeam[i] > 0 && IsValidEntity(giViewModelLaserBeam[i]))
 		{
 			AcceptEntityInput(giViewModelLaserBeam[i], "kill");
@@ -428,16 +428,27 @@ public Action timer_CreateViewModelLaser(Handle timer, int client)
 }
 
 
-void CreateLaserEntities(int client, int wpnIndex)
+void CreateLaserEntities(int client, int weaponEnt, int wpnIndex)
 {
 	// int wpnIndex = GetTrackedWeaponIndex(GetPlayerWeaponSlot(client, SLOT_PRIMARY));
 
 	if (wpnIndex < 0)
 		ThrowError("[lasersight] Primary weapon returned index -1. Failed creating laser entities!");
 
-	if (CreateFakeAttachedProp(wpnIndex, client))
-		if (CreateLaserDot(wpnIndex))
-			CreateLaserBeam(wpnIndex);
+	giAttachment[wpnIndex] = CreateInfoTargetProp(weaponEnt, client, "wmodel", true);
+
+	if (giAttachment[wpnIndex])
+	{
+		#if DEBUG
+		PrintToServer("[lasersight] we have attachment %d on weapon index %d. Updating position.\
+Calling with type %d",
+		giAttachment[wpnIndex], wpnIndex, giWpnType[wpnIndex]);
+		#endif
+		UpdateAttachementPosition(giWpnType[wpnIndex], giAttachment[wpnIndex], false);
+
+		if (CreateLaserDot(wpnIndex, weaponEnt))
+			CreateLaserBeam(wpnIndex, weaponEnt)
+	}
 
 	// REMOVE (no need for timer)
 	// CreateTimer(0.1, timer_CreateViewModelLaser, client);
@@ -671,7 +682,7 @@ public void OnWeaponEquip(int client, int weapon)
 		#endif
 
 		int wpnindex = LookForWeaponsToTrack(client);
-		CreateLaserEntities(client, wpnindex);
+		CreateLaserEntities(client, weapon, wpnindex);
 		gbFreezeTime[client] = false;
 		return;
 	}
@@ -698,49 +709,50 @@ bool NeedUpdateLoop()
 }
 
 
-bool CreateFakeAttachedProp(int weapon, int client)
-{
-	if (giAttachment[weapon] > 0){
-		#if DEBUG
-		PrintToServer("[lasersight] Attachment already exists for weapon %d",
-		iAffectedWeapons[weapon]);
-		#endif
-		return false;
-	}
+// REMOVE merged with viewmodel methods
+// int CreateFakeAttachedProp(int weapon, int client, char[] tag)
+// {
+// 	if (giAttachment[weapon] > 0){
+// 		#if DEBUG
+// 		PrintToServer("[lasersight] Attachment already exists for weapon %d",
+// 		iAffectedWeapons[weapon]);
+// 		#endif
+// 		return -1; }
 
-	giAttachment[weapon] = CreateEntityByName("info_target");
+// 	iEnt = CreateEntityByName("info_target");
 
-	#if DEBUG
-	// giAttachment[weapon] = CreateEntityByName("prop_dynamic_ornament");
-	// giAttachment[weapon] = CreateEntityByName("prop_physics");
-	// DispatchKeyValue(giAttachment[weapon], "model", "models/nt/a_lil_tiger.mdl");
-	PrintToServer("[lasersight] Created info_target on %N 's weapon (%d)",
-	client, iAffectedWeapons[weapon]);
-	#endif
+// 	#if DEBUG
+// 	// giAttachment[weapon] = CreateEntityByName("prop_dynamic_ornament");
+// 	// giAttachment[weapon] = CreateEntityByName("prop_physics");
+// 	// DispatchKeyValue(giAttachment[weapon], "model", "models/nt/a_lil_tiger.mdl");
+// 	PrintToServer("[lasersight] Created info_target on %N 's weapon (%d)",
+// 	client, iAffectedWeapons[weapon]);
+// 	#endif
 
-	char ent_name[20];
-	Format(ent_name, sizeof(ent_name), "info_target%d", weapon); // tag this weapon
-	DispatchKeyValue(giAttachment[weapon], "targetname", ent_name);
+// 	char ent_name[20];
+// 	Format(ent_name, sizeof(ent_name), "%s%d", tag, weapon); // tag this weapon
+// 	DispatchKeyValue(iEnt, "targetname", ent_name);
 
-	DispatchSpawn(giAttachment[weapon]);
+// 	DispatchSpawn(iEnt);
 
-	MakeParent(giAttachment[weapon], iAffectedWeapons[weapon]);
+// 	MakeParent(iEnt, weapon);
 
-	CreateTimer(0.1, timer_SetAttachment, giAttachment[weapon], TIMER_FLAG_NO_MAPCHANGE);
+// 	// Obsolete
+// 	// CreateTimer(0.1, timer_SetAttachment, giAttachment[weapon], TIMER_FLAG_NO_MAPCHANGE);
 
-	TeleportEntity(giAttachment[weapon], NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
-	return true;
-}
+// 	TeleportEntity(iEnt, NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
+// 	return iEnt;
+// }
 
 
-void MakeParent(int entity, int weapon)
+void MakeParent(int entity, int parent)
 {
 	char buffer[64];
-	Format(buffer, sizeof(buffer), "weapon%d", weapon);
-	DispatchKeyValue(weapon, "targetname", buffer);
+	Format(buffer, sizeof(buffer), "weapon%d", parent);
+	DispatchKeyValue(parent, "targetname", buffer);
 
 	SetVariantString("!activator"); // FIXME is this useless?
-	AcceptEntityInput(entity, "SetParent", weapon, weapon, 0);
+	AcceptEntityInput(entity, "SetParent", parent, parent, 0);
 }
 
 
@@ -759,7 +771,7 @@ public Action timer_SetAttachment(Handle timer, int info_target)
 
 	// adjusting to avoid coming out of barrel
 	float origin[3];
-	GetEntPropVector(info_target, Prop_Send, "m_vecOrigin", origin);
+	// GetEntPropVector(info_target, Prop_Send, "m_vecOrigin", origin);
 	DispatchSpawn(info_target);
 	origin[0] -= 1.0; // forward axis
 	origin[1] += 0.9; // up down axis
@@ -770,17 +782,22 @@ public Action timer_SetAttachment(Handle timer, int info_target)
 
 
 // index of affected weapon in array
-bool CreateLaserDot(int weapon)
+bool CreateLaserDot(int weaponIndex, int weaponEnt)
 {
-	if (giLaserDot[weapon] <= 0) // we have not created a laser dot yet
+	if (giLaserDot[weaponIndex] <= 0) // we have not created a laser dot yet
 	{
-		giLaserDot[weapon] = CreateLaserDotEnt(weapon);
-		giLaserTarget[weapon] = CreateTargetProp(weapon, "dot_");
+		giLaserDot[weaponIndex] = CreateLaserDotEnt(weaponEnt);
+		giLaserTarget[weaponIndex] = CreateTargetProp(weaponEnt, "dot_");
 
 		SetVariantString("!activator"); // useless?
-		AcceptEntityInput(giLaserDot[weapon], "SetParent", giLaserTarget[weapon], giLaserTarget[weapon], 0);
+		AcceptEntityInput(giLaserDot[weaponIndex], "SetParent", giLaserTarget[weaponIndex], giLaserTarget[weaponIndex], 0);
 		return true;
 	}
+
+	#if DEBUG
+	PrintToServer("[lasersight] Error creating laser DOT for weapon index %d! (%d)",
+	weaponIndex, weaponEnt);
+	#endif
 	return false;
 }
 
@@ -909,21 +926,19 @@ int CreateLaserDotEnt(int weapon)
 
 
 // index of weapon in affected weapons array to tie the beam to
-bool CreateLaserBeam(int weapon)
+bool CreateLaserBeam(int weaponIndex, int weaponEnt)
 {
-	if (weapon < 0)
+	if (weaponIndex < 0)
 		ThrowError("[lasersight] Weapon -1 in CreateLaserBeam!");
 
-	if (giLaserBeam[weapon] > 0)
-	{
+	if (giLaserBeam[weaponIndex] > 0){
 		#if DEBUG
 		ThrowError("[lasersight] Laser beam already existed for weapon %d!",
-		iAffectedWeapons[weapon]);
+		iAffectedWeapons[weaponIndex]);
 		#endif
-		return false;
-	}
+		return false; }
 
-	giLaserBeam[weapon]	= CreateLaserBeamEnt(weapon);
+	giLaserBeam[weaponIndex] = CreateLaserBeamEnt(weaponEnt);
 	return true;
 }
 
@@ -947,16 +962,10 @@ void CreateViewModelLaserBeam(int client, WeaponType weapontype)
 	PrintToServer("[lasersight] viewmodel index: %d", giViewModel[client]);
 	#endif
 
-	giViewModelLaserStart[client] = CreateFakeAttachedPropViewModel(giViewModel[client], client, "startbeam");
-	giViewModelLaserEnd[client] = CreateFakeAttachedPropViewModel(giViewModel[client], client, "endbeam");
+	giViewModelLaserStart[client] = CreateInfoTargetProp(giViewModel[client], client, "startbeam");
+	giViewModelLaserEnd[client] = CreateInfoTargetProp(giViewModel[client], client, "endbeam");
 	giViewModelLaserBeam[client] = CreateViewModelLaserBeamEnt(giViewModel[client], client);
 
-	int wpn = EntRefToEntIndex(GetEntPropEnt(giViewModel[client], Prop_Data, "m_hWeapon"));
-	PrintToServer("Weapon from VIEWMODEL is %d", wpn);
-
-
-
-	// FIXME get active weapon's type here and pass it instead of WPN_NONE if possible
 	UpdateAttachementPosition(weapontype, giViewModelLaserStart[client], true);
 	UpdateAttachementPosition(weapontype, giViewModelLaserEnd[client], false);
 
@@ -967,22 +976,32 @@ void CreateViewModelLaserBeam(int client, WeaponType weapontype)
 }
 
 
-int CreateFakeAttachedPropViewModel(int ViewModel, int client, char[] tag)
+int CreateInfoTargetProp(int parent, int client, char[] tag, bool worldmodel=false)
 {
 	int iEnt = CreateEntityByName("info_target");
 	// int iEnt = CreateEntityByName("prop_physics");
 	// DispatchKeyValue(iEnt, "model", "models/nt/a_lil_tiger.mdl");
 
 	char ent_name[20];
-	Format(ent_name, sizeof(ent_name), "%s%d", tag, GetClientUserId(client)); // tag
-	DispatchKeyValue(iEnt, "targetname", ent_name);
+	if (worldmodel) // we attach this ent to the world model
+	{
+		Format(ent_name, sizeof(ent_name), "%s%d", tag, parent); // parent is the weapon ent
+		DispatchKeyValue(iEnt, "targetname", ent_name);
+	}
+	else // these are for the viewmodel
+	{
+		Format(ent_name, sizeof(ent_name), "%s%d", tag, GetClientUserId(client)); // parents are the viewmodel
+		DispatchKeyValue(iEnt, "targetname", ent_name);
+	}
 
-	PrintToServer("[lasersight] Created info_target on %N VM (%d) :%d %s",
-	client, ViewModel, iEnt, ent_name);
+	#if DEBUG
+	PrintToServer("[lasersight] Created %s info_target (%d \"%s\") on parent (%d)",
+	worldmodel ? "worldmodel" : "viewmodel", iEnt, ent_name, parent);
+	#endif
 
 	DispatchSpawn(iEnt);
 
-	MakeParent(iEnt, ViewModel);
+	MakeParent(iEnt, parent);
 
 	TeleportEntity(iEnt, NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
 	return iEnt;
@@ -991,46 +1010,62 @@ int CreateFakeAttachedPropViewModel(int ViewModel, int client, char[] tag)
 
 void UpdatePositionOnViewModel(int client, WeaponType weapontype)
 {
-	UpdateAttachementPosition(weapontype, giViewModelLaserStart[client], true);
-	UpdateAttachementPosition(weapontype, giViewModelLaserEnd[client], false);
+	UpdateAttachementPosition(weapontype, giViewModelLaserStart[client], true, true);
+	UpdateAttachementPosition(weapontype, giViewModelLaserEnd[client], true, false);
 }
 
 
-void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool bStartPoint=true)
+void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewmodel, bool bStartPoint=true)
 {
 	DataPack dp = CreateDataPack();
 	WritePackCell(dp, target_ent);
-	WritePackCell(dp, bStartPoint); // startpoint or endpoint for the beam
 
 	switch (weapontype)
 	{
 		case WPN_jittescoped:
 		{
-			WritePackCell(dp, WPN_jittescoped)
-			if (bStartPoint)
-			{
-				WritePackFloat(dp, 2.0);
-				WritePackFloat(dp, 6.0);
-				WritePackFloat(dp, 8.0);
+			WritePackString(dp, "eject") // jitte_s model doesn't have muzzle attachment point
+			if (viewmodel){
+				if (bStartPoint)
+				{
+					WritePackFloat(dp, 2.0);
+					WritePackFloat(dp, 6.0);
+					WritePackFloat(dp, 8.0);
+				}
+				WritePackFloat(dp, 90.0);
+				WritePackFloat(dp, 0.0);
+				WritePackFloat(dp, -5.0);
 			}
-			WritePackFloat(dp, 90.0);
-			WritePackFloat(dp, 0.0);
-			WritePackFloat(dp, -5.0);
+			else // world model
+			{
+				WritePackFloat(dp, -1.0);
+				WritePackFloat(dp, 0.9);
+				WritePackFloat(dp, 0.0);
+			}
 
 			CreateTimer(0.1, timer_SetAttachmentViewModel, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
 		}
 		default:
 		{
-			WritePackCell(dp, WPN_NONE)
-			if (bStartPoint)
+			WritePackString(dp, "muzzle") // "muzzle" works for when attaching to most weapon
+			if (viewmodel)
+			{
+				if (bStartPoint)
+				{
+					WritePackFloat(dp, -1.0);
+					WritePackFloat(dp, -4.9);
+					WritePackFloat(dp, 1.5);
+				}
+				WritePackFloat(dp, 80.0);
+				WritePackFloat(dp, -0.5);
+				WritePackFloat(dp, -1.0);
+			}
+			else // world model
 			{
 				WritePackFloat(dp, -1.0);
-				WritePackFloat(dp, -4.9);
-				WritePackFloat(dp, 1.5);
+				WritePackFloat(dp, 0.9);
+				WritePackFloat(dp, 0.0);
 			}
-			WritePackFloat(dp, 80.0);
-			WritePackFloat(dp, -0.5);
-			WritePackFloat(dp, -1.0);
 
 			CreateTimer(0.1, timer_SetAttachmentViewModel, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
 		}
@@ -1041,71 +1076,25 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool bStar
 public Action timer_SetAttachmentViewModel(Handle timer, DataPack dp)
 {
 	ResetPack(dp);
-	int info_target = ReadPackCell(dp);
-	int bStart = ReadPackCell(dp); // startpoint or endpoint for the beam 
-	WeaponType attachpoint = view_as<WeaponType>(ReadPackCell(dp));
+	int entId = ReadPackCell(dp);
+	char attachpoint[10];
+	ReadPackString(dp, attachpoint, sizeof(attachpoint));
 	float vecOrigin[3];
 	vecOrigin[0] = ReadPackFloat(dp);
 	vecOrigin[1] = ReadPackFloat(dp);
 	vecOrigin[2] = ReadPackFloat(dp);
 
+	SetVariantString(attachpoint);
+	AcceptEntityInput(entId, "SetParentAttachment");
+
+	DispatchSpawn(entId);
+
+	SetEntPropVector(entId, Prop_Send, "m_vecOrigin", vecOrigin);
+
 	#if DEBUG
-	PrintToServer("[lasersight] SetParentAttachment to %s for info_target type %s (%d).", 
-	attachpoint == WPN_jittescoped ? "\"eject\" for jittes" : "\"muzzle\" (default)", 
-	bStart ? "start" : "end",  info_target);
+	PrintToServer("[lasersight] Position of attachment entity %d %.2f %.2f %.2f on %s",
+	entId, vecOrigin[0], vecOrigin[1], vecOrigin[2], attachpoint);
 	#endif
-
-	if (attachpoint == WPN_jittescoped)
-	{
-		SetVariantString("eject"); // jitte_s model doesn't have it for example
-		AcceptEntityInput(info_target, "SetParentAttachment");
-	}
-	else
-	{
-		SetVariantString("muzzle"); // "muzzle" works for when attaching to most weapon
-		AcceptEntityInput(info_target, "SetParentAttachment");
-	}
-
-	if (bStart)
-	{
-		// adjusting to avoid coming out of barrel
-		// GetEntPropVector(info_target, Prop_Send, "m_vecOrigin", vecOrigin);
-		DispatchSpawn(info_target);
-
-		// vecOrigin[0] -= 1.0; // forward axis
-		// vecOrigin[1] -= 4.9; // up down axis
-		// vecOrigin[2] += 1.5; // horizontal
-		// vecOrigin[0] -= ReadPackFloat(dp); // forward axis
-		// vecOrigin[1] -= ReadPackFloat(dp); // up down axis
-		// vecOrigin[2] += ReadPackFloat(dp); // horizontal
-
-		SetEntPropVector(info_target, Prop_Send, "m_vecOrigin", vecOrigin);
-
-		#if DEBUG
-		PrintToServer("[lasersight] Initial position of start beam entity %.2f %.2f %.2f",
-		vecOrigin[0], vecOrigin[1], vecOrigin[2]);
-		#endif
-	}
-	else
-	{
-		// adjusting to avoid coming out of barrel
-		// GetEntPropVector(info_target, Prop_Send, "m_vecOrigin", vecOrigin);
-		DispatchSpawn(info_target);
-
-		// vecOrigin[0] += 80.0; // forward axis (30.0)
-		// vecOrigin[1] -= 0.5; // up down axis (pitch, + = up)
-		// vecOrigin[2] -= 1.0; // horizontal (- = left / + = right)
-		// vecOrigin[0] += ReadPackFloat(dp); // forward axis (30.0)
-		// vecOrigin[1] -= ReadPackFloat(dp); // up down axis (pitch, + = up)
-		// vecOrigin[2] -= ReadPackFloat(dp); // horizontal (- = left / + = right)
-
-		SetEntPropVector(info_target, Prop_Send, "m_vecOrigin", vecOrigin);
-
-		#if DEBUG
-		PrintToServer("[lasersight] Initial position of end beam entity %.2f %.2f %.2f",
-		vecOrigin[0], vecOrigin[1], vecOrigin[2]);
-		#endif
-	}
 
 	return Plugin_Handled;
 }
@@ -1232,25 +1221,25 @@ void DestroyLaserBeam(int weapon)
 }
 
 
-int CreateLaserBeamEnt(int weapon)
+int CreateLaserBeamEnt(int weaponEnt)
 {
 	int laser_entity = CreateEntityByName("env_beam");
 
 	#if DEBUG
-	PrintToServer("[lasersight] Created laser BEAM for weapon %d.", weapon);
+	PrintToServer("[lasersight] Created laser BEAM for weapon %d.", weaponEnt);
 	#endif
 
 	char ent_name[20];
-	IntToString(weapon, ent_name, sizeof(ent_name));
+	IntToString(weaponEnt, ent_name, sizeof(ent_name));
 	DispatchKeyValue(laser_entity, "targetname", ent_name);
 
 	ent_name[0] = '\0';
-	Format(ent_name, sizeof(ent_name), "info_target%d", weapon);
+	Format(ent_name, sizeof(ent_name), "wmodel%d", weaponEnt);
 	DispatchKeyValue(laser_entity, "LightningStart", ent_name);
 
 	// Note: there is no "targetpoint" key value like mentioned on the wiki in NT!
 	ent_name[0] = '\0';
-	Format(ent_name, sizeof(ent_name), "dot%d", weapon);
+	Format(ent_name, sizeof(ent_name), "dot%d", weaponEnt);
 	DispatchKeyValue(laser_entity, "LightningEnd", ent_name);
 
 	// Positioning
@@ -1973,7 +1962,7 @@ void OnReloadKeyPressed(int client)
 	if (view_as<bool>(GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Data, "m_bInReload")))
 	{
 		#if DEBUG
-		PrintToServer("[lasersight] IN_RELOAD weapon %d m_bInReload is %d. Toggling laser off.", 
+		PrintToServer("[lasersight] IN_RELOAD weapon %d m_bInReload is %d. Toggling laser off.",
 		weapon, GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Data, "m_bInReload"));
 		#endif
 
