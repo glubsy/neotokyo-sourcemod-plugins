@@ -433,7 +433,14 @@ void CreateLaserEntities(int client, int weaponEnt, int wpnIndex)
 	// int wpnIndex = GetTrackedWeaponIndex(GetPlayerWeaponSlot(client, SLOT_PRIMARY));
 
 	if (wpnIndex < 0)
-		ThrowError("[lasersight] Primary weapon returned index -1. Failed creating laser entities!");
+	{
+		#if DEBUG
+		PrintToServer("[lasersight] Creating only default viewmodel entities for %N", client);
+		#endif
+		// FIXME pass in the weaponEnt's WeaponType for proper attachment points
+		CreateViewModelLaserBeam(client, WPN_NONE);
+		return;
+	}
 
 	giAttachment[wpnIndex] = CreateInfoTargetProp(weaponEnt, client, "wmodel", true);
 
@@ -707,42 +714,6 @@ bool NeedUpdateLoop()
 	}
 	return false;
 }
-
-
-// REMOVE merged with viewmodel methods
-// int CreateFakeAttachedProp(int weapon, int client, char[] tag)
-// {
-// 	if (giAttachment[weapon] > 0){
-// 		#if DEBUG
-// 		PrintToServer("[lasersight] Attachment already exists for weapon %d",
-// 		iAffectedWeapons[weapon]);
-// 		#endif
-// 		return -1; }
-
-// 	iEnt = CreateEntityByName("info_target");
-
-// 	#if DEBUG
-// 	// giAttachment[weapon] = CreateEntityByName("prop_dynamic_ornament");
-// 	// giAttachment[weapon] = CreateEntityByName("prop_physics");
-// 	// DispatchKeyValue(giAttachment[weapon], "model", "models/nt/a_lil_tiger.mdl");
-// 	PrintToServer("[lasersight] Created info_target on %N 's weapon (%d)",
-// 	client, iAffectedWeapons[weapon]);
-// 	#endif
-
-// 	char ent_name[20];
-// 	Format(ent_name, sizeof(ent_name), "%s%d", tag, weapon); // tag this weapon
-// 	DispatchKeyValue(iEnt, "targetname", ent_name);
-
-// 	DispatchSpawn(iEnt);
-
-// 	MakeParent(iEnt, weapon);
-
-// 	// Obsolete
-// 	// CreateTimer(0.1, timer_SetAttachment, giAttachment[weapon], TIMER_FLAG_NO_MAPCHANGE);
-
-// 	TeleportEntity(iEnt, NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
-// 	return iEnt;
-// }
 
 
 void MakeParent(int entity, int parent)

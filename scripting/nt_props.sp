@@ -1785,12 +1785,12 @@ public DongDispatch(int client, int scale, int bstatic)
 			if (!bstatic)
 			{
 				AddEntityToHistory(CreatePropPhysicsOverride_AtClientPos(client, gs_dongs[scale], 120), client);
-				CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_PropHistory[client][g_PropCursor[client]]);
+				CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, EntIndexToEntRef(g_PropHistory[client][g_PropCursor[client]]));
 			}
 			else
 			{
 				AddEntityToHistory(CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 120), client);
-				CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_PropHistory[client][g_PropCursor[client]]);
+				CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, EntIndexToEntRef(g_PropHistory[client][g_PropCursor[client]]));
 			}
 		}
 		case 2:
@@ -1802,7 +1802,7 @@ public DongDispatch(int client, int scale, int bstatic)
 
 			// remove the prop when it's touched by a player
 			SDKHook(g_PropHistory[client][g_PropCursor[client]], SDKHook_Touch, OnTouchEntityRemove);
-			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_PropHistory[client][g_PropCursor[client]]);
+			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, EntIndexToEntRef(g_PropHistory[client][g_PropCursor[client]]));
 		}
 		case 3:
 		{
@@ -1812,7 +1812,7 @@ public DongDispatch(int client, int scale, int bstatic)
 				AddEntityToHistory(CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 200), client);
 
 			SDKHook(g_PropHistory[client][g_PropCursor[client]], SDKHook_Touch, OnTouchEntityRemove);
-			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_PropHistory[client][g_PropCursor[client]]);
+			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, EntIndexToEntRef(g_PropHistory[client][g_PropCursor[client]]));
 		}
 		case 4:
 		{
@@ -1822,7 +1822,7 @@ public DongDispatch(int client, int scale, int bstatic)
 				AddEntityToHistory(CreatePropDynamicOverride_AtClientPos(client, gs_dongs[scale], 250), client);
 
 			SDKHook(g_PropHistory[client][g_PropCursor[client]], SDKHook_Touch, OnTouchEntityRemove);
-			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, g_PropHistory[client][g_PropCursor[client]]);
+			CreateTimer(GetConVarFloat(cvPropMaxTTL), TimerKillEntity, EntIndexToEntRef(g_PropHistory[client][g_PropCursor[client]]));
 		}
 	}
 	#if DEBUG
@@ -3062,16 +3062,10 @@ public Action timer_CheckIfCloaked(Handle timer, int userid)
 }
 
 
-public Action TimerKillEntity(Handle timer, prop)
+public Action TimerKillEntity(Handle timer, int entref)
 {
-	KillEntity(prop);
-	return Plugin_Handled;
-}
-
-
-public Action KillEntity(prop)
-{
-	if(IsValidEdict(prop))
+	int prop = EntRefToEntIndex(entref);
+	if(IsValidEdict(prop) && prop > MaxClients)
 	{
 		AcceptEntityInput(prop, "kill");
 	}

@@ -827,7 +827,7 @@ void UpdateAffectedClientsArray(int client)
 void GetEndPositionFromClient(int client, float[3] start, float[3] angle, float[3] end)
 {
 	TR_TraceRayFilter(start, angle,
-	(CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_MONSTER|CONTENTS_DEBRIS|CONTENTS_HITBOX),
+	CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_MONSTER|CONTENTS_DEBRIS|CONTENTS_HITBOX,
 	RayType_Infinite, TraceEntityFilterPlayer, client);
 	if (TR_DidHit(INVALID_HANDLE))
 	{
