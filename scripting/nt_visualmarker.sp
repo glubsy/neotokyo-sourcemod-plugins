@@ -8,6 +8,9 @@
 #endif
 
 #define USE_TE 1
+#define REDCOLOR "240 12 0"
+#define YELLOWCOLOR "200 200 20"
+#define PINKCOLOR "240 12 210"
 
 enum SpriteType { QMARK = 0, CIRCLE, TARGET, LABEL, MAX };
 
@@ -52,6 +55,9 @@ TODO:
 - share spotted beacon from ghost carrier when clicking while aiming at a beacon/player
 - only show visual pings from people in same squad (only if requested because clutter)
 - display a small halo ring upon creation -> could animate surrounding sprite with dynamic scaling? (see Prop_Send properties)
+- display beacons as green / blue for spectators (also longer beams?)
+- add env_hudhint to advertise the use key
+
 */
 
 
@@ -63,6 +69,10 @@ public void OnPluginStart()
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("game_round_end", OnRoundEnd);
 	// HookEvent("player_team", OnPlayerTeam);
+
+	#if DEBUG
+	HookConVarChange(FindConVar("neo_restart_this"), OnNeoRestartThis);
+	#endif
 
 	for (int i = 0; i < sizeof(giBeaconSprite); ++i)
 	{
@@ -85,6 +95,42 @@ public OnMapStart()
 	PrecacheSound(BEEPSND);
 }
 
+#if DEBUG
+public void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] newValue)
+{
+	for (int i = 1; i <= MaxClients; ++i)
+	{
+		if (IsValidEntity(giBeaconSprite[i][TARGET])){
+			AcceptEntityInput(giBeaconSprite[i][TARGET], "ClearParent");
+			AcceptEntityInput(giBeaconSprite[i][TARGET], "kill");
+		}
+		if (IsValidEntity(giBeaconSprite[i][CIRCLE])){
+			AcceptEntityInput(giBeaconSprite[i][CIRCLE], "ClearParent");
+			AcceptEntityInput(giBeaconSprite[i][CIRCLE], "kill");
+		}
+		if (IsValidEntity(giBeaconSprite[i][QMARK])){
+			AcceptEntityInput(giBeaconSprite[i][QMARK], "ClearParent");
+			AcceptEntityInput(giBeaconSprite[i][QMARK], "kill");
+		}
+		giBeaconSprite[i][TARGET] = -1;
+		giBeaconSprite[i][QMARK] = -1;
+		giBeaconSprite[i][CIRCLE] = -1;
+
+		#if !USE_TE
+		if (IsValidEntity(giBeaconBeam[i])){
+			AcceptEntityInput(giBeaconBeam[i], "ClearParent");
+			AcceptEntityInput(giBeaconBeam[i], "kill");
+			giBeaconBeam[i] = -1;
+		}
+		if (IsValidEntity(giTargetEnd[i])){
+			AcceptEntityInput(giTargetEnd[i], "ClearParent");
+			AcceptEntityInput(giTargetEnd[i], "kill");
+			giTargetEnd[i] = -1;
+		}
+		#endif // !USE_TE
+	}
+}
+#endif // DEBUG
 
 public Action OnPlayerSpawn(Event event, const char[] name, bool dontbroadcast)
 {
@@ -119,8 +165,8 @@ public Action OnPlayerSpawn(Event event, const char[] name, bool dontbroadcast)
 
 public void OnClientDisconnect(int client)
 {
-	if (ghToggleTimer[client] != INVALID_HANDLE)
-		TriggerTimer(ghToggleTimer[client])
+	// if (ghToggleTimer[client] != INVALID_HANDLE)
+	// 	TriggerTimer(ghToggleTimer[client])
 	DestroyBeacon(client);
 }
 
@@ -129,8 +175,8 @@ public Action OnRoundEnd(Event event, const char[] name, bool dontbroadcast)
 {
 	for (int i = 1; i <= MaxClients; ++i)
 	{
-		if (ghToggleTimer[i] != INVALID_HANDLE)
-			TriggerTimer(ghToggleTimer[i])
+		// if (ghToggleTimer[i] != INVALID_HANDLE)
+		// 	TriggerTimer(ghToggleTimer[i])
 
 		SDKUnhook(giBeaconSprite[i][TARGET], SDKHook_SetTransmit, Hook_SetTransmit);
 		SDKUnhook(giBeaconSprite[i][QMARK], SDKHook_SetTransmit, Hook_SetTransmit);
@@ -141,31 +187,7 @@ public Action OnRoundEnd(Event event, const char[] name, bool dontbroadcast)
 		giBeaconSprite[i][QMARK] = -1;
 		giBeaconSprite[i][CIRCLE] = -1;
 		// giBeaconSprite[i][LABEL] = -1;
-
-		#if DEBUG > 2
-		if (IsValidEntity(giBeaconBeam[i])){
-			AcceptEntityInput(giBeaconBeam[i], "ClearParent");
-			AcceptEntityInput(giBeaconBeam[i], "kill");
-			giBeaconBeam[i] = -1;
-		}
-		if (IsValidEntity(giTargetStart[i])){
-			AcceptEntityInput(giTargetStart[i], "ClearParent");
-			AcceptEntityInput(giTargetStart[i], "kill");
-			giTargetStart[i] = -1;
-		}
-		if (IsValidEntity(giTargetEnd[i])){
-			AcceptEntityInput(giTargetEnd[i], "ClearParent");
-			AcceptEntityInput(giTargetEnd[i], "kill");
-			giTargetEnd[i] = -1;
-		}
-		if (IsValidEntity(giHeadTarget[i])){
-			AcceptEntityInput(giHeadTarget[i], "ClearParent");
-			AcceptEntityInput(giHeadTarget[i], "kill");
-			giHeadTarget[i] = -1;
-		}
-		#endif //DEBUG
 	}
-
 }
 
 
@@ -186,7 +208,7 @@ int CreateSpriteEnt(SpriteType type)
 		DispatchKeyValue(iEnt, "renderamt", "255"); // transparency
 		DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
 		DispatchKeyValue(iEnt, "renderfx", "9"); // 9 slow strobe
-		DispatchKeyValue(iEnt, "rendercolor", "240 12 0");
+		DispatchKeyValue(iEnt, "rendercolor", YELLOWCOLOR);
 		DispatchKeyValue(iEnt, "alpha", "255");
 		DispatchKeyValue(iEnt, "m_bWorldSpaceScale", "0");
 
@@ -206,7 +228,7 @@ int CreateSpriteEnt(SpriteType type)
 		DispatchKeyValue(iEnt, "renderamt", "255"); // transparency
 		DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
 		// DispatchKeyValue(iEnt, "renderfx", "19"); // 19 clamp max size
-		DispatchKeyValue(iEnt, "rendercolor", "240 12 0");
+		DispatchKeyValue(iEnt, "rendercolor", YELLOWCOLOR);
 		DispatchKeyValue(iEnt, "alpha", "255");
 
 		SetVariantFloat(0.2);
@@ -258,7 +280,7 @@ stock int CreateBeamEnt(int client)
 
 	DispatchKeyValue(iLaserEnt, "renderamt", "30"); // TODO(?): low renderamt, increase when activate
 	DispatchKeyValue(iLaserEnt, "renderfx", "15"); // distort?
-	DispatchKeyValue(iLaserEnt, "rendercolor", "200 25 25 30");
+	DispatchKeyValue(iLaserEnt, "rendercolor", "200 25 25 40");
 	DispatchKeyValue(iLaserEnt, "BoltWidth", "1.0");
 	DispatchKeyValue(iLaserEnt, "spawnflags", "256"); // fade towards ending entity
 
@@ -281,7 +303,7 @@ stock int CreateBeamEnt(int client)
 }
 
 
-int CreateTargetProp(int client, char[] sTag, int parent=0, bool attachtoclient=true)
+int CreateTargetProp(int client, char[] sTag, bool attachtoclient=true)
 {
 	// int iEnt = CreateEntityByName("info_target");
 	int iEnt = CreateEntityByName("prop_dynamic_override");
@@ -388,24 +410,26 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 
 	if (buttons & (1 << 5)) // IN_USE
 	{
-		if (gbKeyHeld[client])
+		if (!gbCanUpdatePos[client])
+			return Plugin_Continue;
+
+		if (!gbKeyHeld[client])
 		{
-			buttons &= ~(1 <<5); // I hope it won't conflict with anything else like ghostcap.sp
+			CreateMarker(client);
 		}
-		else
+		MovePreviewMarker(client);
+		gbKeyHeld[client] = true;
+	}
+	else
+	{
+		if (gbKeyHeld[client])
 		{
 			if (gbCanUpdatePos[client])
 			{
 				gbCanUpdatePos[client] = false;
-				PlaceBeacon(client);
-				CreateTimer(5.1, timer_ClearBlockingFlag, GetClientUserId(client),
-				TIMER_FLAG_NO_MAPCHANGE);
+				PlaceFinalMarker(client);
 			}
-			gbKeyHeld[client] = true;
 		}
-	}
-	else
-	{
 		gbKeyHeld[client] = false;
 	}
 	return Plugin_Continue;
@@ -420,6 +444,18 @@ public Action timer_ClearBlockingFlag(Handle timer, int userid)
 }
 
 
+void MovePreviewMarker(int client)
+{
+	float vecEnd[3], vecStart[3], vecAngle[3];
+	GetClientEyePosition(client, vecStart);
+	GetClientEyeAngles(client, vecAngle);
+	GetEndPosition(client, vecEnd, vecStart, vecAngle);
+
+	TeleportEntity(giBeaconSprite[client][TARGET], vecEnd, NULL_VECTOR, NULL_VECTOR);
+	// TeleportEntity(giBeaconSprite[client][QMARK], vecEnd, NULL_VECTOR, NULL_VECTOR);
+	// TeleportEntity(giBeaconSprite[client][CIRCLE], vecEnd, NULL_VECTOR, NULL_VECTOR);
+}
+
 
 void MakeParent(int child, int parent)
 {
@@ -428,70 +464,58 @@ void MakeParent(int child, int parent)
 }
 
 
-// doesn't seem to work in NT?
-int CreateLabelProp(int client, char[] message)
+bool CreateMarker(int client)
 {
-	int iEnt = CreateEntityByName("point_message");
-
-	#if DEBUG
-	PrintToServer("[visualmarker] created point_message %d", iEnt);
-	#endif
-
-	DispatchKeyValue(iEnt, "message", message);
-	DispatchKeyValue(iEnt, "radius", "1000");
-	DispatchKeyValue(iEnt, "developeronly", "0");
-	SetEntProp(iEnt, Prop_Data, "m_drawText", 1);
-	SetEntProp(iEnt, Prop_Data, "m_bEnabled", 1);
-	AcceptEntityInput(iEnt, "Enable");
-
-	DispatchSpawn(iEnt);
-	// ActivateEntity(iEnt);
-	TeleportEntity(iEnt, NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
-	return iEnt;
-
-}
-
-void PlaceBeacon(int client)
-{
-	float vecEnd[3], vecStart[3], vecAngle[3];
-	GetClientEyePosition(client, vecStart);
-	GetClientEyeAngles(client, vecAngle);
-	GetEndPosition(client, vecEnd, vecStart, vecAngle);
-
-	// OBSOLETE TESTING
-	// SpawnTESprite(vecEnd, giQmarkModel, 0.2);
-	// SpawnTESprite(vecEnd, giCircleModel, 0.5);
-
-	if (giBeaconSprite[client][QMARK] <= 0) // FIXME more tests?
-	{
-		giBeaconSprite[client][TARGET] = CreateTargetProp(client, "pmarker", 0, false);
-		giBeaconSprite[client][QMARK] = CreateSpriteEnt(QMARK);
-		giBeaconSprite[client][CIRCLE] = CreateSpriteEnt(CIRCLE);
-		// giBeaconSprite[client][LABEL] = CreateLabelProp(client, "TEST_LABEL");
-		// TeleportEntity(giBeaconSprite[client][LABEL], vecEnd, NULL_VECTOR, NULL_VECTOR);
-
-		MakeParent(giBeaconSprite[client][QMARK], giBeaconSprite[client][TARGET]);
-		MakeParent(giBeaconSprite[client][CIRCLE], giBeaconSprite[client][TARGET]);
-		// MakeParent(giBeaconSprite[client][LABEL], giBeaconSprite[client][TARGET]);
+	if (giBeaconSprite[client][TARGET] > 0){ // FIXME more tests?
+		#if DEBUG
+		PrintToServer("[visualmarker] BeaconSprite TARGET already existed for %N. Reusing",
+		client);
+		#endif
 
 		BuildFilter(client, giBeaconSprite[client][TARGET], TARGET);
 		BuildFilter(client, giBeaconSprite[client][QMARK], QMARK);
 		BuildFilter(client, giBeaconSprite[client][CIRCLE], CIRCLE);
 
-		// giHeadTarget[client] = CreateTargetProp(client, "headtarget");
+		SDKHook(giBeaconSprite[client][TARGET], SDKHook_SetTransmit, Hook_SetTransmit);
+		SDKHook(giBeaconSprite[client][QMARK], SDKHook_SetTransmit, Hook_SetTransmit);
+		SDKHook(giBeaconSprite[client][CIRCLE], SDKHook_SetTransmit, Hook_SetTransmit);
 
-		/* OBSOLETE used for SpawnRing()
-		// NOTE parenting an info_target to the sprite works
-		giTargetStart[client] = CreateTargetProp(client, "targetstart", giBeaconSprite[client][QMARK]);
+		DispatchKeyValue(giBeaconSprite[client][QMARK], "rendercolor", YELLOWCOLOR);
+		DispatchKeyValue(giBeaconSprite[client][CIRCLE], "rendercolor", YELLOWCOLOR);
 
-		// OBSOLETE used for SpawnRing()
-		// giTargetEnd[client] = CreateTargetProp(client, "targetend", giBeaconSprite[client]);
-		*/
-
-		#if !USE_TE
-		giBeaconBeam[client] = CreateBeamEnt(client);
-		#endif
+		AcceptEntityInput(giBeaconSprite[client][QMARK], "ShowSprite");
+		AcceptEntityInput(giBeaconSprite[client][CIRCLE], "ShowSprite");
+		// AcceptEntityInput(giBeaconSprite[client][LABEL], "Enable");
+		return false;
 	}
+
+	giBeaconSprite[client][TARGET] = CreateTargetProp(client, "pmarker", false);
+	giBeaconSprite[client][QMARK] = CreateSpriteEnt(QMARK);
+	giBeaconSprite[client][CIRCLE] = CreateSpriteEnt(CIRCLE);
+	// giBeaconSprite[client][LABEL] = CreateLabelProp(client, "TEST_LABEL");
+	// TeleportEntity(giBeaconSprite[client][LABEL], vecEnd, NULL_VECTOR, NULL_VECTOR);
+
+	MakeParent(giBeaconSprite[client][QMARK], giBeaconSprite[client][TARGET]);
+	MakeParent(giBeaconSprite[client][CIRCLE], giBeaconSprite[client][TARGET]);
+	// MakeParent(giBeaconSprite[client][LABEL], giBeaconSprite[client][TARGET]);
+
+	BuildFilter(client, giBeaconSprite[client][TARGET], TARGET);
+	BuildFilter(client, giBeaconSprite[client][QMARK], QMARK);
+	BuildFilter(client, giBeaconSprite[client][CIRCLE], CIRCLE);
+
+	// giHeadTarget[client] = CreateTargetProp(client, "headtarget");
+
+	/* OBSOLETE used for SpawnRing()
+	// NOTE parenting an info_target to the sprite works
+	giTargetStart[client] = CreateTargetProp(client, "targetstart", giBeaconSprite[client][QMARK]);
+
+	// OBSOLETE used for SpawnRing()
+	// giTargetEnd[client] = CreateTargetProp(client, "targetend", giBeaconSprite[client]);
+	*/
+
+	#if !USE_TE
+	giBeaconBeam[client] = CreateBeamEnt(client);
+	#endif
 
 	// As usual, we have all the downsides with none of the advantages. Hook'em all!
 	SDKHook(giBeaconSprite[client][TARGET], SDKHook_SetTransmit, Hook_SetTransmit);
@@ -501,6 +525,17 @@ void PlaceBeacon(int client)
 	AcceptEntityInput(giBeaconSprite[client][QMARK], "ShowSprite");
 	AcceptEntityInput(giBeaconSprite[client][CIRCLE], "ShowSprite");
 	// AcceptEntityInput(giBeaconSprite[client][LABEL], "Enable");
+
+	return true;
+}
+
+
+void PlaceFinalMarker(int client)
+{
+	float vecEnd[3], vecStart[3], vecAngle[3];
+	GetClientEyePosition(client, vecStart);
+	GetClientEyeAngles(client, vecAngle);
+	GetEndPosition(client, vecEnd, vecStart, vecAngle);
 
 	// filter out team if not same team
 	int iTEClients[NEO_MAX_CLIENTS+1];
@@ -525,6 +560,9 @@ void PlaceBeacon(int client)
 	PrintToServer("[visualmarker] TurnOn sprites & TurnOn BEAM");
 	#endif
 
+	DispatchKeyValue(giBeaconSprite[client][QMARK], "rendercolor", REDCOLOR);
+	DispatchKeyValue(giBeaconSprite[client][CIRCLE], "rendercolor", REDCOLOR);
+
 	TeleportEntity(giBeaconSprite[client][TARGET], vecEnd, NULL_VECTOR, NULL_VECTOR);
 	// TeleportEntity(giBeaconSprite[client][QMARK], vecEnd, NULL_VECTOR, NULL_VECTOR);
 	// TeleportEntity(giBeaconSprite[client][CIRCLE], vecEnd, NULL_VECTOR, NULL_VECTOR);
@@ -541,7 +579,6 @@ void PlaceBeacon(int client)
 	if (ghToggleTimer[client] == INVALID_HANDLE)
 		ghToggleTimer[client] = CreateTimer(GetConVarFloat(gCVARTimeToLive), timer_ToggleBeaconOff, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 }
-
 
 stock Action timer_IncreaseEndRadius(Handle timer, int client)
 {
@@ -584,7 +621,7 @@ public Action timer_ToggleBeaconOff(Handle timer, int userid)
 	SDKUnhook(giBeaconSprite[client][CIRCLE], SDKHook_SetTransmit, Hook_SetTransmit);
 
 	ghToggleTimer[client] = INVALID_HANDLE;
-	return Plugin_Handled;
+	return Plugin_Stop;
 }
 
 
@@ -826,4 +863,28 @@ public bool:TraceEntityFilterPlayer(entity, contentsMask, any:data)
 {
 	// return entity > MaxClients;
 	return entity != data; // only avoid collision with ourself (or data)
+}
+
+
+// doesn't seem to work in NT?
+stock int CreateLabelProp(int client, char[] message)
+{
+	int iEnt = CreateEntityByName("point_message");
+
+	#if DEBUG
+	PrintToServer("[visualmarker] created point_message %d", iEnt);
+	#endif
+
+	DispatchKeyValue(iEnt, "message", message);
+	DispatchKeyValue(iEnt, "radius", "1000");
+	DispatchKeyValue(iEnt, "developeronly", "0");
+	SetEntProp(iEnt, Prop_Data, "m_drawText", 1);
+	SetEntProp(iEnt, Prop_Data, "m_bEnabled", 1);
+	AcceptEntityInput(iEnt, "Enable");
+
+	DispatchSpawn(iEnt);
+	// ActivateEntity(iEnt);
+	TeleportEntity(iEnt, NULL_VECTOR, NULL_VECTOR, NULL_VECTOR);
+	return iEnt;
+
 }
