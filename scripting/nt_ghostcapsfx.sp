@@ -462,14 +462,9 @@ void ProcessCookies(int client)
 	}
 
 	if (!IsPlayerReallyAlive(client))
-	{
 		UpdateDeadArray(client);
-		BuildAffectedTeamArray();
-	}
-	else
-	{
-		BuildAffectedTeamArray();
-	}
+
+	BuildAffectedTeamArray();
 }
 
 
@@ -584,7 +579,7 @@ void UpdateDeadArray(int client)
 	if (client <= 0) // force rebuild for all
 	{
 		g_iNumAffectedDead = 0;
-		for (int thisClient = 1; thisClient <= MaxClients; thisClient++)
+		for (int thisClient = MaxClients; thisClient; --thisClient)
 		{
 			if (!IsValidClient(thisClient) || IsFakeClient(thisClient))
 				continue;
@@ -593,6 +588,13 @@ void UpdateDeadArray(int client)
 			if ((IsPlayerObserving(thisClient) || GetClientTeam(thisClient) <= 1) && g_bWantsGhostSFX[thisClient])
 				g_iAffectedDeadPlayers[g_iNumAffectedDead++] = thisClient;
 		}
+		return;
+	}
+
+	if (g_iNumAffectedDead >= sizeof(g_iAffectedDeadPlayers))
+	{
+		LogError("[nt_ghostcapsfx] UpdateDeadArray() g_iNumAffectedDead was out of bounds!");
+		UpdateDeadArray(-1);
 		return;
 	}
 
@@ -1116,7 +1118,7 @@ public void DoSparkleEffect(int client)
 // 		PrintToServer("[nt_ghostcapsfx] m_hOwnerEntity of \"%s\" (id: %d) entity (%d) was: %d.", classname, g_iGhost, entity, carrier);
 // 		#endif
 // 		g_bGhostIsHeld = false;
-// 		Explode(entity);
+// 		CreateExplosionEffect(entity);
 
 // 		// avoid checking for destroyed entities during round restart (lots of them get destroyed, too verbose, slows down server)
 // 		g_bEndOfRound = false;
@@ -1124,10 +1126,10 @@ public void DoSparkleEffect(int client)
 // }
 
 
-void Explode(int entity, int carrier)
+void CreateExplosionEffect(int entity, int carrier)
 {
 	#if DEBUG
-	PrintToServer("[nt_ghostcapsfx] Explode(%d)!", entity);
+	PrintToServer("[nt_ghostcapsfx] CreateExplosionEffect(%d)!", entity);
 	#endif
 
 	if(carrier > 0)
@@ -1223,7 +1225,6 @@ void EmmitCapSound(int client)
 }
 
 
-
 public void OnMapEnd()
 {
 	int i;
@@ -1248,9 +1249,6 @@ public void OnMapEnd()
 	if(KillGhostTimer != INVALID_HANDLE)
 		KillGhostTimer = INVALID_HANDLE;
 }
-
-
-
 
 
 // Taken from doublecap plugin by Soft as HELL
@@ -1285,7 +1283,7 @@ public Action timer_RemoveGhost(Handle timer)
 		#if DEBUG > 0
 		PrintToServer("Timer: removed ghost from carrier %i!", g_iGhostCarrier);
 		#endif
-		Explode(g_iGhost, g_iGhostCarrier);
+		CreateExplosionEffect(g_iGhost, g_iGhostCarrier);
 		RemoveGhost(g_iGhostCarrier);
 	}
 	else
@@ -1295,9 +1293,9 @@ public Action timer_RemoveGhost(Handle timer)
 			#if DEBUG > 0
 			PrintToServer("Timer: removed ghost %i classname %s!", g_iGhost, classname);
 			#endif
-			Explode(g_iGhost, -1);
-			RemoveEdict(g_iGhost);
-			// AcceptEntityInput(ghost, "Kill"); // should be safer
+			CreateExplosionEffect(g_iGhost, -1);
+			// RemoveEdict(g_iGhost);
+			AcceptEntityInput(g_iGhost, "Kill"); // should be safer
 		}
 	}
 
@@ -1337,8 +1335,8 @@ void RemoveGhost(int client)
 	// Delete ghost
 	if(IsValidEdict(g_iGhost))
 	{
-		RemoveEdict(g_iGhost);
-		// 	AcceptEntityInput(ghost, "Kill"); // should be safer
+		// RemoveEdict(g_iGhost);
+		AcceptEntityInput(g_iGhost, "Kill"); // should be safer
 	}
 
 	g_bEndOfRound = false; // stop hooking entity destruction until restart of round
