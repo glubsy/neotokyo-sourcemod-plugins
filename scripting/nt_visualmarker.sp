@@ -56,7 +56,6 @@ TODO:
 - share spotted beacon from ghost carrier when clicking while aiming at a beacon/player
 - only show visual pings from people in same squad (only if requested because clutter)
 - display a small halo ring upon creation -> could animate surrounding sprite with dynamic scaling? (see Prop_Send properties)
-- add env_hudhint to advertise the use key
 
 FIXME: what happens when a beacon is placed at the last second of a round? Check timers.
 */
@@ -91,18 +90,6 @@ public void OnPluginStart()
 		giBeaconSprite[i][CIRCLE] = -1;
 		// giBeaconSprite[i][LABEL] = -1;
 	}
-
-
-	#if DEBUG
-	for (int i = 1; i <= MaxClients; ++i)
-	{
-		if (!IsValidClient(i) || IsFakeClient(i))
-			continue;
-		PrintToChatAll("avertisement for %N", i);
-		CreateTimer(2.0, timer_AdvertiseHelp, GetClientUserId(i), TIMER_FLAG_NO_MAPCHANGE);
-		CreateTimer(20.0, timer_AdvertiseHelp, GetClientUserId(i), TIMER_FLAG_NO_MAPCHANGE);
-	}
-	#endif
 }
 
 public void OnConfigExectured()
@@ -119,28 +106,17 @@ public void OnClientPutInServer(int client)
 	else
 		gbCanPlace[client] = true;
 
-	CreateTimer(5.0, timer_AdvertiseHelp, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
+	CreateTimer(30.0, timer_AdvertiseHelp, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 }
 
 
 public Action timer_AdvertiseHelp(Handle timer, int userid)
 {
 	int client = GetClientOfUserId(userid);
-	int hint = CreateEntityByName("env_hudhint");
-
-	char msg[64];
-	Format(msg,sizeof(msg),"Ctrl + Jump LONG JUMP");
-	DispatchKeyValue(hint, "message", msg);
-	DispatchKeyValue(hint, "spawnflags", "1");
-	// SetVariantString("!activator");
-	// DispatchKeyValue(hint, "")
-	DispatchSpawn(hint);
-	ActivateEntity(hint);
-	AcceptEntityInput(hint, "ShowHudHint");
-	#if DEBUG
-	PrintToServer("[visualmarker] Displayed hudhint to %N", client)
-	PrintToChatAll("[visualmarker] Displayed hudhint to %N", client)
-	#endif
+	if (!IsValidClient(client))
+		return Plugin_Handled;
+	PrintToChat(client, "[visualmarker] you can play a visual ping by pressing the USE key.");
+	return Plugin_Handled;
 }
 
 
