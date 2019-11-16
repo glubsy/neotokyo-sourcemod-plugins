@@ -28,9 +28,10 @@ bool gbIsObserver[NEO_MAX_CLIENTS+1];
 bool gbCanUpdatePos[NEO_MAX_CLIENTS+1];
 int giRadiusInc[NEO_MAX_CLIENTS+1];
 int giHiddenEnts[NEO_MAX_CLIENTS+1][MAX][NEO_MAX_CLIENTS+1]; // assuming opposing team will never have more than 20 players
-Handle gCVARTimeToLive;
+Handle gCvarTimeToLive, gCvarAllowedClasses, gCvarShowSpectators, gCvarShowOpponents = INVALID_HANDLE;
 Handle ghToggleTimer[NEO_MAX_CLIENTS+1] = INVALID_HANDLE;
 bool gbKeyHeld[NEO_MAX_CLIENTS+1];
+bool gbCanPlace[NEO_MAX_CLIENTS+1], gbLimitToClass;
 
 #define LASERMDL "materials/sprites/redglow1.vmt" // good for animation, but no ignorez and only red
 #define BEEPSND "buttons/button15.wav"
@@ -57,14 +58,21 @@ TODO:
 - display a small halo ring upon creation -> could animate surrounding sprite with dynamic scaling? (see Prop_Send properties)
 - display beacons as green / blue for spectators (also longer beams?)
 - add env_hudhint to advertise the use key
-
+- limit ability to place markers to some classes
 */
 
 
 public void OnPluginStart()
 {
-	gCVARTimeToLive = CreateConVar("sm_marker_ttl", "5.0",
+	gCvarTimeToLive = CreateConVar("sm_marker_ttl", "5.0",
 	"Time in seconds before marker disappears.", _, true, 1.0, true, 10.0);
+	gCvarAllowedClasses = CreateConVar("sm_marker_classes", "7",
+	"Classes allowed to place markers, as an octal representation. 1: recons 2: assaults 4: supports. 7 means all, 0 means nobody!",
+	_, true, 0.0, true, 7.0);
+	gCvarShowSpectators = CreateConVar("sm_marker_spectators", "1",
+	"Display visual pings to spectators", _, true, 0.0, true, 1.0);
+	gCvarShowOpponents = CreateConVar("sm_marker_opponents", "0",
+	"Display visual pings to ennemy team members", _, true, 0.0, true, 1.0);
 
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("game_round_end", OnRoundEnd);
@@ -73,6 +81,8 @@ public void OnPluginStart()
 	#if DEBUG
 	HookConVarChange(FindConVar("neo_restart_this"), OnNeoRestartThis);
 	#endif
+
+	AutoExecConfig(true, "nt_visualmarker");
 
 	for (int i = 0; i < sizeof(giBeaconSprite); ++i)
 	{
@@ -83,7 +93,28 @@ public void OnPluginStart()
 	}
 }
 
-public OnMapStart()
+#define RECON_ALLOWED (1 << 0)
+#define ASSAULT_ALLOWED (2 << 0)
+#define SUPPORT_ALLOWED (3 << 0)
+
+
+public void OnConfigExectured()
+{
+	int classes = GetConVarInt(gCvarAllowedClasses);
+	gbLimitToClass = classes < 7 ? true : false;
+}
+
+
+public void OnClientPutInServer(int client)
+{
+	if (gbLimitToClass)
+		gbCanPlace[client] = false;
+	else
+		gbCanPlace[client] = true;
+}
+
+
+public void OnMapStart()
 {
 	// g_modelLaser = PrecacheModel("materials/sprites/laser.vmt");
 	g_modelLaser = PrecacheModel(LASERMDL);
@@ -142,7 +173,23 @@ public Action OnPlayerSpawn(Event event, const char[] name, bool dontbroadcast)
 		gbIsObserver[client] = true;
 	}
 	else
+	{
 		gbIsObserver[client] = false;
+		if (gbLimitToClass)
+		{
+			int class = GetEntProp(client, Prop_Send, "m_iClassType");
+			if (class == 3)
+				++class;
+
+			if (class & GetConVarInt(gCvarAllowedClasses))
+			{
+				PrintToServer("%N can place", client);
+				gbCanPlace[client] = true;
+			}
+		}
+		else
+			gbCanPlace[client] = true;
+	}
 
 	#if DEBUG
 	PrintToServer("[visualmarker] Spawning player %N is %s.", client,
@@ -205,11 +252,11 @@ int CreateSpriteEnt(SpriteType type)
 		DispatchKeyValue(iEnt, "rendermode", "5"); // 3 glow keeps size, 9 doesn't, 1,5,8 ignore z buffer
 		DispatchKeyValueFloat(iEnt, "GlowProxySize", 2.0);
 		// DispatchKeyValueFloat(iEnt, "HDRColorScale", 1.0); // needs testing
-		DispatchKeyValue(iEnt, "renderamt", "255"); // transparency
+		DispatchKeyValue(iEnt, "renderamt", "125"); // this doesn't seem to work
 		DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
 		DispatchKeyValue(iEnt, "renderfx", "9"); // 9 slow strobe
 		DispatchKeyValue(iEnt, "rendercolor", YELLOWCOLOR);
-		DispatchKeyValue(iEnt, "alpha", "255");
+		DispatchKeyValue(iEnt, "alpha", "125"); // this doesn't seem to work
 		DispatchKeyValue(iEnt, "m_bWorldSpaceScale", "0");
 
 		SetVariantFloat(0.1);
@@ -225,11 +272,11 @@ int CreateSpriteEnt(SpriteType type)
 		DispatchKeyValue(iEnt, "rendermode", "5"); // 3 glow keeps size, 9 doesn't, 1,5,8 ignore z buffer
 		DispatchKeyValueFloat(iEnt, "GlowProxySize", 2.0);
 		// DispatchKeyValueFloat(iEnt, "HDRColorScale", 1.0); // needs testing
-		DispatchKeyValue(iEnt, "renderamt", "255"); // transparency
+		DispatchKeyValue(iEnt, "renderamt", "125"); // this doesn't seem to work
 		DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
 		// DispatchKeyValue(iEnt, "renderfx", "19"); // 19 clamp max size
 		DispatchKeyValue(iEnt, "rendercolor", YELLOWCOLOR);
-		DispatchKeyValue(iEnt, "alpha", "255");
+		DispatchKeyValue(iEnt, "alpha", "125"); // this doesn't seem to work
 
 		SetVariantFloat(0.2);
 		AcceptEntityInput(iEnt, "SetScale");  // this works!
@@ -405,7 +452,7 @@ public Action timer_SetAttachment(Handle timer, DataPack dp)
 
 public Action OnPlayerRunCmd(int client, int &buttons)
 {
-	if (client == 0 || gbIsObserver[client] || IsFakeClient(client))
+	if (client == 0 || !gbCanPlace[client] || IsFakeClient(client))
 		return Plugin_Continue;
 
 	if (buttons & (1 << 5)) // IN_USE
@@ -418,7 +465,7 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 			CreateMarker(client);
 		}
 		MovePreviewMarker(client);
-		gbKeyHeld[client] = true;
+		gbKeyHeld[client] = true; // we spam this :/
 	}
 	else
 	{
@@ -472,16 +519,21 @@ bool CreateMarker(int client)
 		client);
 		#endif
 
-		BuildFilter(client, giBeaconSprite[client][TARGET], TARGET);
-		BuildFilter(client, giBeaconSprite[client][QMARK], QMARK);
-		BuildFilter(client, giBeaconSprite[client][CIRCLE], CIRCLE);
+		BuildFilter(client, giBeaconSprite[client][TARGET], TARGET, true);
+		BuildFilter(client, giBeaconSprite[client][QMARK], QMARK, true);
+		BuildFilter(client, giBeaconSprite[client][CIRCLE], CIRCLE, true);
 
 		SDKHook(giBeaconSprite[client][TARGET], SDKHook_SetTransmit, Hook_SetTransmit);
 		SDKHook(giBeaconSprite[client][QMARK], SDKHook_SetTransmit, Hook_SetTransmit);
 		SDKHook(giBeaconSprite[client][CIRCLE], SDKHook_SetTransmit, Hook_SetTransmit);
 
+		// revert back to etheral state
 		DispatchKeyValue(giBeaconSprite[client][QMARK], "rendercolor", YELLOWCOLOR);
+		DispatchKeyValue(giBeaconSprite[client][QMARK], "alpha", "15");
+		DispatchKeyValue(giBeaconSprite[client][QMARK], "renderamt", "15");
 		DispatchKeyValue(giBeaconSprite[client][CIRCLE], "rendercolor", YELLOWCOLOR);
+		DispatchKeyValue(giBeaconSprite[client][CIRCLE], "alpha", "15");
+		DispatchKeyValue(giBeaconSprite[client][CIRCLE], "renderamt", "15");
 
 		AcceptEntityInput(giBeaconSprite[client][QMARK], "ShowSprite");
 		AcceptEntityInput(giBeaconSprite[client][CIRCLE], "ShowSprite");
@@ -499,9 +551,9 @@ bool CreateMarker(int client)
 	MakeParent(giBeaconSprite[client][CIRCLE], giBeaconSprite[client][TARGET]);
 	// MakeParent(giBeaconSprite[client][LABEL], giBeaconSprite[client][TARGET]);
 
-	BuildFilter(client, giBeaconSprite[client][TARGET], TARGET);
-	BuildFilter(client, giBeaconSprite[client][QMARK], QMARK);
-	BuildFilter(client, giBeaconSprite[client][CIRCLE], CIRCLE);
+	BuildFilter(client, giBeaconSprite[client][TARGET], TARGET, true);
+	BuildFilter(client, giBeaconSprite[client][QMARK], QMARK, true);
+	BuildFilter(client, giBeaconSprite[client][CIRCLE], CIRCLE, true);
 
 	// giHeadTarget[client] = CreateTargetProp(client, "headtarget");
 
@@ -560,8 +612,17 @@ void PlaceFinalMarker(int client)
 	PrintToServer("[visualmarker] TurnOn sprites & TurnOn BEAM");
 	#endif
 
+	BuildFilter(client, giBeaconSprite[client][TARGET], TARGET, false);
+	BuildFilter(client, giBeaconSprite[client][QMARK], QMARK, false);
+	BuildFilter(client, giBeaconSprite[client][CIRCLE], CIRCLE, false);
+
 	DispatchKeyValue(giBeaconSprite[client][QMARK], "rendercolor", REDCOLOR);
+	DispatchKeyValue(giBeaconSprite[client][QMARK], "alpha", "255");
+	DispatchKeyValue(giBeaconSprite[client][QMARK], "renderamt", "255");
+
 	DispatchKeyValue(giBeaconSprite[client][CIRCLE], "rendercolor", REDCOLOR);
+	DispatchKeyValue(giBeaconSprite[client][CIRCLE], "alpha", "255");
+	DispatchKeyValue(giBeaconSprite[client][CIRCLE], "renderamt", "255");
 
 	TeleportEntity(giBeaconSprite[client][TARGET], vecEnd, NULL_VECTOR, NULL_VECTOR);
 	// TeleportEntity(giBeaconSprite[client][QMARK], vecEnd, NULL_VECTOR, NULL_VECTOR);
@@ -577,7 +638,7 @@ void PlaceFinalMarker(int client)
 	// CreateTimer(0.1, timer_IncreaseEndRadius, client, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 
 	if (ghToggleTimer[client] == INVALID_HANDLE)
-		ghToggleTimer[client] = CreateTimer(GetConVarFloat(gCVARTimeToLive), timer_ToggleBeaconOff, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
+		ghToggleTimer[client] = CreateTimer(GetConVarFloat(gCvarTimeToLive), timer_ToggleBeaconOff, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 }
 
 stock Action timer_IncreaseEndRadius(Handle timer, int client)
@@ -745,19 +806,41 @@ stock void SpawnTESprite(float[3] Pos, int Model, float Size)
 }
 
 
-void BuildFilter(int client, int entity, SpriteType type)
+void BuildFilter(int client, int entity, SpriteType type, bool hidden=false)
 {
 	#if DEBUG
-	PrintToServer("[visualmarker] Calling BuildFilter(%d, %d)", client, entity);
+	PrintToServer("[visualmarker] Calling BuildFilter(%d, %d) %s",
+	client, entity, hidden ? "HIDDEN" : "not hidden");
 	#endif
+
 	if (entity <= 0) // perhaps we better not do this check
 		return;
+
+	if (hidden) // only show for us
+	{
+		for (int i = MaxClients; i; --i)
+		{
+			if (!IsValidClient(i))
+				continue;
+			if (i == client)
+			{
+				giHiddenEnts[i][type][client] = -1;
+				continue;
+			}
+
+			giHiddenEnts[i][type][client] = entity;
+		}
+		return;
+	}
 
 	int team = GetClientTeam(client);
 	for (int i = MaxClients; i; --i)
 	{
 		if (!IsValidClient(i) || GetClientTeam(i) == team)
+		{
+			giHiddenEnts[i][type][client] = -1;
 			continue;
+		}
 		giHiddenEnts[i][type][client] = entity;
 
 		#if DEBUG
