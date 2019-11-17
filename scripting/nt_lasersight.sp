@@ -66,6 +66,7 @@ bool gbInZoomState[NEO_MAX_CLIENTS+1]; // laser can be displayed
 Handle ghTimerCheckSequence[NEO_MAX_CLIENTS+1] = { INVALID_HANDLE, ...};
 Handle ghTimerCheckAimed[NEO_MAX_CLIENTS+1] = { INVALID_HANDLE, ...};
 Handle ghTimerCheckSRSSequence[NEO_MAX_CLIENTS+1] = {INVALID_HANDLE, ...};
+Handle ghTimerCheckReload[NEO_MAX_CLIENTS+1] = {INVALID_HANDLE, ...};
 int giOwnBeam[NEO_MAX_CLIENTS+1];
 bool gbLaserEnabled[NEO_MAX_CLIENTS+1];
 int giActiveWeapon[NEO_MAX_CLIENTS+1]; // holds index of weapon stored in iAffectedWeapons
@@ -791,12 +792,13 @@ void ToggleLaserDot(int client, int weapon_index, bool activate)
 
 int CreateTargetProp(int weapon, char[] sTag)
 {
-	// int iEnt = CreateEntityByName("info_target");
-	int iEnt = CreateEntityByName("prop_dynamic_override");
-	DispatchKeyValue(iEnt, "model", "models/nt/props_debris/can01.mdl");
+	// sems to work (in this case) with EF_PARENT_ANIMATES https://developer.valvesoftware.com/wiki/Effect_flags
+	int iEnt = CreateEntityByName("info_target");
+	// int iEnt = CreateEntityByName("prop_dynamic_override");
+	// DispatchKeyValue(iEnt, "model", "models/nt/props_debris/can01.mdl");
 
-	// stupid hacks because Source Engine is weird! (info_target is not a networked entity)
-	DispatchKeyValue(iEnt,"renderfx","0");
+	// these hacks were used with prop_dynamic_override and to optimize a bit
+	DispatchKeyValue(iEnt,"renderfx","256"); // EF_PARENT_ANIMATES (instead of 0)
 	DispatchKeyValue(iEnt,"damagetoenablemotion","0");
 	DispatchKeyValue(iEnt,"forcetoenablemotion","0");
 	DispatchKeyValue(iEnt,"Damagetype","0");
@@ -1117,13 +1119,13 @@ public Action timer_SetAttachmentPosition(Handle timer, DataPack dp)
 	vecOrigin[0] = ReadPackFloat(dp);
 	vecOrigin[1] = ReadPackFloat(dp);
 	vecOrigin[2] = ReadPackFloat(dp);
-	float vecAngle[3];
-	if (IsPackReadable(dp, 3 * 4)){
-		vecAngle[0] = ReadPackFloat(dp);
-		vecAngle[1] = ReadPackFloat(dp);
-		vecAngle[2] = ReadPackFloat(dp);
-	}
-	PrintToServer("vecAngle {%f %f %f}", vecAngle[0], vecAngle[1], vecAngle[2]);
+	// float vecAngle[3];
+	// if (IsPackReadable(dp, 3 * 4)){
+	// 	vecAngle[0] = ReadPackFloat(dp);
+	// 	vecAngle[1] = ReadPackFloat(dp);
+	// 	vecAngle[2] = ReadPackFloat(dp);
+	// }
+	// PrintToServer("vecAngle {%f %f %f}", vecAngle[0], vecAngle[1], vecAngle[2]);
 
 	SetVariantString(attachpoint);
 	AcceptEntityInput(entId, "SetParentAttachment");
@@ -1132,8 +1134,8 @@ public Action timer_SetAttachmentPosition(Handle timer, DataPack dp)
 
 	SetEntPropVector(entId, Prop_Send, "m_vecOrigin", vecOrigin);
 
-	if (vecOrigin[0] != 0.0)
-		SetEntPropVector(entId, Prop_Data, "m_angAbsRotation", vecAngle);
+	// if (vecOrigin[0] != 0.0)
+	// 	SetEntPropVector(entId, Prop_Data, "m_angAbsRotation", vecAngle);
 
 	#if DEBUG
 	PrintToServer("[lasersight] Position of attachment entity %d %.2f %.2f %.2f on %s",
@@ -1175,14 +1177,15 @@ int CreateViewModelLaserBeamEnt(int ViewModel, int client)
 	DispatchKeyValue(laser_entity, "texture", "materials/sprites/laser.vmt");
 	// DispatchKeyValue(laser_entity, "model", "materials/sprites/laser.vmt"); // seems unnecessary
 	// SetEntityModel(laser_entity,  "materials/sprites/laser.vmt"); // seems unnecessary
-	DispatchKeyValue(laser_entity, "decalname", "redglowalpha"); // FIXME
+	// DispatchKeyValue(laser_entity, "decalname", "redglowalpha");
 
-	DispatchKeyValue(laser_entity, "renderamt", "120"); // TODO(?): low renderamt, increase when activated?
-	DispatchKeyValue(laser_entity, "renderfx", "15");
-	DispatchKeyValue(laser_entity, "rendercolor", "200 25 25 128");
-	DispatchKeyValue(laser_entity, "BoltWidth", "2.0");
+	DispatchKeyValue(laser_entity, "renderamt", "255");
+	DispatchKeyValue(laser_entity, "renderfx", "14"); // 15 distort, 14 constant glow, 0 normal
+	DispatchKeyValue(laser_entity, "rendercolor", "200 25 25");
+	// DispatchKeyValue(laser_entity, "rendermode", "1");
+	SetVariantInt(190); AcceptEntityInput(laser_entity, "alpha"); // this works! (needs proper renderfx)
+	DispatchKeyValue(laser_entity, "BoltWidth", "1.5");
 	DispatchKeyValue(laser_entity, "spawnflags", "256"); // fade towards ending entity
-
 	DispatchKeyValue(laser_entity, "life", "0.0");
 	DispatchKeyValue(laser_entity, "StrikeTime", "0");
 	DispatchKeyValue(laser_entity, "TextureScroll", "35");
@@ -1293,12 +1296,12 @@ int CreateLaserBeamEnt(int weaponEnt)
 
 	// Setting Appearance
 	DispatchKeyValue(laser_entity, "texture", "materials/sprites/laser.vmt");
-	DispatchKeyValue(laser_entity, "model", "materials/sprites/laser.vmt"); // ?
+	// DispatchKeyValue(laser_entity, "model", "materials/sprites/laser.vmt"); // ?
 	DispatchKeyValue(laser_entity, "decalname", "redglowalpha");
 
-	DispatchKeyValue(laser_entity, "renderamt", "120"); // TODO(?): low renderamt, increase when activate
+	DispatchKeyValue(laser_entity, "renderamt", "100"); // TODO(?): low renderamt, increase when activate
 	DispatchKeyValue(laser_entity, "renderfx", "15");
-	DispatchKeyValue(laser_entity, "rendercolor", "200 25 25 128");
+	DispatchKeyValue(laser_entity, "rendercolor", "200 25 25");
 	DispatchKeyValue(laser_entity, "BoltWidth", "2.0");
 
 	// something else..
@@ -1677,7 +1680,7 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 	{
 		if (gbHeldKeys[client][KEY_ALTFIRE])
 		{
-			buttons &= ~IN_ATTACK2;
+			buttons &= ~IN_ATTACK2; // FIXME: bad idea, probably not even needed
 		}
 		else
 		{
@@ -1993,7 +1996,6 @@ bool IsWeaponReloading(int weapon)
 }
 
 
-
 void OnReloadKeyPressed(int client)
 {
 	#if DEBUG
@@ -2001,10 +2003,28 @@ void OnReloadKeyPressed(int client)
 	SetWeaponAmmo(client, GetAmmoType(GetActiveWeapon(client)), 90);
 	#endif
 
+	// check if we are still in a reload animation, block accordingly
+	if (view_as<bool>(GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Data, "m_bInReload")))
+	{
+		#if DEBUG
+		PrintToServer("[lasersight] IN_RELOAD weapon %d m_bInReload is %d. Blocking.",
+		weapon, GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Data, "m_bInReload"));
+		#endif
+	}
+
+	// the above check will not trigger right after key press, need delay
+	if (ghTimerCheckReload[client] == INVALID_HANDLE)
+		ghTimerCheckReload[client] = CreateTimer(0.1, timer_CheckForReload, client, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+
+public Action timer_CheckForReload(Handle timer, int client)
+{
 	//check until "m_bInReload" in weapon_srs is released -> TODO in any weapon?
 	if (view_as<bool>(GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Data, "m_bInReload")))
 	{
 		#if DEBUG
+		int weapon = GetPlayerWeaponSlot(client, SLOT_PRIMARY);
 		PrintToServer("[lasersight] IN_RELOAD weapon %d m_bInReload is %d. Toggling laser off.",
 		weapon, GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Data, "m_bInReload"));
 		#endif
@@ -2016,6 +2036,9 @@ void OnReloadKeyPressed(int client)
 		else
 			ToggleLaserOff(client, giActiveWeapon[client], 0);
 	}
+
+	ghTimerCheckReload[client] = INVALID_HANDLE;
+	return Plugin_Handled;
 }
 
 
