@@ -158,8 +158,6 @@ public void OnConfigsExecuted()
 		SDKHook(client, SDKHook_WeaponSwitchPost, OnWeaponSwitch_Post);
 		SDKHook(client, SDKHook_WeaponEquipPost, OnWeaponEquip);
 		SDKHook(client, SDKHook_WeaponDropPost, OnWeaponDrop);
-
-		// CreateTimer(1.0, timer_LookForWeaponsToTrack, GetClientUserId(client));
 	}
 }
 #endif
@@ -257,17 +255,17 @@ public void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] 
 		giLaserDot[i] = 0;
 		giLaserBeam[i] = 0;
 
-		if (giViewModelLaserBeam[i] > 0 && IsValidEntity(giViewModelLaserBeam[i]))
+		if (giViewModelLaserBeam[i] > 0 && IsValidEdict(giViewModelLaserBeam[i]))
 		{
 			AcceptEntityInput(giViewModelLaserBeam[i], "kill");
 			giViewModelLaserBeam[i] = 0;
 		}
-		if (giViewModelLaserStart[i] > 0 && IsValidEntity(giViewModelLaserStart[i]))
+		if (giViewModelLaserStart[i] > 0 && IsValidEdict(giViewModelLaserStart[i]))
 		{
 			AcceptEntityInput(giViewModelLaserStart[i], "kill");
 			giViewModelLaserStart[i] = 0;
 		}
-		if (giViewModelLaserEnd[i] > 0 && IsValidEntity(giViewModelLaserEnd[i]))
+		if (giViewModelLaserEnd[i] > 0 && IsValidEdict(giViewModelLaserEnd[i]))
 		{
 			AcceptEntityInput(giViewModelLaserEnd[i], "kill");
 			giViewModelLaserEnd[i] = 0;
@@ -283,9 +281,9 @@ public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 		giAttachment[i] = 0;
 		giLaserDot[i] = 0;
 		giLaserBeam[i] = 0;
+		giActiveWeapon[i] = -1;
 
 		#if DEBUG
-		PrintToServer("[lasersight] OnRoundEnd()");
 		if (giViewModelLaserBeam[i] > 0 && IsValidEntity(giViewModelLaserBeam[i]))
 		{
 			AcceptEntityInput(giViewModelLaserBeam[i], "kill");
@@ -451,7 +449,7 @@ void CreateLaserEntities(int client, int weaponEnt, int wpnIndex)
 Calling with type %d",
 		giAttachment[wpnIndex], wpnIndex, giWpnType[wpnIndex]);
 		#endif
-		UpdateAttachementPosition(giWpnType[wpnIndex], giAttachment[wpnIndex], false);
+		UpdateAttachementPosition(giWpnType[wpnIndex], giAttachment[wpnIndex], false, false);
 
 		if (CreateLaserDot(wpnIndex, weaponEnt))
 			CreateLaserBeam(wpnIndex, weaponEnt)
@@ -624,10 +622,10 @@ int GetTrackedWeaponIndex(int weapon)
 public void OnWeaponSwitch_Post(int client, int weapon)
 {
 	#if DEBUG
-	// if (!IsFakeClient(client)) {  // reduces log output
+	if (!IsFakeClient(client)) {  // reduces log output
 		PrintToServer("[lasersight] OnWeaponSwitch_Post %N (%d), weapon %d",
 		client, client, weapon);
-	// }
+	}
 	#endif
 
 	if (gbFreezeTime[client])
@@ -641,7 +639,7 @@ public void OnWeaponSwitch_Post(int client, int weapon)
 
 	gbInZoomState[client] = false;
 
-	if (gbShouldEmitLaser[client]) // our next weapon will not emit then
+	if (gbShouldEmitLaser[client]) // was emitting, our next weapon will not emit then
 	{
 		gbShouldEmitLaser[client] = false;
 		ToggleLaserOff(client, giActiveWeapon[client], 0); // our previous weapon
@@ -727,31 +725,6 @@ void MakeParent(int entity, int parent)
 }
 
 
-public Action timer_SetAttachment(Handle timer, int info_target)
-{
-	#if DEBUG
-	PrintToServer("[lasersight] SetParentAttachment to muzzle for info_target %d.", info_target);
-	#endif
-
-	SetVariantString("muzzle"); // "muzzle" works for when attaching to weapon
-	AcceptEntityInput(info_target, "SetParentAttachment");
-
-	// "As above, but without teleporting. The entity retains its position relative to the attachment at the time of the input being received."
-	// SetVariantString("grenade0");
-	// AcceptEntityInput(entity, "SetParentAttachmentMaintainOffset");
-
-	// adjusting to avoid coming out of barrel
-	float origin[3];
-	// GetEntPropVector(info_target, Prop_Send, "m_vecOrigin", origin);
-	DispatchSpawn(info_target);
-	origin[0] -= 1.0; // forward axis
-	origin[1] += 0.9; // up down axis
-	// origin[2] -= 2.5; // horizontal
-
-	SetEntPropVector(info_target, Prop_Send, "m_vecOrigin", origin);
-}
-
-
 // index of affected weapon in array
 bool CreateLaserDot(int weaponIndex, int weaponEnt)
 {
@@ -786,31 +759,31 @@ void DestroyLaserDot(int client)
 }
 
 
-void ToggleLaserDot(int client, int weapon, bool activate)
+void ToggleLaserDot(int client, int weapon_index, bool activate)
 {
 	// if (giLaserDot[giActiveWeapon[client]] < 0 || !IsValidEntity(giLaserDot[giActiveWeapon[client]]))
 	// 	return;
-	if (giLaserDot[weapon] < 0 || !IsValidEntity(giLaserDot[weapon]))
+	if (giLaserDot[weapon_index] < 0 || !IsValidEntity(giLaserDot[weapon_index]))
 		return;
-	if (giLaserTarget[weapon] < 0 || !IsValidEntity(giLaserTarget[weapon]))
+	if (giLaserTarget[weapon_index] < 0 || !IsValidEntity(giLaserTarget[weapon_index]))
 		return;
 
 	#if DEBUG
 	PrintToServer("[lasersight] %s laser dot (dot %d target %d) for %N.",
-	activate ? "Showing" : "Hiding", giLaserDot[weapon], giLaserTarget[weapon], client);
+	activate ? "Showing" : "Hiding", giLaserDot[weapon_index], giLaserTarget[weapon_index], client);
 	#endif
 
 	if (activate)
 	{
-		AcceptEntityInput(giLaserDot[weapon], "ShowSprite");
-		SDKHook(giLaserDot[weapon], SDKHook_SetTransmit, Hook_SetTransmitLaserDot);
-		SDKHook(giLaserTarget[weapon], SDKHook_SetTransmit, Hook_SetTransmitLaserDotTarget);
+		AcceptEntityInput(giLaserDot[weapon_index], "ShowSprite");
+		SDKHook(giLaserDot[weapon_index], SDKHook_SetTransmit, Hook_SetTransmitLaserDot);
+		SDKHook(giLaserTarget[weapon_index], SDKHook_SetTransmit, Hook_SetTransmitLaserDotTarget);
 	}
 	else
 	{
-		AcceptEntityInput(giLaserDot[weapon], "HideSprite");
-		SDKUnhook(giLaserDot[weapon], SDKHook_SetTransmit, Hook_SetTransmitLaserDot);
-		SDKUnhook(giLaserTarget[weapon], SDKHook_SetTransmit, Hook_SetTransmitLaserDotTarget);
+		AcceptEntityInput(giLaserDot[weapon_index], "HideSprite");
+		SDKUnhook(giLaserDot[weapon_index], SDKHook_SetTransmit, Hook_SetTransmitLaserDot);
+		SDKUnhook(giLaserTarget[weapon_index], SDKHook_SetTransmit, Hook_SetTransmitLaserDotTarget);
 	}
 }
 
@@ -922,7 +895,7 @@ void CreateViewModelLaserBeam(int client, WeaponType weapontype)
 	if (giViewModelLaserBeam[client] > 0)
 	{
 		#if DEBUG
-		ThrowError("[lasersight] View model Laser beam already existed for client %N!",
+		ThrowError("[lasersight] View model Laser beam already existed(?) for client %N.",
 		client);
 		#endif
 		return;
@@ -937,8 +910,8 @@ void CreateViewModelLaserBeam(int client, WeaponType weapontype)
 	giViewModelLaserEnd[client] = CreateInfoTargetProp(giViewModel[client], client, "endbeam");
 	giViewModelLaserBeam[client] = CreateViewModelLaserBeamEnt(giViewModel[client], client);
 
-	UpdateAttachementPosition(weapontype, giViewModelLaserStart[client], true);
-	UpdateAttachementPosition(weapontype, giViewModelLaserEnd[client], false);
+	UpdateAttachementPosition(weapontype, giViewModelLaserStart[client], true, true);
+	UpdateAttachementPosition(weapontype, giViewModelLaserEnd[client], true, false);
 
 	#if !DEBUG
 	SDKHook(giViewModel[client], SDKHook_SetTransmit, Hook_SetTransmitViewModel);
@@ -1003,9 +976,12 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 					WritePackFloat(dp, 6.0);
 					WritePackFloat(dp, 8.0);
 				}
-				WritePackFloat(dp, 90.0);
-				WritePackFloat(dp, 0.0);
-				WritePackFloat(dp, -5.0);
+				else
+				{
+					WritePackFloat(dp, 90.0);
+					WritePackFloat(dp, 0.0);
+					WritePackFloat(dp, -5.0);
+				}
 			}
 			else // world model
 			{
@@ -1014,8 +990,92 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 				WritePackFloat(dp, 0.0);
 			}
 
-			CreateTimer(0.1, timer_SetAttachmentViewModel, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
+			CreateTimer(0.1, timer_SetAttachmentPosition, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
 		}
+
+		case WPN_mpn:
+		{
+			WritePackString(dp, "muzzle")
+			if (viewmodel){
+				if (bStartPoint)
+				{
+					WritePackFloat(dp, -1.0);
+					WritePackFloat(dp, -6.0);
+					WritePackFloat(dp, -1.4);
+				}
+				else
+				{
+					WritePackFloat(dp, 80.0);
+					WritePackFloat(dp, -3.7);
+					WritePackFloat(dp, -2.0);
+				}
+			}
+			else // world model
+			{
+				WritePackFloat(dp, -1.0);
+				WritePackFloat(dp, 0.9);
+				WritePackFloat(dp, -5.0);
+			}
+
+			CreateTimer(0.1, timer_SetAttachmentPosition, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
+		}
+
+		case WPN_m41s:
+		{
+			WritePackString(dp, "muzzle")
+			if (viewmodel){
+				if (bStartPoint)
+				{
+					WritePackFloat(dp, -5.0);
+					WritePackFloat(dp, -4.0);
+					WritePackFloat(dp, -1.4);
+				}
+				else
+				{
+					WritePackFloat(dp, 80.0);
+					WritePackFloat(dp, -4.7);
+					WritePackFloat(dp, -2.5);
+				}
+			}
+			else // world model
+			{
+				WritePackFloat(dp, -1.0);
+				WritePackFloat(dp, 0.9);
+				WritePackFloat(dp, 0.0);
+			}
+
+			CreateTimer(0.1, timer_SetAttachmentPosition, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
+		}
+
+		case WPN_mx_silenced:
+		{
+			if (viewmodel)
+			{
+				WritePackString(dp, "eject") // "muzzle" works for when attaching to most weapon
+				if (bStartPoint)
+				{
+					WritePackFloat(dp, -6.5); // horizontal - left
+					WritePackFloat(dp, 40.0); // + backwards
+					WritePackFloat(dp, 5.0); // +up -down pitch
+				}
+				else
+				{
+					WritePackFloat(dp, -6.5);
+					WritePackFloat(dp, 100.5);
+					WritePackFloat(dp, 15.0);
+				}
+			}
+			else // world model
+			{
+				WritePackString(dp, "muzzle") // "muzzle" works for when attaching to most weapon
+				WritePackFloat(dp, -1.0);
+				WritePackFloat(dp, 0.9);
+				WritePackFloat(dp, 0.0);
+			}
+
+			CreateTimer(0.1, timer_SetAttachmentPosition, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
+		}
+
 		default:
 		{
 			WritePackString(dp, "muzzle") // "muzzle" works for when attaching to most weapon
@@ -1023,13 +1083,16 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 			{
 				if (bStartPoint)
 				{
-					WritePackFloat(dp, -1.0);
-					WritePackFloat(dp, -4.9);
-					WritePackFloat(dp, 1.5);
+					WritePackFloat(dp, -1.0); // forward axis
+					WritePackFloat(dp, -4.9); // up/down axis pitch
+					WritePackFloat(dp, 1.5); // horizontal yaw
 				}
-				WritePackFloat(dp, 80.0);
-				WritePackFloat(dp, -0.5);
-				WritePackFloat(dp, -1.0);
+				else
+				{
+					WritePackFloat(dp, 80.0); // forward axis
+					WritePackFloat(dp, -0.5); // up down axis (pitch, + = up)
+					WritePackFloat(dp, -1.0); // horizontal (- = left / + = right)
+				}
 			}
 			else // world model
 			{
@@ -1038,13 +1101,13 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 				WritePackFloat(dp, 0.0);
 			}
 
-			CreateTimer(0.1, timer_SetAttachmentViewModel, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
+			CreateTimer(0.1, timer_SetAttachmentPosition, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
 		}
 	}
 }
 
 
-public Action timer_SetAttachmentViewModel(Handle timer, DataPack dp)
+public Action timer_SetAttachmentPosition(Handle timer, DataPack dp)
 {
 	ResetPack(dp);
 	int entId = ReadPackCell(dp);
@@ -1054,6 +1117,13 @@ public Action timer_SetAttachmentViewModel(Handle timer, DataPack dp)
 	vecOrigin[0] = ReadPackFloat(dp);
 	vecOrigin[1] = ReadPackFloat(dp);
 	vecOrigin[2] = ReadPackFloat(dp);
+	float vecAngle[3];
+	if (IsPackReadable(dp, 3 * 4)){
+		vecAngle[0] = ReadPackFloat(dp);
+		vecAngle[1] = ReadPackFloat(dp);
+		vecAngle[2] = ReadPackFloat(dp);
+	}
+	PrintToServer("vecAngle {%f %f %f}", vecAngle[0], vecAngle[1], vecAngle[2]);
 
 	SetVariantString(attachpoint);
 	AcceptEntityInput(entId, "SetParentAttachment");
@@ -1061,6 +1131,9 @@ public Action timer_SetAttachmentViewModel(Handle timer, DataPack dp)
 	DispatchSpawn(entId);
 
 	SetEntPropVector(entId, Prop_Send, "m_vecOrigin", vecOrigin);
+
+	if (vecOrigin[0] != 0.0)
+		SetEntPropVector(entId, Prop_Data, "m_angAbsRotation", vecAngle);
 
 	#if DEBUG
 	PrintToServer("[lasersight] Position of attachment entity %d %.2f %.2f %.2f on %s",
@@ -1349,7 +1422,6 @@ velocity %.3f %.3f %.3f",
 
 
 			#if METHOD TEMP_ENT // not used anymore
-
 			if (IsValidEntity(giAttachment[giActiveWeapon[client]]))
 				startEnt = giAttachment[giActiveWeapon[client]];
 			if (IsValidEntity(giLaserDot[giActiveWeapon[client]]))
@@ -1940,9 +2012,9 @@ void OnReloadKeyPressed(int client)
 		gbInZoomState[client] = false;
 		gbShouldEmitLaser[client] = false;
 		if (gbActiveWeaponIsSRS[client] || gbActiveWeaponIsZRL[client])
-			ToggleLaserOff(client, weapon, 1);
+			ToggleLaserOff(client, giActiveWeapon[client], 1);
 		else
-			ToggleLaserOff(client, weapon, 0);
+			ToggleLaserOff(client, giActiveWeapon[client], 0);
 	}
 }
 
@@ -2051,18 +2123,18 @@ public Action timer_CheckSequence(Handle timer, DataPack datapack)
 }
 
 
-void ToggleLaserOn(int client, int weapon, int viewmodel)
+void ToggleLaserOn(int client, int weapon_index, int viewmodel)
 {
-	ToggleLaserDot(client, weapon, true);
-	ToggleLaserBeam(client, weapon, true);
+	ToggleLaserDot(client, weapon_index, true);
+	ToggleLaserBeam(client, weapon_index, true);
 	ToggleViewModelLaserBeam(client, viewmodel);
 	g_bNeedUpdateLoop = NeedUpdateLoop();
 }
 
-void ToggleLaserOff(int client, int weapon, int viewmodel)
+void ToggleLaserOff(int client, int weapon_index, int viewmodel)
 {
-	ToggleLaserDot(client, weapon, false);
-	ToggleLaserBeam(client, weapon, false);
+	ToggleLaserDot(client, weapon_index, false);
+	ToggleLaserBeam(client, weapon_index, false);
 	ToggleViewModelLaserBeam(client, viewmodel);
 	g_bNeedUpdateLoop = NeedUpdateLoop();
 }
