@@ -8,6 +8,8 @@
 #endif
 #define IN_NEOZOOM = (1 << 23) //IN_GRENADE1
 #define IN_ALTFIRE = (1 << 11) //IN_ATTACK2
+#define VIEWMDL_OFF 0
+#define VIEWMDL_ON 1
 
 enum KeyType {
 	KEY_VISION = 0,
@@ -36,7 +38,7 @@ enum WeaponType {
 	WPN_srs }
 
 int g_modelLaser, g_modelHalo/*, g_imodelLaserDot*/;
-Handle CVAR_LaserAlpha, CVAR_AllWeapons;
+Handle CVAR_LaserAlpha, CVAR_AllWeapons, CVAR_ZoomResetOn;
 int laser_color[4] = {210, 30, 0, 200};
 
 // Weapons where laser makes sense
@@ -76,6 +78,7 @@ bool gbActiveWeaponIsZRL[NEO_MAX_CLIENTS+1];
 bool gbFreezeTime[NEO_MAX_CLIENTS+1];
 bool gbIsRecon[NEO_MAX_CLIENTS+1];
 bool gbCanSprint[NEO_MAX_CLIENTS+1];
+bool gbZoomForceOn;
 
 
 bool gbHeldKeys[NEO_MAX_CLIENTS+1][MAXKEYS];
@@ -125,6 +128,8 @@ public void OnPluginStart()
 	laser_color[3] = GetConVarInt(CVAR_LaserAlpha); //TODO: hook convar change
 	CVAR_AllWeapons = CreateConVar("sm_lasersight_allweapons", "1",
 	"Draw laser beam from all weapons, not just sniper rifles.", _, true, 0.0, true, 1.0);
+	CVAR_ZoomResetOn = CreateConVar("sm_lasersight_zoom_forceon", "1",
+	"Zooming in forces laser beam to activate itself everytime.", _, true, 0.0, true, 1.0);
 
 	// Make sure we will allocate enough size to hold our weapon names throughout the plugin.
 	for (int i = 0; i < sizeof(g_sLaserWeaponNames); i++)
@@ -241,7 +246,7 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 	{
 		gbShouldEmitLaser[victim] = false;
 		if (giActiveWeapon[victim] > -1)
-			ToggleLaserOff(victim, giActiveWeapon[victim], 0);
+			ToggleLaserOff(victim, giActiveWeapon[victim], VIEWMDL_OFF);
 	}
 }
 
@@ -307,6 +312,8 @@ public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 
 public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
+	gbZoomForceOn = GetConVarBool(CVAR_ZoomResetOn);
+
 	for (int i = 1; i <= MaxClients; ++i){
 		gbFreezeTime[i] = true;
 
@@ -643,7 +650,7 @@ public void OnWeaponSwitch_Post(int client, int weapon)
 	if (gbShouldEmitLaser[client]) // was emitting, our next weapon will not emit then
 	{
 		gbShouldEmitLaser[client] = false;
-		ToggleLaserOff(client, giActiveWeapon[client], 0); // our previous weapon
+		ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_OFF); // our previous weapon
 	}
 
 	if (UpdateActiveWeapon(client, weapon)) // here we store our new weapon
@@ -1053,7 +1060,7 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 		{
 			if (viewmodel)
 			{
-				WritePackString(dp, "eject") // "muzzle" works for when attaching to most weapon
+				WritePackString(dp, "eject") // special case here
 				if (bStartPoint)
 				{
 					WritePackFloat(dp, -6.5); // horizontal - left
@@ -1069,7 +1076,7 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 			}
 			else // world model
 			{
-				WritePackString(dp, "muzzle") // "muzzle" works for when attaching to most weapon
+				WritePackString(dp, "muzzle")
 				WritePackFloat(dp, -1.0);
 				WritePackFloat(dp, 0.9);
 				WritePackFloat(dp, 0.0);
@@ -1077,6 +1084,37 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 
 			CreateTimer(0.1, timer_SetAttachmentPosition, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
 		}
+
+		case WPN_zr68l:
+		{
+			if (viewmodel)
+			{
+				if (bStartPoint)
+				{
+					WritePackString(dp, "eject");
+					WritePackFloat(dp, -1.5); // horizontal -left ?
+					WritePackFloat(dp, 15.0); // + backwards ?
+					WritePackFloat(dp, -2.0); // +up -down pitch ?
+				}
+				else
+				{
+					WritePackString(dp, "muzzle");
+					WritePackFloat(dp, 80.0);
+					WritePackFloat(dp, -4.0); // left right?
+					WritePackFloat(dp, -2.0); // - down + up pitch?
+				}
+			}
+			else // world model
+			{
+				WritePackString(dp, "muzzle_flash")
+				WritePackFloat(dp, -1.0);
+				WritePackFloat(dp, 0.9);
+				WritePackFloat(dp, 0.0);
+			}
+
+			CreateTimer(0.1, timer_SetAttachmentPosition, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
+		}
+
 
 		default:
 		{
@@ -1332,7 +1370,7 @@ public void OnWeaponDrop(int client, int weapon)
 	{
 		gbShouldEmitLaser[client] = false;
 		gbInZoomState[client] = false;
-		ToggleLaserOff(client, giActiveWeapon[client], 0)
+		ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_OFF)
 	}
 
 	g_bNeedUpdateLoop = NeedUpdateLoop(); // FIXME is this needed still?
@@ -1670,7 +1708,7 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 		if (gbActiveWeaponIsSRS[client] && gbHeldKeys[client][KEY_ATTACK])
 		{
 			gbInZoomState[client] = false;
-			ToggleLaserOff(client, giActiveWeapon[client], 1);
+			ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_ON);
 		}
 		gbHeldKeys[client][KEY_ATTACK] = false;
 	}
@@ -1774,9 +1812,9 @@ bool OnSprintKeyPressed(int buttons, int client)
 		if (giActiveWeapon[client] > -1)
 		{
 			if (gbActiveWeaponIsSRS[client] || gbActiveWeaponIsZRL[client])
-				ToggleLaserOff(client, giActiveWeapon[client], 1);
+				ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_ON);
 			else
-				ToggleLaserOff(client, giActiveWeapon[client], 0);
+				ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_OFF);
 		}
 		return true; // block keys normally handled after it
 	}
@@ -1808,9 +1846,9 @@ void OnZoomKeyPressed(int client)
 			gbShouldEmitLaser[client] = false;
 		gbInZoomState[client] = false;
 	}
-	else
+	else // we are zooming in
 	{
-		if (gbLaserEnabled[client]) // explicitly disabled by player
+		if (gbLaserEnabled[client] || gbZoomForceOn) // explicitly disabled by player
 			gbShouldEmitLaser[client] = true;
 
 		#if DEBUG
@@ -1837,24 +1875,24 @@ void OnZoomKeyPressed(int client)
 		if (gbInZoomState[client])
 		{
 			if (gbActiveWeaponIsSRS[client] || gbActiveWeaponIsZRL[client])
-				ToggleLaserOn(client, giActiveWeapon[client], 0);
+				ToggleLaserOn(client, giActiveWeapon[client], VIEWMDL_OFF);
 			else
-				ToggleLaserOn(client, giActiveWeapon[client], 1);
+				ToggleLaserOn(client, giActiveWeapon[client], VIEWMDL_ON);
 		}
 		else
 		{
 			if (gbActiveWeaponIsSRS[client] || gbActiveWeaponIsZRL[client])
-				ToggleLaserOff(client, giActiveWeapon[client], 1);
+				ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_ON);
 			else
-				ToggleLaserOff(client, giActiveWeapon[client], 0);
+				ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_OFF);
 		}
 	}
 	else
 	{
 		if (gbActiveWeaponIsSRS[client] || gbActiveWeaponIsZRL[client])
-			ToggleLaserOff(client, giActiveWeapon[client], 1);
+			ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_ON);
 		else
-			ToggleLaserOff(client, giActiveWeapon[client], 0);
+			ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_OFF);
 	}
 
 	// ToggleLaser(client, giActiveWeapon[client]);
@@ -1870,12 +1908,12 @@ void HandleSRSQuirks(int client)
 	if (gbHeldKeys[client][KEY_ATTACK]){
 		if (gbInZoomState[client]){
 			// gbShouldEmitLaser[client] = true;
-			ToggleLaserOn(client, giActiveWeapon[client], 0);
+			ToggleLaserOn(client, giActiveWeapon[client], VIEWMDL_OFF);
 			return;
 		}
 		else{
 			// gbShouldEmitLaser[client] = false;
-			ToggleLaserOff(client, giActiveWeapon[client], 1);
+			ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_ON);
 			return;
 		}
 	}
@@ -1964,9 +2002,9 @@ public Action timer_CheckForAimed(Handle timer, int client)
 	else
 	{
 		if (gbActiveWeaponIsSRS[client] || gbActiveWeaponIsZRL[client])
-			ToggleLaserOff(client, giActiveWeapon[client], 1);
+			ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_ON);
 		else
-			ToggleLaserOff(client, giActiveWeapon[client], 0);
+			ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_OFF);
 
 		ghTimerCheckAimed[client] = INVALID_HANDLE;
 		return Plugin_Stop;
@@ -2032,9 +2070,9 @@ public Action timer_CheckForReload(Handle timer, int client)
 		gbInZoomState[client] = false;
 		gbShouldEmitLaser[client] = false;
 		if (gbActiveWeaponIsSRS[client] || gbActiveWeaponIsZRL[client])
-			ToggleLaserOff(client, giActiveWeapon[client], 1);
+			ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_ON);
 		else
-			ToggleLaserOff(client, giActiveWeapon[client], 0);
+			ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_OFF);
 	}
 
 	ghTimerCheckReload[client] = INVALID_HANDLE;
@@ -2133,12 +2171,12 @@ public Action timer_CheckSequence(Handle timer, DataPack datapack)
 	if (gbInZoomState[client])
 	{
 		if (!gbActiveWeaponIsZRL[client])
-			ToggleLaserOn(client, GetTrackedWeaponIndex(weapon), 1);
+			ToggleLaserOn(client, GetTrackedWeaponIndex(weapon), VIEWMDL_ON);
 	}
 	else
 	{
 		if (!gbActiveWeaponIsZRL[client])
-			ToggleLaserOff(client, GetTrackedWeaponIndex(weapon), 1);
+			ToggleLaserOff(client, GetTrackedWeaponIndex(weapon), VIEWMDL_OFF);
 	}
 
 	ghTimerCheckSequence[client] = INVALID_HANDLE;
@@ -2164,10 +2202,12 @@ void ToggleLaserOff(int client, int weapon_index, int viewmodel)
 
 
 // for regular weapons, prevent automatic laser creation on aim down sight
-void ToggleLaserActivity(int client, int weapon)
+void ToggleLaserActivity(int client, int weapon, bool advertise=true)
 {
 	gbLaserEnabled[client] = !gbLaserEnabled[client];
-	PrintCenterText(client, "Laser sight toggled %s", gbLaserEnabled[client] ? "on" : "off");
+
+	if (advertise && !gbZoomForceOn)
+		PrintCenterText(client, "Laser sight toggled %s", gbLaserEnabled[client] ? "on" : "off");
 
 	// check if we're zoomed currently
 	// if (!IsWeaponAimed(iAffectedWeapons[giActiveWeapon[client]]) || IsWeaponReloading(iAffectedWeapons[giActiveWeapon[client]]))
@@ -2178,22 +2218,22 @@ void ToggleLaserActivity(int client, int weapon)
 	if (gbInZoomState[client])
 	{
 		#if DEBUG > 2
-		PrintToChatAll("%N in zoom?", client);
+		PrintToChatAll("[lasersight] %N in zoom?", client);
 		#endif
 		gbShouldEmitLaser[client] = gbLaserEnabled[client] ? true : false;
 	}
 	else
 	{
 		#if DEBUG > 2
-		PrintToChatAll("%N not in zoom?", client);
+		PrintToChatAll("[lasersight] %N not in zoom?", client);
 		#endif
 		gbShouldEmitLaser[client] = false;
 	}
 
 	if (gbShouldEmitLaser[client])
-		ToggleLaserOn(client, weapon, 1);
+		ToggleLaserOn(client, weapon, VIEWMDL_ON);
 	else
-		ToggleLaserOff(client, weapon, 0);
+		ToggleLaserOff(client, weapon, VIEWMDL_OFF);
 }
 
 
