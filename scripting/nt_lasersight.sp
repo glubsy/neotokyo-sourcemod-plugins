@@ -34,6 +34,7 @@ enum WeaponType {
 	WPN_srm_s,
 	WPN_zr68c,
 	WPN_zr68s,
+	WPN_aa13,
 	WPN_zr68l,
 	WPN_srs }
 
@@ -55,6 +56,7 @@ new const String:g_sLaserWeaponNames[][] = {
 	"weapon_srm_s",
 	"weapon_zr68c",
 	"weapon_zr68s",
+	"weapon_aa13",
 	"weapon_zr68l",
 	"weapon_srs" }; // NOTE: the 2 last items must be actual sniper rifles!
 #define LONGEST_WEP_NAME 18
@@ -88,7 +90,7 @@ bool gbIsObserver[NEO_MAX_CLIENTS+1];
 int giLaserBeam[NEO_MAX_CLIENTS+1]; // per weapon (not client)
 int giLaserDot[NEO_MAX_CLIENTS+1]; // per weapon (not client)
 int giLaserTarget[NEO_MAX_CLIENTS+1]; // per weapon (not client)
-int giAttachment[NEO_MAX_CLIENTS+1]; // per weapon (not client)
+int giAttachedInfoTarget[NEO_MAX_CLIENTS+1]; // per weapon (not client)
 
 // Viewmodel entities
 int giViewModelLaserStart[NEO_MAX_CLIENTS+1]; // per client
@@ -107,15 +109,13 @@ public Plugin:myinfo =
 
 // TODO: use return GetEntProp(weapon, Prop_Data, "m_iState") to check if weapon is being carried by a player (see smlib/weapons.inc)
 // TODO: make checking for in_zoom state a forward (for other plugins to use)?
-// TODO: Attach a prop to the muzzle of every srs, then raytrace a laser straight in front when tossed in the world
 // TODO: setup two beams, a normal one for spectators, a thicker one for night vision?
 
-//TODO: fire changemode or fireempty animations on toggle laser command
+//TODO: animation (changemode or fireempty) on toggle laser command
 //TODO: look at what texture the L4D2 SDK uses for laser beams (particles)
 //TODO: show the entire laser beam to players hit by traceray when pointed directly at their head
 //TODO: have laser color / alpha in a convar
-
-//FIXME: SRS first equip doesn't toggle laser on viewmodel
+//TODO: fix observers having laser ability with right click
 
 #define TEMP_ENT 1 // use TE every game frame, instead of actual env_beam (obsolete)
 #define METHOD 0
@@ -255,41 +255,29 @@ public void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] 
 	#if DEBUG
 	PrintToServer("[lasersight] OnNeoRestartThis()");
 	#endif
-	for (int i = 1; i < sizeof(iAffectedWeapons); ++i)
-	{
-		giAttachment[i] = 0;
-		giLaserDot[i] = 0;
-		giLaserBeam[i] = 0;
-
-		if (giViewModelLaserBeam[i] > 0 && IsValidEdict(giViewModelLaserBeam[i]))
-		{
-			AcceptEntityInput(giViewModelLaserBeam[i], "kill");
-			giViewModelLaserBeam[i] = 0;
-		}
-		if (giViewModelLaserStart[i] > 0 && IsValidEdict(giViewModelLaserStart[i]))
-		{
-			AcceptEntityInput(giViewModelLaserStart[i], "kill");
-			giViewModelLaserStart[i] = 0;
-		}
-		if (giViewModelLaserEnd[i] > 0 && IsValidEdict(giViewModelLaserEnd[i]))
-		{
-			AcceptEntityInput(giViewModelLaserEnd[i], "kill");
-			giViewModelLaserEnd[i] = 0;
-		}
-	}
+	ResetAllEntities();
 }
 
 
 public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 {
+	#if DEBUG
+	PrintToServer("[lasersight] OnRoundEnd()");
+	#endif
+	ResetAllEntities();
+}
+
+
+void ResetAllEntities()
+{
 	for (int i = 1; i < sizeof(iAffectedWeapons); ++i)
 	{
-		giAttachment[i] = 0;
+		giAttachedInfoTarget[i] = 0;
 		giLaserDot[i] = 0;
 		giLaserBeam[i] = 0;
 		giActiveWeapon[i] = -1;
 
-		#if DEBUG
+		// #if DEBUG
 		if (giViewModelLaserBeam[i] > 0 && IsValidEntity(giViewModelLaserBeam[i]))
 		{
 			AcceptEntityInput(giViewModelLaserBeam[i], "kill");
@@ -305,13 +293,17 @@ public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 			AcceptEntityInput(giViewModelLaserEnd[i], "kill");
 			giViewModelLaserEnd[i] = 0;
 		}
-		#endif
+		// #endif
 	}
 }
 
 
 public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
+	#if DEBUG
+	PrintToServer("[lasersight] OnRoundStart()");
+	#endif
+
 	gbZoomForceOn = GetConVarBool(CVAR_ZoomResetOn);
 
 	for (int i = 1; i <= MaxClients; ++i){
@@ -324,30 +316,15 @@ public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 		SetEntProp(i, Prop_Send, "m_iRank", 4);
 		#endif
 	}
-	#if DEBUG
-	PrintToChatAll("OnRoundStart()");
-	#endif
-
-	// CreateTimer(20.0, timer_FreezeTimeOff, -1, TIMER_FLAG_NO_MAPCHANGE);
 }
 
-#if DEBUG
+
 public void OnPluginEnd(){
+	ResetAllEntities();
 	for (int i = 1; i <= MaxClients; ++i){
 		if (!IsClientInGame(i) || IsFakeClient(i))
 			continue;
-		if (giViewModelLaserStart[i] > 0)
-		{
-			AcceptEntityInput(giViewModelLaserStart[i], "kill");
-		}
-		if (giViewModelLaserEnd[i] > 0)
-		{
-			AcceptEntityInput(giViewModelLaserEnd[i], "kill");
-		}
-		if (giViewModelLaserBeam[i] > 0)
-		{
-			AcceptEntityInput(giViewModelLaserBeam[i], "kill");
-		}
+
 		int ViewModel = GetEntPropEnt(i, Prop_Send, "m_hViewModel");
 		AcceptEntityInput(ViewModel, "Killhierarchy");
 
@@ -355,7 +332,6 @@ public void OnPluginEnd(){
 		SDKUnhook(giViewModelLaserBeam[i], SDKHook_SetTransmit, Hook_SetTransmitViewModel);
 	}
 }
-#endif
 
 
 public Action timer_FreezeTimeOff(Handle timer, int client)
@@ -448,16 +424,16 @@ void CreateLaserEntities(int client, int weaponEnt, int wpnIndex)
 		return;
 	}
 
-	giAttachment[wpnIndex] = CreateInfoTargetProp(weaponEnt, client, "wmodel", true);
+	giAttachedInfoTarget[wpnIndex] = CreateInfoTargetProp(weaponEnt, client, "wmodel", true);
 
-	if (giAttachment[wpnIndex])
+	if (giAttachedInfoTarget[wpnIndex])
 	{
 		#if DEBUG
-		PrintToServer("[lasersight] we have attachment %d on weapon index %d. Updating position.\
+		PrintToServer("[lasersight] we have attachment %d on weapon index %d. Updating position. \
 Calling with type %d",
-		giAttachment[wpnIndex], wpnIndex, giWpnType[wpnIndex]);
+		giAttachedInfoTarget[wpnIndex], wpnIndex, giWpnType[wpnIndex]);
 		#endif
-		UpdateAttachementPosition(giWpnType[wpnIndex], giAttachment[wpnIndex], false, false);
+		UpdateAttachementPosition(giWpnType[wpnIndex], giAttachedInfoTarget[wpnIndex], false, false);
 
 		if (CreateLaserDot(wpnIndex, weaponEnt))
 			CreateLaserBeam(wpnIndex, weaponEnt)
@@ -825,7 +801,7 @@ int CreateTargetProp(int weapon, char[] sTag)
 	DispatchKeyValue(iEnt, "targetname", ent_name);
 
 	#if DEBUG
-	PrintToServer("[lasersight] Created target (%d) on weapon %d :%s",
+	PrintToServer("[lasersight] Created info_target (%d) on weapon %d :%s",
 	iEnt, weapon, ent_name);
 	#endif
 
@@ -975,33 +951,6 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 
 	switch (weapontype)
 	{
-		case WPN_jittescoped:
-		{
-			WritePackString(dp, "eject") // jitte_s model doesn't have muzzle attachment point
-			if (viewmodel){
-				if (bStartPoint)
-				{
-					WritePackFloat(dp, 2.0);
-					WritePackFloat(dp, 6.0);
-					WritePackFloat(dp, 8.0);
-				}
-				else
-				{
-					WritePackFloat(dp, 90.0);
-					WritePackFloat(dp, 0.0);
-					WritePackFloat(dp, -5.0);
-				}
-			}
-			else // world model
-			{
-				WritePackFloat(dp, -1.0);
-				WritePackFloat(dp, 0.9);
-				WritePackFloat(dp, 0.0);
-			}
-
-			CreateTimer(0.1, timer_SetAttachmentPosition, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
-		}
-
 		case WPN_mpn:
 		{
 			WritePackString(dp, "muzzle")
@@ -1021,17 +970,80 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 			}
 			else // world model
 			{
+				WritePackFloat(dp, -2.0);
+				WritePackFloat(dp, 2.9);
+				WritePackFloat(dp, 0.0);
+			}
+		}
+
+		case WPN_jittescoped:
+		{
+			if (viewmodel){
+				WritePackString(dp, "eject"); // jitte_s model doesn't have muzzle attachment point
+				// Below the barrel:
+				// if (bStartPoint)
+				// {
+				// 	WritePackFloat(dp, -3.0); // horizontal - left
+				// 	WritePackFloat(dp, 10.0); // + backwards
+				// 	WritePackFloat(dp, -1.8); // +up -down pitch
+				// }
+				// else
+				// {
+				// 	WritePackFloat(dp, -1.5);
+				// 	WritePackFloat(dp, 100.5);
+				// 	WritePackFloat(dp, 15.0);
+				// }
+				// Above the barrel:
+				if (bStartPoint)
+				{
+					WritePackFloat(dp, -1.0); // horizontal - left
+					WritePackFloat(dp, 6.0); // + backwards
+					WritePackFloat(dp, 2.0); // +up -down pitch
+				}
+				else
+				{
+					WritePackFloat(dp, 2.7);
+					WritePackFloat(dp, 60.5);
+					WritePackFloat(dp, 10.0);
+				}
+			}
+			else // world model
+			{
+				WritePackString(dp, "muzzle_flash"); // FIXME doesn't find the attachment point somehow!?
 				WritePackFloat(dp, -1.0);
 				WritePackFloat(dp, 0.9);
-				WritePackFloat(dp, -5.0);
+				WritePackFloat(dp, 0.0);
 			}
+		}
 
-			CreateTimer(0.1, timer_SetAttachmentPosition, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
+		case WPN_m41:
+		{
+			WritePackString(dp, "muzzle");
+			if (viewmodel){
+				if (bStartPoint)
+				{
+					WritePackFloat(dp, -2.0);
+					WritePackFloat(dp, -3.1);
+					WritePackFloat(dp, 1.0);
+				}
+				else
+				{
+					WritePackFloat(dp, 80.0);
+					WritePackFloat(dp, -1.5);
+					WritePackFloat(dp, -0.5);
+				}
+			}
+			else // world model
+			{
+				WritePackFloat(dp, -2.0);
+				WritePackFloat(dp, -0.9);
+				WritePackFloat(dp, 0.0);
+			}
 		}
 
 		case WPN_m41s:
 		{
-			WritePackString(dp, "muzzle")
+			WritePackString(dp, "muzzle");
 			if (viewmodel){
 				if (bStartPoint)
 				{
@@ -1048,19 +1060,44 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 			}
 			else // world model
 			{
+				WritePackFloat(dp, -16.0);
 				WritePackFloat(dp, -1.0);
+				WritePackFloat(dp, 0.0);
+			}
+		}
+
+		case WPN_mx:
+		{
+			if (viewmodel)
+			{
+				WritePackString(dp, "muzzle");
+				if (bStartPoint)
+				{
+					WritePackFloat(dp, -1.0); // forward axis
+					WritePackFloat(dp, -4.9); // up/down axis pitch
+					WritePackFloat(dp, 1.5); // horizontal yaw
+				}
+				else
+				{
+					WritePackFloat(dp, 80.0); // forward axis
+					WritePackFloat(dp, -0.5); // up down axis (pitch, + = up)
+					WritePackFloat(dp, -1.0); // horizontal (- = left / + = right)
+				}
+			}
+			else // world model
+			{
+				WritePackString(dp, "muzzle");
+				WritePackFloat(dp, -3.0);
 				WritePackFloat(dp, 0.9);
 				WritePackFloat(dp, 0.0);
 			}
-
-			CreateTimer(0.1, timer_SetAttachmentPosition, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
 		}
 
 		case WPN_mx_silenced:
 		{
 			if (viewmodel)
 			{
-				WritePackString(dp, "eject") // special case here
+				WritePackString(dp, "eject"); // special case here
 				if (bStartPoint)
 				{
 					WritePackFloat(dp, -6.5); // horizontal - left
@@ -1076,13 +1113,11 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 			}
 			else // world model
 			{
-				WritePackString(dp, "muzzle")
-				WritePackFloat(dp, -1.0);
-				WritePackFloat(dp, 0.9);
+				WritePackString(dp, "muzzle");
+				WritePackFloat(dp, -5.7);
+				WritePackFloat(dp, 2.0);
 				WritePackFloat(dp, 0.0);
 			}
-
-			CreateTimer(0.1, timer_SetAttachmentPosition, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
 		}
 
 		case WPN_zr68l:
@@ -1106,21 +1141,99 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 			}
 			else // world model
 			{
-				WritePackString(dp, "muzzle_flash")
+				WritePackString(dp, "muzzle")
 				WritePackFloat(dp, -1.0);
 				WritePackFloat(dp, 0.9);
 				WritePackFloat(dp, 0.0);
 			}
-
-			CreateTimer(0.1, timer_SetAttachmentPosition, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
 		}
 
+		case WPN_zr68s:
+		{
+			if (viewmodel)
+			{
+				WritePackString(dp, "muzzle");
+				if (bStartPoint)
+				{
+					WritePackFloat(dp, -1.0);
+					WritePackFloat(dp, -4.9);
+					WritePackFloat(dp, 1.5);
+				}
+				else
+				{
+					WritePackFloat(dp, 80.0);
+					WritePackFloat(dp, -0.5);
+					WritePackFloat(dp, -1.0);
+				}
+			}
+			else // world model
+			{
+				WritePackString(dp, "muzzle");
+				WritePackFloat(dp, -5.5);
+				WritePackFloat(dp, 0.9);
+				WritePackFloat(dp, 0.0);
+			}
+		}
+
+		case WPN_aa13:
+		{
+			if (viewmodel)
+			{
+				WritePackString(dp, "muzzle");
+				if (bStartPoint)
+				{
+					WritePackFloat(dp, -1.0); // forward axis
+					WritePackFloat(dp, 2.0); // up/down axis pitch
+					WritePackFloat(dp, 0.0); // horizontal yaw
+				}
+				else
+				{
+					WritePackFloat(dp, 80.0); // forward axis
+					WritePackFloat(dp, -0.5); // up down axis (pitch, + = up)
+					WritePackFloat(dp, -1.0); // horizontal (- = left / + = right)
+				}
+			}
+			else // world model
+			{
+				WritePackString(dp, "muzzle");
+				WritePackFloat(dp, -2.0);
+				WritePackFloat(dp, 1.2);
+				WritePackFloat(dp, 0.0);
+			}
+		}
+
+		case WPN_pz:
+		{
+			if (viewmodel)
+			{
+				WritePackString(dp, "muzzle");
+				if (bStartPoint)
+				{
+					WritePackFloat(dp, -1.0);
+					WritePackFloat(dp, -4.9);
+					WritePackFloat(dp, 1.5);
+				}
+				else
+				{
+					WritePackFloat(dp, 80.0);
+					WritePackFloat(dp, -0.5);
+					WritePackFloat(dp, -1.0);
+				}
+			}
+			else // world model
+			{
+				WritePackString(dp, "muzzle");
+				WritePackFloat(dp, -12.0);
+				WritePackFloat(dp, -1.1);
+				WritePackFloat(dp, -0.1);
+			}
+		}
 
 		default:
 		{
-			WritePackString(dp, "muzzle") // "muzzle" works for when attaching to most weapon
 			if (viewmodel)
 			{
+				WritePackString(dp, "muzzle"); // "muzzle" works for when attaching to most weapon
 				if (bStartPoint)
 				{
 					WritePackFloat(dp, -1.0); // forward axis
@@ -1136,14 +1249,15 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 			}
 			else // world model
 			{
+				WritePackString(dp, "muzzle"); // "muzzle" works for when attaching to most weapon
 				WritePackFloat(dp, -1.0);
 				WritePackFloat(dp, 0.9);
 				WritePackFloat(dp, 0.0);
 			}
-
-			CreateTimer(0.1, timer_SetAttachmentPosition, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
 		}
 	}
+
+	CreateTimer(0.1, timer_SetAttachmentPosition, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
 }
 
 
@@ -1151,7 +1265,7 @@ public Action timer_SetAttachmentPosition(Handle timer, DataPack dp)
 {
 	ResetPack(dp);
 	int entId = ReadPackCell(dp);
-	char attachpoint[10];
+	char attachpoint[20];
 	ReadPackString(dp, attachpoint, sizeof(attachpoint));
 	float vecOrigin[3];
 	vecOrigin[0] = ReadPackFloat(dp);
@@ -1227,7 +1341,6 @@ int CreateViewModelLaserBeamEnt(int ViewModel, int client)
 	DispatchKeyValue(laser_entity, "life", "0.0");
 	DispatchKeyValue(laser_entity, "StrikeTime", "0");
 	DispatchKeyValue(laser_entity, "TextureScroll", "35");
-	// DispatchKeyValue(laser_entity, "TouchType", "3");
 
 	DispatchSpawn(laser_entity);
 
@@ -1334,7 +1447,6 @@ int CreateLaserBeamEnt(int weaponEnt)
 
 	// Setting Appearance
 	DispatchKeyValue(laser_entity, "texture", "materials/sprites/laser.vmt");
-	// DispatchKeyValue(laser_entity, "model", "materials/sprites/laser.vmt"); // ?
 	DispatchKeyValue(laser_entity, "decalname", "redglowalpha");
 
 	DispatchKeyValue(laser_entity, "renderamt", "100"); // TODO(?): low renderamt, increase when activate
@@ -1346,7 +1458,14 @@ int CreateLaserBeamEnt(int weaponEnt)
 	DispatchKeyValue(laser_entity, "life", "0.0");
 	DispatchKeyValue(laser_entity, "StrikeTime", "0");
 	DispatchKeyValue(laser_entity, "TextureScroll", "35");
-	// DispatchKeyValue(laser_entity, "TouchType", "3");
+	// DispatchKeyValue(laser_entity, "TouchType", "1"); // TODO: Hook OnTouchedByEntity to display beam to player that is hit by beam?
+
+	#if DEBUG
+	DispatchKeyValue(laser_entity, "spawnflags", "256"); // don't shade start
+	#else
+	DispatchKeyValue(laser_entity, "spawnflags", "896"); // 128 Shade start + 256 Shade End + 512 Taper out
+	#endif
+
 
 	DispatchSpawn(laser_entity);
 	SetEntityModel(laser_entity,  "materials/sprites/laser.vmt");
@@ -1463,8 +1582,8 @@ velocity %.3f %.3f %.3f",
 
 
 			#if METHOD TEMP_ENT // not used anymore
-			if (IsValidEntity(giAttachment[giActiveWeapon[client]]))
-				startEnt = giAttachment[giActiveWeapon[client]];
+			if (IsValidEntity(giAttachedInfoTarget[giActiveWeapon[client]]))
+				startEnt = giAttachedInfoTarget[giActiveWeapon[client]];
 			if (IsValidEntity(giLaserDot[giActiveWeapon[client]]))
 				endEnt = giLaserTarget[giActiveWeapon[client]];
 
@@ -1635,7 +1754,7 @@ bool IsActiveWeaponZRL(int weapon)
 	return false;
 }
 
-
+//(client, &buttons, &impulse, Float:vel[3], Float:angles[3], &weapon, &subtype, &cmdnum, &tickcount, &seed, mouse[2]);
 public Action OnPlayerRunCmd(int client, int &buttons)
 {
 	if (client == 0 || gbIsObserver[client] || IsFakeClient(client))
@@ -1794,7 +1913,6 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 		// NOTE: the key is already released as soon as this is called!
 		OnZoomKeyPressed(client);
 	}
-
 
 	return Plugin_Continue;
 }
@@ -2184,6 +2302,29 @@ public Action timer_CheckSequence(Handle timer, DataPack datapack)
 }
 
 
+void SetSwitchModeSequence(int viewmodel, WeaponType weapontype)
+{
+	int sequence;
+	switch (weapontype)
+	{
+		case WPN_mpn:
+		{
+			sequence = 7;
+		}
+		case WPN_NONE:
+		{
+			return;
+		}
+		default:
+		{
+			return;
+		}
+	}
+
+	SetEntProp(viewmodel, Prop_Send, "m_nSequence", sequence);
+}
+
+
 void ToggleLaserOn(int client, int weapon_index, int viewmodel)
 {
 	ToggleLaserDot(client, weapon_index, true);
@@ -2202,7 +2343,7 @@ void ToggleLaserOff(int client, int weapon_index, int viewmodel)
 
 
 // for regular weapons, prevent automatic laser creation on aim down sight
-void ToggleLaserActivity(int client, int weapon, bool advertise=true)
+void ToggleLaserActivity(int client, int weapon_index, bool advertise=true)
 {
 	gbLaserEnabled[client] = !gbLaserEnabled[client];
 
@@ -2231,9 +2372,11 @@ void ToggleLaserActivity(int client, int weapon, bool advertise=true)
 	}
 
 	if (gbShouldEmitLaser[client])
-		ToggleLaserOn(client, weapon, VIEWMDL_ON);
+		ToggleLaserOn(client, weapon_index, VIEWMDL_ON);
 	else
-		ToggleLaserOff(client, weapon, VIEWMDL_OFF);
+		ToggleLaserOff(client, weapon_index, VIEWMDL_OFF);
+
+	SetSwitchModeSequence(giViewModel[client], giWpnType[weapon_index]);
 }
 
 
