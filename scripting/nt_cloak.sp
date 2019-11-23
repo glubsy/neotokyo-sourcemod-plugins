@@ -104,7 +104,10 @@ public Action OnPlayerHurt(Event event, const char[] name, bool dontbroadcast)
 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
 	// int health = GetEventInt(event, "health");
 
-	if (!gbIsSupport[client] || !gbCanCloak[client])
+	if (!gbIsSupport[client])
+		return Plugin_Continue;
+
+	if (gbCanCloak[client])
 		return Plugin_Continue;
 
 	int attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
@@ -114,6 +117,10 @@ public Action OnPlayerHurt(Event event, const char[] name, bool dontbroadcast)
 
 	if (GetClientTeam(client) == GetClientTeam(attacker))
 		return Plugin_Continue;
+
+	#if DEBUG
+	LogAction(client, -1, "[nt_cloak] Cloak turned off for %N", client);
+	#endif
 
 	SetEntProp(client, Prop_Send, "m_iThermoptic", 0);
 	return Plugin_Continue;
@@ -135,14 +142,14 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 		{
 			gbHeldKey[client] = true;
 
-			#if DEBUG
+			#if DEBUG > 1
 			int prop = GetEntProp(client, Prop_Send, "m_iThermoptic");
 			SetEntProp(client, Prop_Send, "m_iThermoptic", prop ? 0 : 1);
 			#endif
 
 			if (gbCanCloak[client])
 			{
-				#if !DEBUG
+				#if DEBUG <= 1
 				SetEntProp(client, Prop_Send, "m_iThermoptic", 1);
 				gbCanCloak[client] = false;
 				#endif
@@ -170,8 +177,6 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 				SOUND_FROM_PLAYER, SNDCHAN_AUTO, 50,
 				SND_NOFLAGS, SNDVOL_NORMAL, SNDPITCH_NORMAL);
 			}
-
-
 		}
 	}
 	else
@@ -188,7 +193,7 @@ bool IsPlayerObserving(int client)
 	// Note: CPlayerResource also seems to keep track of players alive state (netprop)
 	if (GetEntProp(client, Prop_Send, "m_iObserverMode") > 0 || IsPlayerReallyDead(client))
 	{
-		#if DEBUG
+		#if DEBUG > 1
 		PrintToServer("[nt_cloak] Determined that %N is observing right now. \
 m_iObserverMode = %d, deadflag = %d, Health = %d", client,
 		GetEntProp(client, Prop_Send, "m_iObserverMode"),
