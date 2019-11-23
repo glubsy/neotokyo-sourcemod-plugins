@@ -39,10 +39,11 @@ bool gbCanPlace[NEO_MAX_CLIENTS+1], gbLimitToClass;
 // #define LASERMDL "materials/sprites/laser.vmt"
 // #define BEEPSND "sound/buttons/button16.wav"
 // #define BEEPSND "sound/buttons/button18.wav"
+#define FAKEPROPMDL "models/nt/props_debris/can01.mdl"
 
 public Plugin:myinfo =
 {
-	name = "NEOTOKYO target marker",
+	name = "NEOTOKYO visual marker",
 	author = "glub",
 	description = "Place a marker in the world for teammates to see.",
 	version = "0.1",
@@ -56,8 +57,7 @@ TODO:
 - share spotted beacon from ghost carrier when clicking while aiming at a beacon/player
 - only show visual pings from people in same squad (only if requested because clutter)
 - display a small halo ring upon creation -> could animate surrounding sprite with dynamic scaling? (see Prop_Send properties)
-
-FIXME: what happens when a beacon is placed at the last second of a round? Check timers.
+- what happens when a beacon is placed at the last second of a round? Check timers.
 */
 
 
@@ -101,10 +101,7 @@ public void OnConfigExectured()
 
 public void OnClientPutInServer(int client)
 {
-	if (gbLimitToClass)
-		gbCanPlace[client] = false;
-	else
-		gbCanPlace[client] = true;
+	gbCanPlace[client] = false;
 
 	CreateTimer(30.0, timer_AdvertiseHelp, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 }
@@ -115,7 +112,7 @@ public Action timer_AdvertiseHelp(Handle timer, int userid)
 	int client = GetClientOfUserId(userid);
 	if (!IsValidClient(client))
 		return Plugin_Handled;
-	PrintToChat(client, "[visualmarker] you can play a visual ping by pressing the USE key.");
+	PrintToChat(client, "[visualmarker] you can place a visual ping by pressing the USE key.");
 	return Plugin_Handled;
 }
 
@@ -130,6 +127,7 @@ public void OnMapStart()
 	giCircleModel = PrecacheModel("materials/vgui/hud/ctg/g_beacon_circle.vmt"); // circle
 
 	PrecacheSound(BEEPSND);
+	PrecacheModel(FAKEPROPMDL);
 }
 
 #if DEBUG
@@ -177,6 +175,7 @@ public Action OnPlayerSpawn(Event event, const char[] name, bool dontbroadcast)
 
 	if (IsClientObserver(client)){
 		gbIsObserver[client] = true;
+		gbCanPlace[client] = false;
 	}
 	else
 	{
@@ -240,11 +239,7 @@ public Action OnRoundEnd(Event event, const char[] name, bool dontbroadcast)
 		SDKUnhook(giBeaconSprite[i][QMARK], SDKHook_SetTransmit, Hook_SetTransmit);
 		SDKUnhook(giBeaconSprite[i][CIRCLE], SDKHook_SetTransmit, Hook_SetTransmit);
 
-		// Supposedly the entities have been destroyed
-		giBeaconSprite[i][TARGET] = -1;
-		giBeaconSprite[i][QMARK] = -1;
-		giBeaconSprite[i][CIRCLE] = -1;
-		// giBeaconSprite[i][LABEL] = -1;
+		DestroyBeacon(i);
 	}
 }
 
@@ -254,7 +249,7 @@ int CreateSpriteEnt(SpriteType type)
 	int iEnt = CreateEntityByName("env_sprite");
 
 	if (!IsValidEntity(iEnt))
-		return -1;
+		ThrowError("[visualmarker] env_sprite creation attempt returned invalid entity %d!", iEnt);
 
 	if (type == QMARK)
 	{
@@ -262,7 +257,7 @@ int CreateSpriteEnt(SpriteType type)
 
 		DispatchKeyValue(iEnt, "rendermode", "5"); // 3 glow keeps size, 9 doesn't, 1,5,8 ignore z buffer
 		DispatchKeyValueFloat(iEnt, "GlowProxySize", 2.0);
-		// DispatchKeyValueFloat(iEnt, "HDRColorScale", 1.0); // needs testing
+		DispatchKeyValueFloat(iEnt, "HDRColorScale", 1.0);
 		DispatchKeyValue(iEnt, "renderamt", "125"); // this doesn't seem to work
 		DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
 		DispatchKeyValue(iEnt, "renderfx", "9"); // 9 slow strobe
@@ -271,9 +266,9 @@ int CreateSpriteEnt(SpriteType type)
 		DispatchKeyValue(iEnt, "m_bWorldSpaceScale", "0");
 
 		SetVariantFloat(0.1);
-		AcceptEntityInput(iEnt, "SetScale");  // this works!
+		AcceptEntityInput(iEnt, "SetScale");  // this works
 		// SetEntPropFloat(ent, Prop_Data, "m_flSpriteScale", 0.2); // doesn't seem to work
-		// DispatchKeyValueFloat(iEnt, "scale", 1.0); // doesn't seem to work
+		// DispatchKeyValueFloat(iEnt, "scale", 1.0); // works too, ignored below 0.25
 		// AcceptEntityInput(iEnt, "scale"); // doesn't work
 	}
 	else if (type == CIRCLE)
@@ -282,7 +277,7 @@ int CreateSpriteEnt(SpriteType type)
 
 		DispatchKeyValue(iEnt, "rendermode", "5"); // 3 glow keeps size, 9 doesn't, 1,5,8 ignore z buffer
 		DispatchKeyValueFloat(iEnt, "GlowProxySize", 2.0);
-		// DispatchKeyValueFloat(iEnt, "HDRColorScale", 1.0); // needs testing
+		DispatchKeyValueFloat(iEnt, "HDRColorScale", 1.0);
 		DispatchKeyValue(iEnt, "renderamt", "125"); // this doesn't seem to work
 		DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
 		// DispatchKeyValue(iEnt, "renderfx", "19"); // 19 clamp max size
@@ -290,13 +285,11 @@ int CreateSpriteEnt(SpriteType type)
 		DispatchKeyValue(iEnt, "alpha", "125"); // this doesn't seem to work
 
 		SetVariantFloat(0.2);
-		AcceptEntityInput(iEnt, "SetScale");  // this works!
+		AcceptEntityInput(iEnt, "SetScale");  // this works
 		// SetEntPropFloat(ent, Prop_Data, "m_flSpriteScale", 0.2); // doesn't seem to work
-		// DispatchKeyValueFloat(iEnt, "scale", 1.0); // doesn't seem to work
+		// DispatchKeyValueFloat(iEnt, "scale", 0.25); // works too, ignored below 0.25
 		// AcceptEntityInput(iEnt, "scale"); // doesn't work
 	}
-	else
-		return -1;
 
 	DispatchSpawn(iEnt);
 	return iEnt;
@@ -365,10 +358,14 @@ int CreateTargetProp(int client, char[] sTag, bool attachtoclient=true)
 {
 	// int iEnt = CreateEntityByName("info_target");
 	int iEnt = CreateEntityByName("prop_dynamic_override");
-	DispatchKeyValue(iEnt, "model", "models/nt/props_debris/can01.mdl");
+	DispatchKeyValue(iEnt, "model", FAKEPROPMDL);
 
 	// stupid hacks because Source Engine is weird! (info_target is not a networked entity)
-	DispatchKeyValue(iEnt,"renderfx","0");
+	// with renderfx EF_PARENT_ANIMATES https://developer.valvesoftware.com/wiki/Effect_flags 
+	// updates the sprite's position, but TE beam fails to find the target?
+	// same problem with m_iEFlags EFL_FORCE_CHECK_TRANSMIT = (1<<7) (see smlib entities.inc)
+	// SetEntProp(iEnt, Prop_Data, "m_iEFlags", (1<<7));
+	DispatchKeyValue(iEnt,"renderfx","0"); 
 	DispatchKeyValue(iEnt,"damagetoenablemotion","0");
 	DispatchKeyValue(iEnt,"forcetoenablemotion","0");
 	DispatchKeyValue(iEnt,"Damagetype","0");
@@ -460,8 +457,7 @@ public Action timer_SetAttachment(Handle timer, DataPack dp)
 	return Plugin_Handled;
 }
 
-
-public Action OnPlayerRunCmd(int client, int &buttons)
+public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3])
 {
 	if (client == 0 || !gbCanPlace[client] || IsFakeClient(client))
 		return Plugin_Continue;
@@ -475,7 +471,7 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 		{
 			CreateMarker(client);
 		}
-		MovePreviewMarker(client);
+		MovePreviewMarker(client, angles);
 		gbKeyHeld[client] = true; // we spam this :/
 	}
 	else
@@ -485,7 +481,7 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 			if (gbCanUpdatePos[client])
 			{
 				gbCanUpdatePos[client] = false;
-				PlaceFinalMarker(client);
+				PlaceFinalMarker(client, angles);
 			}
 		}
 		gbKeyHeld[client] = false;
@@ -502,12 +498,15 @@ public Action timer_ClearBlockingFlag(Handle timer, int userid)
 }
 
 
-void MovePreviewMarker(int client)
+void MovePreviewMarker(int client, float[3] vecAngle)
 {
-	float vecEnd[3], vecStart[3], vecAngle[3];
+	float vecEnd[3], vecStart[3]/*, vecAngle[3]*/;
 	GetClientEyePosition(client, vecStart);
-	GetClientEyeAngles(client, vecAngle);
+	// GetClientEyeAngles(client, vecAngle);
 	GetEndPosition(client, vecEnd, vecStart, vecAngle);
+
+	if (giBeaconSprite[client][TARGET] <= 0)
+		ThrowError("[visualmarker] %N attempted to teleport an invalid TARGET entity!", client);
 
 	TeleportEntity(giBeaconSprite[client][TARGET], vecEnd, NULL_VECTOR, NULL_VECTOR);
 	// TeleportEntity(giBeaconSprite[client][QMARK], vecEnd, NULL_VECTOR, NULL_VECTOR);
@@ -534,9 +533,10 @@ bool CreateMarker(int client)
 		BuildFilter(client, giBeaconSprite[client][QMARK], QMARK, true);
 		BuildFilter(client, giBeaconSprite[client][CIRCLE], CIRCLE, true);
 
-		SDKHook(giBeaconSprite[client][TARGET], SDKHook_SetTransmit, Hook_SetTransmit);
-		SDKHook(giBeaconSprite[client][QMARK], SDKHook_SetTransmit, Hook_SetTransmit);
-		SDKHook(giBeaconSprite[client][CIRCLE], SDKHook_SetTransmit, Hook_SetTransmit);
+		// FIXME: this is redundant, we should already be hooked?
+		// SDKHook(giBeaconSprite[client][TARGET], SDKHook_SetTransmit, Hook_SetTransmit);
+		// SDKHook(giBeaconSprite[client][QMARK], SDKHook_SetTransmit, Hook_SetTransmit);
+		// SDKHook(giBeaconSprite[client][CIRCLE], SDKHook_SetTransmit, Hook_SetTransmit);
 
 		// revert back to etheral state
 		DispatchKeyValue(giBeaconSprite[client][QMARK], "rendercolor", YELLOWCOLOR);
@@ -593,11 +593,11 @@ bool CreateMarker(int client)
 }
 
 
-void PlaceFinalMarker(int client)
+void PlaceFinalMarker(int client, float[3] vecAngle)
 {
-	float vecEnd[3], vecStart[3], vecAngle[3];
+	float vecEnd[3], vecStart[3]/*, vecAngle[3]*/;
 	GetClientEyePosition(client, vecStart);
-	GetClientEyeAngles(client, vecAngle);
+	// GetClientEyeAngles(client, vecAngle);
 	GetEndPosition(client, vecEnd, vecStart, vecAngle);
 
 	// filter out team if not same team
@@ -687,7 +687,8 @@ public Action timer_ToggleBeaconOff(Handle timer, int userid)
 	int client = GetClientOfUserId(userid);
 
 	// This may happen if timer keeps running after round ended
-	if (!IsValidEntity(giBeaconSprite[client][QMARK]) || !IsValidEntity(giBeaconSprite[client][CIRCLE]))
+	if (!IsValidEntity(giBeaconSprite[client][QMARK]) 
+	|| !IsValidEntity(giBeaconSprite[client][CIRCLE]))
 	{
 		ghToggleTimer[client] = INVALID_HANDLE;
 		return Plugin_Stop;
@@ -726,19 +727,26 @@ void ToggleBeacon(int client)
 
 void DestroyBeacon(int client)
 {
-	if (IsValidEntity(giBeaconSprite[client][QMARK]) && giBeaconSprite[client][QMARK] > MaxClients)
-	{
+	if (IsValidEntity(giBeaconSprite[client][QMARK]) && giBeaconSprite[client][QMARK] > MaxClients){
+		#if DEBUG
+		PrintToServer("[visualmarker] Removing QMARK for %N", client);
+		#endif
 		AcceptEntityInput(giBeaconSprite[client][QMARK], "ClearParent");
 		AcceptEntityInput(giBeaconSprite[client][QMARK], "kill");
 		giBeaconSprite[client][QMARK] = -1;
 	}
 	if (IsValidEntity(giBeaconSprite[client][CIRCLE]) && giBeaconSprite[client][CIRCLE] > MaxClients){
+		#if DEBUG
+		PrintToServer("[visualmarker] Removing CIRCLE for %N", client);
+		#endif
 		AcceptEntityInput(giBeaconSprite[client][CIRCLE], "ClearParent");
 		AcceptEntityInput(giBeaconSprite[client][CIRCLE], "kill");
 		giBeaconSprite[client][CIRCLE] = -1;
 	}
-	if (IsValidEntity(giBeaconSprite[client][TARGET]) && giBeaconSprite[client][TARGET] > MaxClients)
-	{
+	if (IsValidEntity(giBeaconSprite[client][TARGET]) && giBeaconSprite[client][TARGET] > MaxClients){
+		#if DEBUG
+		PrintToServer("[visualmarker] Removing TARGET for %N", client);
+		#endif
 		AcceptEntityInput(giBeaconSprite[client][TARGET], "kill");
 		giBeaconSprite[client][TARGET] = -1;
 	}

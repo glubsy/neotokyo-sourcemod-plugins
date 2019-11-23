@@ -104,6 +104,8 @@ public Plugin myinfo =
 
 // TODO: sound/gameplay/ghost_idle_loop.wav while being carried
 // TODO: use sound/player/CPcaptured.wav for ghost capture sound
+// TODO: redo the ghostcap plugin with trigger (https://developer.valvesoftware.com/wiki/Triggers#Programming) on capzones
+// and outputs from OnPlayerPickup on ghost instead of checking every 0.25 second
 
 
 public void OnPluginStart()
@@ -591,7 +593,7 @@ void UpdateDeadArray(int client)
 		return;
 	}
 
-	if (g_iNumAffectedDead >= sizeof(g_iAffectedDeadPlayers))
+	if (g_iNumAffectedDead > sizeof(g_iAffectedDeadPlayers))
 	{
 		LogError("[nt_ghostcapsfx] UpdateDeadArray() g_iNumAffectedDead was out of bounds!");
 		UpdateDeadArray(-1);
@@ -823,6 +825,8 @@ public void OnGhostSpawn(int entity)
 	if (IsValidEntity(entity))
 	{
 		g_iGhost = entity;
+
+		ToggleEffect(g_iGhost, true);
 	}
 	#if DEBUG
 	PrintToServer("[nt_ghostcapsfx] OnGhostSpawn() returned entity index: %d.", entity);
@@ -844,6 +848,7 @@ public void OnGhostCapture(int client)
 	g_bEndOfRound = true;
 
 	EmmitCapSound(client);
+	ToggleEffect(g_iGhost, false);
 
 	for(int i = 0; i < SOUND_INSTANCES; i++)
 	{
@@ -906,7 +911,30 @@ public void OnGhostPickUp(int client)
 
 	g_fFuzzRepeatDelay = 10.0;
 
+	ToggleEffect(g_iGhost, false);
+
 	CreateTimer(0.1, timer_CreateFuzzTimers, _, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+
+void ToggleEffect(int ghostref, bool activate=true)
+{
+	int ghost = EntRefToEntIndex(ghostref);
+	int m_fEffects = GetEntProp(ghost , Prop_Data, "m_fEffects");
+
+	if (activate){
+		m_fEffects |= (2 << 1); // 4 EF_DIMLIGHT 2 EF_BRIGHTLIGHT
+		m_fEffects |= (1 << 8); // EF_ITEM_BLINK
+
+	}
+	else
+	{
+		m_fEffects &= ~(2 << 1); // 4 EF_DIMLIGHT 2 EF_BRIGHTLIGHT
+		m_fEffects &= ~(1 << 8); // EF_ITEM_BLINK
+	}
+	SetEntProp(ghost, Prop_Data, "m_fEffects", m_fEffects);
+	ChangeEdictState(ghost);
+	// DispatchKeyValue(ghost, "renderfx", "256"); // EF_ITEM_BLINK
 }
 
 
@@ -932,6 +960,7 @@ public void OnGhostDrop(int client)
 		FuzzTimer[i] = INVALID_HANDLE;
 	}
 
+	ToggleEffect(g_iGhost, true);
 }
 
 

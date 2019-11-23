@@ -6,12 +6,14 @@
 #if !defined DEBUG
 	#define DEBUG 0
 #endif
+
 bool gbIsSupport[NEO_MAX_CLIENTS+1];
 bool gbFreezeTime;
 bool gbHeldKey[NEO_MAX_CLIENTS+1];
 bool gbCanCloak[NEO_MAX_CLIENTS+1];
 float flRoundStartTime;
 int giReceivingClients[NEO_MAX_CLIENTS];
+#define DENIEDSND "buttons/combine_button2.wav"
 
 public Plugin:myinfo =
 {
@@ -28,12 +30,12 @@ public Plugin:myinfo =
 
 public void OnPluginStart()
 {
-	PrecacheSound("buttons/combine_button2.wav");
+	PrecacheSound(DENIEDSND, true);
 
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("game_round_start", OnRoundStart);
-	HookEvent("player_hurt", OnPlayerHurt, EventHookMode_Pre);
+	HookEvent("player_hurt", OnPlayerHurt/*, EventHookMode_Pre*/);
 }
 
 
@@ -93,8 +95,6 @@ public void OnGameFrame()
 
 		if((gametime - flRoundStartTime) >= 15.0)
 			gbFreezeTime = false;
-		else
-			return;
 	}
 }
 
@@ -152,7 +152,7 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 			{
 				PrintCenterText(client, "You have aleady used your one-time only cloak.");
 				giReceivingClients[0] = client;
-				EmitSound(giReceivingClients, 1, "buttons/combine_button2.wav",
+				EmitSound(giReceivingClients, 1, DENIEDSND,
 				SOUND_FROM_PLAYER, SNDCHAN_AUTO, 50,
 				SND_NOFLAGS, SNDVOL_NORMAL, SNDPITCH_NORMAL);
 
@@ -166,7 +166,7 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 				if (!total)
 					return Plugin_Continue;
 
-				EmitSound(giReceivingClients, total, "buttons/combine_button2.wav",
+				EmitSound(giReceivingClients, total, DENIEDSND,
 				SOUND_FROM_PLAYER, SNDCHAN_AUTO, 50,
 				SND_NOFLAGS, SNDVOL_NORMAL, SNDPITCH_NORMAL);
 			}
