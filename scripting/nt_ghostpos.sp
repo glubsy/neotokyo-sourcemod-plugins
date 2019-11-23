@@ -8,19 +8,21 @@
 #endif
 
 Handle ghCheckPosTimer, hCheckPosEnabled = INVALID_HANDLE;
-float gfLastValidCoords[3];
+float gfLastValidCoords[10][3];
+float gfLastUsedValidCoords[3];
+int gCursor;
 float gfCoordsBuffer[3];
 int g_iGhostCarrier, g_iGhost;
 float gfMinimumHeight;
-bool gbStopTimer;
 bool g_bGhostIsHeld;
+bool bTeleported;
 
 public Plugin:myinfo =
 {
 	name = "NEOTOKYO anti griefing",
 	author = "glub",
-	description = "Checks ghost coordinates, blocks ghost hopping.",
-	version = "0.1",
+	description = "Prevent out of bounds ghost position, blocks ghost hopping.",
+	version = "0.2",
 	url = "https://github.com/glubsy"
 };
 
@@ -37,6 +39,7 @@ public void OnPluginStart()
 	// HookEvent("player_spawn", OnPlayerSpawn); // we'll use SDK hook instead
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("game_round_start", OnRoundStart);
+	HookEvent("game_round_end", OnRoundEnd);
 	HookConVarChange(FindConVar("neo_restart_this"), OnNeoRestartThis);
 	// HookEvent("game_round_end", OnRoundEnd);
 
@@ -57,7 +60,7 @@ public void OnConfigsExecuted(){
 	char currentMap[64];
 	GetCurrentMap(currentMap, 64);
 
-	#if DEBUG
+	#if DEBUG > 1
 	PrintToServer("[ghostpos] Current map: %s", currentMap);
 	#endif
 
@@ -106,6 +109,15 @@ public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 	// TagGhost();
 }
 
+public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
+{
+	if (ghCheckPosTimer != INVALID_HANDLE)
+	{
+		KillTimer(ghCheckPosTimer);
+		ghCheckPosTimer = INVALID_HANDLE;
+	}
+}
+
 
 void TagGhost(int entity)
 {
@@ -131,10 +143,11 @@ public void OnAwakened(const char[] output, int caller, int activator, float del
 public void OnGhostSpawn(int entref)
 {
 	int entity = EntRefToEntIndex(entref);
+
 	if (!IsValidEntity(entity))
 	{
 		#if DEBUG
-		PrintToServer("[ghostpos] OnGhostSpawn() returned INVALID entity index: %d!",
+		PrintToServer("[ghostpos] OnGhostSpawn() returned invalid entity index: %d!",
 		entity);
 		#endif
 	}
@@ -156,14 +169,18 @@ public void OnGhostSpawn(int entref)
 
 public Action timer_StoreInitialPos(Handle timer, int entref)
 {
+	#if DEBUG
+	PrintToServer("[ghostpos] timer_StoreInitialPos got entref = %d", entref);
+	#endif
+
 	int ghost = EntRefToEntIndex(entref);
 	if (!IsValidEntity(ghost))
 	{
 		#if DEBUG
-		ThrowError("[ghostpos] Ghost (entref %d index %d) was invalid when attempting to get its initial position.",
+		LogError("[ghostpos] Ghost (entref %d index %d) was invalid when attempting to get its initial position.",
 		entref, ghost)
 		#endif
-		return Plugin_Stop;
+		return Plugin_Stop; // FIXME this might be normal (first spawned ghost is removed) no need to log
 	}
 
 	float currentPos[3];
@@ -203,11 +220,8 @@ public void OnPlayerPickup(const char[] output, int caller, int activator, float
 	g_bGhostIsHeld = true;
 	g_iGhostCarrier = GetEntPropEnt(caller, Prop_Send, "m_hOwnerEntity");
 
-	if (ghCheckPosTimer != INVALID_HANDLE)
-	{
-		gbStopTimer = true;
-	}
-	ghCheckPosTimer = CreateTimer(0.5, timer_CheckPos, caller, TIMER_REPEAT);
+	if (ghCheckPosTimer == INVALID_HANDLE)
+		ghCheckPosTimer = CreateTimer(0.5, timer_CheckPos, caller, TIMER_REPEAT);
 }
 
 
@@ -249,14 +263,14 @@ public void OnGhostCapture()
 public Action timer_StartCheckingGhostPos(Handle timer)
 {
 	if (ghCheckPosTimer == INVALID_HANDLE)
-		ghCheckPosTimer = CreateTimer(5.0, timer_CheckPos, g_iGhost, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+		ghCheckPosTimer = CreateTimer(5.0, timer_CheckPos, EntRefToEntIndex(g_iGhost), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 	return Plugin_Handled;
 }
 
 
 public Action timer_CheckPos(Handle timer, int ghost)
 {
-	if (gbStopTimer) // FIXME this is bad
+	if (!IsValidEntity(ghost))
 	{
 		ghCheckPosTimer = INVALID_HANDLE;
 		return Plugin_Stop;
@@ -283,12 +297,10 @@ m_iEFlags %d flcompare %d m_iState %d",
 	// 	PrintToServer("ghost has EFL_DIRTY_ABSVELOCITY")
 	#endif
 
-	gfCoordsBuffer = currentPos;
-
 	if (FloatCompare(currentPos[2], gfMinimumHeight) == -1) // we're too low and not on ground
 	{
-		if (!IsImmobile(currentPos))
-			return Plugin_Continue;
+		// if (!IsImmobile(currentPos))
+		// 	return Plugin_Continue;
 
 		#if DEBUG
 		PrintToServer("[ghostpos] Ghost seems to be OOB. Getting last known valid coords.");
@@ -306,12 +318,23 @@ m_iEFlags %d flcompare %d m_iState %d",
 		// 	return Plugin_Stop;
 		// }
 
+		float fCoords[3];
+		fCoords = GetNextValidCoods(gfLastUsedValidCoords); // get at current cursor
+
+		gfLastUsedValidCoords = fCoords;
+
 		#if DEBUG
-		PrintToServer("[ghostpos] Teleporting back to %f %f %f",
-		gfLastValidCoords[0], gfLastValidCoords[1], gfLastValidCoords[2]);
+		PrintToServer("[ghostpos] Teleporting back to %f %f %f (cursor %d)",
+		gfLastUsedValidCoords[0], gfLastUsedValidCoords[1], gfLastUsedValidCoords[2], gCursor);
 		#endif
 
-		TeleportEntity(ghost, gfLastValidCoords, NULL_VECTOR, NULL_VECTOR); // FIXME lower z axis to avoid falling?
+		float vecVel[3];
+		vecVel[2] += 1.0;
+
+		TeleportEntity(ghost, fCoords, NULL_VECTOR, vecVel); // FIXME lower z axis to avoid prop falling?
+		// ChangeEdictState(ghost);
+
+		bTeleported = true;
 
 		return Plugin_Continue;
 	}
@@ -325,15 +348,19 @@ m_iEFlags %d flcompare %d m_iState %d",
 			g_iGhostCarrier, bOnGround ? "is on ground" : "is NOT on ground" );
 			#endif
 
-			if (bOnGround /*&& StandsFirm(g_iGhostCarrier)*/) 
-				StoreCoords(currentPos);
+			if (bOnGround /*&& StandsFirm(g_iGhostCarrier)*/)
+				StoreCoords(currentPos, 20.0); // TODO: only pass if low velocity?
 
 			return Plugin_Continue;
 		}
 
 		if (IsImmobile(currentPos)) // wish we could detect props being at rest on the ground :(
 		{
-			StoreCoords(currentPos);
+			if (!bTeleported)
+			{
+				StoreCoords(currentPos);
+			}
+			bTeleported = false;
 			ghCheckPosTimer = INVALID_HANDLE;
 			return Plugin_Stop;
 		}
@@ -343,32 +370,89 @@ m_iEFlags %d flcompare %d m_iState %d",
 }
 
 
-bool IsImmobile(float[3] currentCoords)
+bool AreVectorsEqual(float[3] vec1, float[3] vec2)
 {
-	// same coords, we can safely store them as we assume the entity is at rest
-	if (!FloatCompare(currentCoords[2], gfCoordsBuffer[2])
-	   && !FloatCompare(currentCoords[1], gfCoordsBuffer[1])
-	   && !FloatCompare(currentCoords[0], gfCoordsBuffer[0]))
-	{
-		#if DEBUG
-		PrintToServer("[ghostpos] coord seems immobile at {%f %f %f}",
-		currentCoords[0], currentCoords[1], currentCoords[2]);
-		#endif
-
+	if (!FloatCompare(vec1[2], vec2[2])
+	   && !FloatCompare(vec1[1], vec2[1])
+	   && !FloatCompare(vec1[0], vec2[0]))
 		return true;
-	}
 
 	return false;
 }
 
-
-void StoreCoords(float[3] validCoords)
+bool IsNullVector(float[3] vec)
 {
+	if (!FloatCompare(vec[2], 0.0)
+	   && !FloatCompare(vec[1], 0.0)
+	   && !FloatCompare(vec[0], 0.0))
+		return true;
+	return false;
+}
+
+
+bool IsImmobile(float[3] currentCoords)
+{
+	// same coords, we can safely store them as we assume the entity is at rest
+	if (AreVectorsEqual(currentCoords, gfCoordsBuffer))
+	{
+		#if DEBUG
+		PrintToServer("[ghostpos] seems immobile at {%f %f %f}",
+		currentCoords[0], currentCoords[1], currentCoords[2]);
+		#endif
+		// gfCoordsBuffer = currentCoords
+		return true;
+	}
+
+	gfCoordsBuffer = currentCoords;
+	return false;
+}
+
+
+void StoreCoords(float[3] validCoords, float offset=0.0)
+{
+	gCursor++;
+	gCursor %= sizeof(gfLastValidCoords);
+
+	gfLastValidCoords[gCursor][0] = validCoords[0];
+	gfLastValidCoords[gCursor][1] = validCoords[1];
+	gfLastValidCoords[gCursor][2] = validCoords[2] + offset;
+
 	#if DEBUG
-	PrintToServer("[ghostpos] Storing coords {%f %f %f}",
-	validCoords[0], validCoords[1], validCoords[2]);
+	PrintToServer("[ghostpos] Stored coords {%f %f %f} at cursor %d",
+	validCoords[0], validCoords[1], validCoords[2], gCursor);
 	#endif
-	gfLastValidCoords = validCoords;
+
+}
+
+
+float[3] GetNextValidCoods(float[3] ignored)
+{
+	if (AreVectorsEqual(ignored, NULL_VECTOR))
+	{
+		#if DEBUG
+		PrintToServer("[ghostpos] GetNextValidCoods(NULL_VECTOR), returning (%f %f %) at cursor %d",
+		gfLastValidCoords[gCursor][0], gfLastValidCoords[gCursor][1], gfLastValidCoords[gCursor][2], gCursor);
+		#endif
+		return gfLastValidCoords[gCursor];
+	}
+
+	int attempts;
+	while (AreVectorsEqual(gfLastValidCoords[gCursor], ignored))
+	{
+		++attempts;
+		if (attempts > sizeof(gfLastValidCoords))
+			break;
+
+		--gCursor;
+
+		if (gCursor < 0)
+			gCursor = sizeof(gfLastValidCoords) - 1;
+	}
+
+	if (IsNullVector(gfLastValidCoords[gCursor]))
+		return GetNextValidCoods(gfLastValidCoords[gCursor]);
+
+	return gfLastValidCoords[gCursor];
 }
 
 
