@@ -23,17 +23,18 @@ bool g_bGhostIsCaptured;
 
 public Plugin:myinfo =
 {
-	name = "NEOTOKYO anti griefing",
+	name = "NEOTOKYO anti OOB ghost",
 	author = "glub",
-	description = "Prevent out of bounds ghost position, blocks ghost hopping.",
-	version = "0.2",
+	description = "Prevent out of bounds ghost positions.",
+	version = "0.3",
 	url = "https://github.com/glubsy"
 };
 
-// Add up to 10 last known position coords in a circular buffer
-// restore pos one after the other until the coordinates are valid
-// TODO: block more than one jump per 2 seconds ? for ghost carrier.
-// TODO: set of known hull coordinates which can be problematic (ie. nt_skyline_ctg scaffholdings) and compare against them
+// Adds up to 20 last known positions coords in circular buffers, then 
+// restore position coordinates until a valid one is found
+
+// TODO: check against a set of known hull coordinates which can be problematic
+// (ie. nt_skyline_ctg scaffoldings, saitama fire pit, vtol elevators...)
 
 public void OnPluginStart()
 {
@@ -53,7 +54,6 @@ public void OnPluginStart()
 		#endif
 		OnGhostSpawn(EntIndexToEntRef(ghost));
 	}
-
 }
 
 public void OnConfigsExecuted(){ // perhaps this should simply be OnMapStart
@@ -73,13 +73,7 @@ public void OnConfigsExecuted(){ // perhaps this should simply be OnMapStart
 	}
 	if (StrEqual(currentMap, "nt_rise_ctg"))
 	{
-		gfMinimumHeight = -500.0; // FIXME
-		gbCheckPosEnabled = true;
-		return;
-	}
-	if (StrEqual(currentMap, "nt_saitama_ctg"))
-	{
-		gfMinimumHeight = -500.0; // FIXME
+		gfMinimumHeight = -1000.0;
 		gbCheckPosEnabled = true;
 		return;
 	}
@@ -110,6 +104,7 @@ public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 	#endif
 
 	g_bGhostIsCaptured = false;
+	ResetCoordArrays();
 	UpdateGhostRef();
 	// TagGhost();
 }
@@ -153,7 +148,7 @@ public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 		KillTimer(ghCheckPosTimer);
 		ghCheckPosTimer = INVALID_HANDLE;
 	}
-	ResetCoordArrays();
+	// ResetCoordArrays();
 }
 
 
@@ -174,6 +169,10 @@ void TagGhost(int entity)
 
 void ResetCoordArrays()
 {
+	#if DEBUG
+	PrintToServer("[ghostpos] Reset coord arrays");
+	#endif
+
 	for (int i; i < sizeof(gfLastValidCoords); ++i)
 	{
 		gfLastValidCoords[i] = NULL_VECTOR;
@@ -182,6 +181,8 @@ void ResetCoordArrays()
 	{
 		gfLastStaticValidCoords[i] = NULL_VECTOR;
 	}
+	gfInitialGhostPosition = NULL_VECTOR;
+	gfLastUsedValidCoords = NULL_VECTOR;
 }
 
 
@@ -339,7 +340,7 @@ public Action timer_CheckPos(Handle timer, int ghost)
 	// RoundToCeil(currentPos[1]);
 	// RoundToCeil(currentPos[2]);
 
-	#if DEBUG
+	#if DEBUG > 1
 	int m_hGroundEntity = GetEntPropEnt(ghost, Prop_Data, "m_hGroundEntity");
 	// 0 = World (aka on ground) | -1 = In air | Any other positive value = CBaseEntity entity-index below player. (?)
 	int m_fFlags = GetEntProp(ghost, Prop_Data, "m_fFlags");
@@ -365,20 +366,21 @@ m_iEFlags %d flcompare %d m_iState %d",
 
 		float fCoords[3];
 
-
 		while (IsNullVector(fCoords))
 		{
-			fCoords = GetNextValidCoods(gfLastUsedValidCoords); // get at current cursor
+			fCoords = GetNextValidCoords(gfLastUsedValidCoords); // get at current cursor
 
-			if (IsNullVector(fCoords))
-				fCoords = GetNextValidCoodsStatic(fCoords);
+			// if (IsNullVector(fCoords))
+			// {
+			// 	fCoords = GetNextValidCoordsStatic(lastusedtemp);
+			// }
 		}
 
 		gfLastUsedValidCoords = fCoords;
 
 		#if DEBUG
-		PrintToServer("[ghostpos] Teleporting back to %f %f %f (cursor %d)",
-		gfLastUsedValidCoords[0], gfLastUsedValidCoords[1], gfLastUsedValidCoords[2], gCursor);
+		PrintToServer("[ghostpos] Teleporting back to %f %f %f",
+		gfLastUsedValidCoords[0], gfLastUsedValidCoords[1], gfLastUsedValidCoords[2]);
 		#endif
 
 		float vecVel[3];
@@ -402,7 +404,7 @@ m_iEFlags %d flcompare %d m_iState %d",
 			bOnGround ? "is on ground" : "is NOT on ground" );
 			#endif
 
-			if (bOnGround /*&& StandsFirm(g_iGhostCarrier)*/) // TODO: only pass if low velocity?
+			if (bOnGround && !VectorsEqual(gfLastValidCoords[gCursor], currentPos, 80.0, true) /*&& StandsFirm(g_iGhostCarrier)*/) // TODO: only pass if low velocity?
 				StoreCoords(currentPos, 20.0); // offset to avoid teleporting in solid
 
 			return Plugin_Continue;
@@ -416,8 +418,8 @@ m_iEFlags %d flcompare %d m_iState %d",
 			}
 
 			bTeleported = false;
-			ghCheckPosTimer = INVALID_HANDLE;
 
+			ghCheckPosTimer = INVALID_HANDLE;
 			return Plugin_Stop;
 		}
 	}
@@ -425,7 +427,7 @@ m_iEFlags %d flcompare %d m_iState %d",
 }
 
 
-bool AreVectorsEqual(float[3] vec1, float[3] vec2)
+stock bool AreVectorsEqual(float[3] vec1, float[3] vec2)
 {
 	if (!FloatCompare(vec1[2], vec2[2])
 	   && !FloatCompare(vec1[1], vec2[1])
@@ -434,6 +436,15 @@ bool AreVectorsEqual(float[3] vec1, float[3] vec2)
 
 	return false;
 }
+
+
+bool VectorsEqual(float vec1[3], float vec2[3], float tolerance=0.0, bool squared=false)
+{
+	float distance = GetVectorDistance(vec1, vec2, squared);
+
+	return distance <= (tolerance * tolerance);
+}
+
 
 bool IsNullVector(float[3] vec)
 {
@@ -468,9 +479,9 @@ void StoreStaticCoords(float[3] validCoords)
 	gStaticCursor++;
 	gStaticCursor %= sizeof(gfLastStaticValidCoords);
 
-	gfLastStaticValidCoords[gCursor][0] = validCoords[0];
-	gfLastStaticValidCoords[gCursor][1] = validCoords[1];
-	gfLastStaticValidCoords[gCursor][2] = validCoords[2];
+	gfLastStaticValidCoords[gStaticCursor][0] = validCoords[0];
+	gfLastStaticValidCoords[gStaticCursor][1] = validCoords[1];
+	gfLastStaticValidCoords[gStaticCursor][2] = validCoords[2];
 
 	#if DEBUG
 	PrintToServer("[ghostpos] Stored STATIC coords {%f %f %f} at cursor %d",
@@ -490,27 +501,47 @@ void StoreCoords(float[3] validCoords, float offset=0.0)
 	gfLastValidCoords[gCursor][2] = validCoords[2] + offset;
 
 	#if DEBUG
-	PrintToServer("[ghostpos] Stored coords {%f %f %f} at cursor %d",
+	PrintToServer("[ghostpos] Stored CARRIED coords {%f %f %f} at cursor %d",
 	validCoords[0], validCoords[1], validCoords[2], gCursor);
 	#endif
 }
 
 
-float[3] GetNextValidCoods(float[3] ignored)
+float[3] GetNextValidCoords(float[3] ignored)
 {
 	float result[3];
 
-	int attempts;
-	while (AreVectorsEqual(gfLastValidCoords[gCursor], ignored))
+	// int attempts;
+	// while (AreVectorsEqual(gfLastValidCoords[gCursor], ignored))
+	// {
+	// 	++attempts;
+	// 	if (attempts > sizeof(gfLastValidCoords)){
+	// 		#if DEBUG
+	// 		PrintToServer("breaking loop after CARRIED attempt %d / %d, cursor %d",
+	// 		attempts, sizeof(gfLastValidCoords), gCursor);
+	// 		#endif
+	// 		break;
+	// 	}
+
+	// 	--gCursor;
+
+	// 	if (gCursor < 0)
+	// 		gCursor = sizeof(gfLastValidCoords) - 1;
+	// }
+
+	if (!IsNullVector(ignored))
 	{
-		++attempts;
-		if (attempts > sizeof(gfLastValidCoords))
+		for (int attempts = 0; attempts <= sizeof(gfLastValidCoords); ++attempts)
+		{
+			if (AreVectorsEqual(gfLastValidCoords[gCursor], ignored))
+			{
+				--gStaticCursor
+				if (gCursor < 0)
+					gCursor = sizeof(gfLastValidCoords) - 1;
+				continue;
+			}
 			break;
-
-		--gCursor;
-
-		if (gCursor < 0)
-			gCursor = sizeof(gfLastValidCoords) - 1;
+		}
 	}
 
 	result = gfLastValidCoords[gCursor];
@@ -518,34 +549,90 @@ float[3] GetNextValidCoods(float[3] ignored)
 
 	if (IsNullVector(result))
 	{
-		result = GetNextValidCoodsStatic(result);
+		#if DEBUG
+		PrintToServer("[ghostpos] CARRIED result is null, trying static array with %f %f %f",
+		result[0], result[1], result[2]);
+		#endif
+
+		result = GetNextValidCoordsStatic(ignored);
+		return result;
 	}
+
+	#if DEBUG
+	PrintToServer("[ghostpos] Got CARRIED coords %f %f %f at cursor %d",
+	result[0], result[1], result[2], gCursor);
+	#endif
+
+	--gCursor;
+	if (gCursor < 0)
+		gCursor = sizeof(gfLastValidCoords) - 1;
+
 	return result;
 }
 
 
-float[3] GetNextValidCoodsStatic(float[3] ignored)
+float[3] GetNextValidCoordsStatic(float[3] ignored)
 {
 	float result[3];
 
-	int attempts;
-	while (AreVectorsEqual(gfLastStaticValidCoords[gStaticCursor], ignored))
+	// int attempts;
+	// while (AreVectorsEqual(gfLastStaticValidCoords[gStaticCursor], ignored))
+	// {
+	// 	++attempts;
+	// 	if (attempts > sizeof(gfLastStaticValidCoords))
+	// 	{
+	// 		#if DEBUG
+	// 		PrintToServer("breaking loop after STATIC attempt %d / %d, cursor %d",
+	// 		attempts, sizeof(gfLastStaticValidCoords), gStaticCursor);
+	// 		#endif
+	// 		break;
+	// 	}
+
+	// 	--gStaticCursor;
+
+	// 	if (gStaticCursor < 0)
+	// 		gStaticCursor = sizeof(gfLastStaticValidCoords) - 1;
+	// }
+
+	if (!IsNullVector(ignored))
 	{
-		++attempts;
-		if (attempts > sizeof(gfLastStaticValidCoords))
+		for (int attempts = 0; attempts <= sizeof(gfLastStaticValidCoords); ++attempts)
+		{
+			if (AreVectorsEqual(gfLastStaticValidCoords[gStaticCursor], ignored))
+			{
+				--gStaticCursor
+				if (gStaticCursor < 0)
+					gStaticCursor = sizeof(gfLastStaticValidCoords) - 1;
+				continue;
+			}
 			break;
-
-		--gStaticCursor;
-
-		if (gStaticCursor < 0)
-			gStaticCursor = sizeof(gfLastStaticValidCoords) - 1;
+		}
 	}
 
 	if (IsNullVector(gfLastStaticValidCoords[gStaticCursor]))
+	{
+		--gStaticCursor;
+		if (gStaticCursor < 0)
+			gStaticCursor = sizeof(gfLastStaticValidCoords) - 1;
+
+		#if DEBUG
+		PrintToServer("[ghostpos] reached the end, returning back to initial ghost pos!")
+		#endif
 		return gfInitialGhostPosition; // last resort
+	}
 
 	result = gfLastStaticValidCoords[gStaticCursor];
 	gfLastStaticValidCoords[gStaticCursor] = NULL_VECTOR;
+
+	#if DEBUG
+	PrintToServer("[ghostpos] Got STATIC coords %f %f %f at cursor %d",
+	result[0], result[1], result[2], gStaticCursor);
+	#endif
+
+	--gStaticCursor;
+	if (gStaticCursor < 0)
+		gStaticCursor = sizeof(gfLastStaticValidCoords) - 1;
+
 	return result;
 }
 
