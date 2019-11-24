@@ -39,9 +39,9 @@
 
 **nt_pain_sfx**: sound effects emitted when a player gets hurt.
 
-**nt_cloak**: adds a one-time use cloak for support class, which gets turned off if the player gets damaged.
+**nt_cloak**: adds a one-time use cloak for support class, which gets turned off as soon as the player gets damaged.
 
-**nt_ghostpos**: anti-griefing measure that checks for ghost position on certain maps, teleports it back to valid coordinates, prevents ghost-hopping.
+**nt_ghostpos**: anti-griefing measure that checks for ghost position on certain maps, teleports it back to valid coordinates + anti ghost-hopping.
 
 **nt_visualmarker**: places a marker in the world to indicate a point of interest to your team mates, like a spotted opponent.
 

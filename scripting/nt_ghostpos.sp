@@ -20,12 +20,14 @@ float gfMinimumHeight;
 bool g_bGhostIsHeld;
 bool bTeleported;
 bool g_bGhostIsCaptured;
+bool gbPreventJump[NEO_MAX_CLIENTS+1];
+Handle ghTimerJump = INVALID_HANDLE;
 
 public Plugin:myinfo =
 {
-	name = "NEOTOKYO anti OOB ghost",
+	name = "NEOTOKYO anti OOB ghost and ghost-hopping",
 	author = "glub",
-	description = "Prevent out of bounds ghost positions.",
+	description = "Prevent out of bounds ghost positions and bunny humping while carrying the ghost.",
 	version = "0.3",
 	url = "https://github.com/glubsy"
 };
@@ -721,3 +723,31 @@ public bool HullFilter (int entity, int contentsMask, any data)
 // }
 
 
+public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3])
+{
+	if (client == 0 || IsFakeClient(client))
+		return Plugin_Continue;
+
+	if (client == g_iGhostCarrier)
+	{
+		if (buttons & IN_JUMP && gbPreventJump[client])
+		{
+			buttons &= ~IN_JUMP;
+		}
+		else if (buttons & IN_JUMP)
+		{
+			gbPreventJump[client] = true;
+			if (ghTimerJump == INVALID_HANDLE)
+				ghTimerJump = CreateTimer(1.5, timer_ClearPreventJump, client, TIMER_FLAG_NO_MAPCHANGE);
+		}
+	}
+	return Plugin_Continue;
+}
+
+
+public Action timer_ClearPreventJump(Handle timer, int client)
+{
+	gbPreventJump[client] = false;
+	ghTimerJump = INVALID_HANDLE;
+	return Plugin_Stop;
+}
