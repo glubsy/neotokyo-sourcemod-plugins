@@ -7,15 +7,19 @@
 	#define DEBUG 0
 #endif
 
-Handle ghCheckPosTimer, hCheckPosEnabled = INVALID_HANDLE;
+Handle ghCheckPosTimer = INVALID_HANDLE;
+bool gbCheckPosEnabled;
 float gfLastValidCoords[10][3];
+float gfLastStaticValidCoords[10][3];
 float gfLastUsedValidCoords[3];
-int gCursor;
+float gfInitialGhostPosition[3];
+int gCursor, gStaticCursor;
 float gfCoordsBuffer[3];
 int g_iGhostCarrier, g_iGhost;
 float gfMinimumHeight;
 bool g_bGhostIsHeld;
 bool bTeleported;
+bool g_bGhostIsCaptured;
 
 public Plugin:myinfo =
 {
@@ -26,96 +30,130 @@ public Plugin:myinfo =
 	url = "https://github.com/glubsy"
 };
 
-// Add up to 5 last known position coords in a circular buffer
+// Add up to 10 last known position coords in a circular buffer
 // restore pos one after the other until the coordinates are valid
 // TODO: block more than one jump per 2 seconds ? for ghost carrier.
 // TODO: set of known hull coordinates which can be problematic (ie. nt_skyline_ctg scaffholdings) and compare against them
 
 public void OnPluginStart()
 {
-	hCheckPosEnabled = CreateConVar("nt_checkghostpos", "0",
-	"Regularly check for invalid ghost coordinates.", _, true, 0.0, true, 1.0);
-
-	// HookEvent("player_spawn", OnPlayerSpawn); // we'll use SDK hook instead
-	HookEvent("player_death", OnPlayerDeath);
+	// HookEvent("player_death", OnPlayerDeath);
 	HookEvent("game_round_start", OnRoundStart);
 	HookEvent("game_round_end", OnRoundEnd);
+
+	#if DEBUG > 2 // not really needed actually, OnRoundStart is actually called
 	HookConVarChange(FindConVar("neo_restart_this"), OnNeoRestartThis);
-	// HookEvent("game_round_end", OnRoundEnd);
+	#endif
 
-
-	#if DEBUG
-	PrintToServer("[ghostpos] DEBUG: looking for ghost...");
 	int ghost = FindEntityByClassname(-1, "weapon_ghost");
 	if (IsValidEntity(ghost))
 	{
-		PrintToServer("[ghostpos] Found ghost %d", ghost);
+		#if DEBUG
+		PrintToServer("[ghostpos] Found already existing ghost %d", ghost);
+		#endif
 		OnGhostSpawn(EntIndexToEntRef(ghost));
 	}
-	#endif
+
 }
 
-public void OnConfigsExecuted(){
+public void OnConfigsExecuted(){ // perhaps this should simply be OnMapStart
 
 	char currentMap[64];
 	GetCurrentMap(currentMap, 64);
 
-	#if DEBUG > 1
+	#if DEBUG
 	PrintToServer("[ghostpos] Current map: %s", currentMap);
 	#endif
 
-	// if current map is potential candidate for griefing automatically enable plugin
 	if (StrEqual(currentMap, "nt_skyline_ctg"))
 	{
 		gfMinimumHeight = -500.0;
-		SetConVarInt(hCheckPosEnabled, 1);
+		gbCheckPosEnabled = true;
 		return;
 	}
 	if (StrEqual(currentMap, "nt_rise_ctg"))
 	{
 		gfMinimumHeight = -500.0; // FIXME
-		SetConVarInt(hCheckPosEnabled, 1);
+		gbCheckPosEnabled = true;
 		return;
 	}
 	if (StrEqual(currentMap, "nt_saitama_ctg"))
 	{
 		gfMinimumHeight = -500.0; // FIXME
-		SetConVarInt(hCheckPosEnabled, 1);
+		gbCheckPosEnabled = true;
 		return;
 	}
-	SetConVarInt(hCheckPosEnabled, 0);
+	gbCheckPosEnabled = false;
 }
 
 
+#if DEBUG > 2
+// NOTE: beware, this is always called twice on convar changed!
 public void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] newValue)
 {
-	// OnRoundStart();
-}
+	#if DEBUG
+	PrintToChatAll("[ghostpos] OnNeoRestartThis()");
+	#endif
 
-
-public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
-{
-	//int victim = GetClientOfUserId(GetEventInt(event, "userid"));
+	if (!gbCheckPosEnabled)
+		return;
+	UpdateGhostRef();
 }
+#endif
 
 
 public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
 	#if !DEBUG
-	if (!GetConVarBool(hCheckPosEnabled))
+	if (!gbCheckPosEnabled)
 		return;
 	#endif
 
+	g_bGhostIsCaptured = false;
+	UpdateGhostRef();
 	// TagGhost();
 }
 
+
+int UpdateGhostRef()
+{
+	int ghostindex = EntRefToEntIndex(g_iGhost);
+
+	#if DEBUG
+	PrintToServer("[ghostpos] UpdateGhostRef(), g_iGhost=%d (index %d)", g_iGhost, ghostindex);
+	#endif
+
+	if (!ghostindex || !IsValidEntity(ghostindex))
+	{
+		#if DEBUG
+		PrintToServer("[ghostpos] OnRoundStart, invalid g_iGhost, looking for one...");
+		#endif
+
+		int ghost = FindEntityByClassname(-1, "weapon_ghost");
+		if (IsValidEntity(ghost))
+		{
+			#if DEBUG
+			PrintToServer("[ghostpos] Found ghost %d", ghost);
+			#endif
+			OnGhostSpawn(EntIndexToEntRef(ghost));
+		}
+	}
+}
+
+
 public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 {
+	#if !DEBUG
+	if (!gbCheckPosEnabled)
+		return;
+	#endif
+
 	if (ghCheckPosTimer != INVALID_HANDLE)
 	{
 		KillTimer(ghCheckPosTimer);
 		ghCheckPosTimer = INVALID_HANDLE;
 	}
+	ResetCoordArrays();
 }
 
 
@@ -134,14 +172,26 @@ void TagGhost(int entity)
 }
 
 
-public void OnAwakened(const char[] output, int caller, int activator, float delay)
+void ResetCoordArrays()
 {
-	PrintToServer("Prop %d awakened (activator %d)", caller, activator);
+	for (int i; i < sizeof(gfLastValidCoords); ++i)
+	{
+		gfLastValidCoords[i] = NULL_VECTOR;
+	}
+	for (int i; i < sizeof(gfLastStaticValidCoords); ++i)
+	{
+		gfLastStaticValidCoords[i] = NULL_VECTOR;
+	}
 }
 
 
 public void OnGhostSpawn(int entref)
 {
+	#if !DEBUG
+	if (!gbCheckPosEnabled)
+		return;
+	#endif
+
 	int entity = EntRefToEntIndex(entref);
 
 	if (!IsValidEntity(entity))
@@ -150,6 +200,7 @@ public void OnGhostSpawn(int entref)
 		PrintToServer("[ghostpos] OnGhostSpawn() returned invalid entity index: %d!",
 		entity);
 		#endif
+		return;
 	}
 
 	#if DEBUG
@@ -161,9 +212,8 @@ public void OnGhostSpawn(int entref)
 
 	CreateTimer(10.0, timer_StoreInitialPos, entref, TIMER_FLAG_NO_MAPCHANGE);
 
-	// g_bGhostIsCaptured = false;
+	g_bGhostIsCaptured = false;
 	g_bGhostIsHeld = false;
-	// g_bEndOfRound = false;
 }
 
 
@@ -176,11 +226,12 @@ public Action timer_StoreInitialPos(Handle timer, int entref)
 	int ghost = EntRefToEntIndex(entref);
 	if (!IsValidEntity(ghost))
 	{
-		#if DEBUG
-		LogError("[ghostpos] Ghost (entref %d index %d) was invalid when attempting to get its initial position.",
+		#if DEBUG // FIXME this might be normal (first spawned ghost is removed) no need to log
+		LogError("[ghostpos] Ghost (entref %d index %d) was invalid \
+when attempting to get its initial position.",
 		entref, ghost)
 		#endif
-		return Plugin_Stop; // FIXME this might be normal (first spawned ghost is removed) no need to log
+		return Plugin_Stop;
 	}
 
 	float currentPos[3];
@@ -188,9 +239,18 @@ public Action timer_StoreInitialPos(Handle timer, int entref)
 	// RoundToCeil(currentPos[0]);
 	// RoundToCeil(currentPos[1]);
 	// RoundToCeil(currentPos[2]);
-	StoreCoords(currentPos);
+	StoreStaticCoords(currentPos);
+
+	gfInitialGhostPosition = currentPos;
+
+	#if DEBUG
+	PrintToServer("[ghostpos] Stored initial coords {%f %f %f}",
+	gfInitialGhostPosition[0], gfInitialGhostPosition[1], gfInitialGhostPosition[2]);
+	#endif
+
 	return Plugin_Handled;
 }
+
 
 public void OnTraceAttackPost(int victim, int attacker, int inflictor, float damage,
 int damagetype, int ammotype, int hitbox, int hitgroup)
@@ -199,13 +259,16 @@ int damagetype, int ammotype, int hitbox, int hitgroup)
 	char classname[20];
 	if (!GetEntityClassname(victim, classname, sizeof(classname)))
 		return;
-	PrintToServer("[ghostpos] TakeDamage: %s %d, inflictor %d, attacker %d, damage %f, damagetype %d, ammotype %d, hitbox %d, hitgroup %d",
-	classname, victim, inflictor, attacker, damage, damagetype, ammotype, hitbox, hitgroup);
+	PrintToServer("[ghostpos] TakeDamage: %s %d, inflictor %d, attacker %d, \
+damage %f, damagetype %d, ammotype %d, hitbox %d, hitgroup %d",
+	classname, victim, inflictor, attacker, damage, damagetype,
+	ammotype, hitbox, hitgroup);
 	#endif
 
 	if (ghCheckPosTimer == INVALID_HANDLE)
 	{
-		ghCheckPosTimer = CreateTimer(0.5, timer_CheckPos, victim, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+		ghCheckPosTimer = CreateTimer(0.5, timer_CheckPos,
+		victim, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 	}
 }
 
@@ -222,15 +285,6 @@ public void OnPlayerPickup(const char[] output, int caller, int activator, float
 
 	if (ghCheckPosTimer == INVALID_HANDLE)
 		ghCheckPosTimer = CreateTimer(0.5, timer_CheckPos, caller, TIMER_REPEAT);
-}
-
-
-public void OnGhostUsed(const char[] output, int caller, int activator, float delay)
-{
-	#if DEBUG
-	PrintToServer("[ghostpos] OnGhostUsed by %N (%d). (caller %d activator %d)",
-	caller, caller, caller, activator);
-	#endif
 }
 
 
@@ -254,9 +308,9 @@ public void OnGhostDrop(int client)
 
 public void OnGhostCapture()
 {
-	UnhookSingleEntityOutput(g_iGhost, "OnPlayerPickup", OnPlayerPickup);
-	SDKUnhook(g_iGhost, SDKHook_TraceAttackPost, OnTraceAttackPost);
-	// UnhookSingleEntityOutput(g_iGhost, "OnPlayerUse", OnGhostUsed);
+	// UnhookSingleEntityOutput(g_iGhost, "OnPlayerPickup", OnPlayerPickup);
+	// SDKUnhook(g_iGhost, SDKHook_TraceAttackPost, OnTraceAttackPost);
+	g_bGhostIsCaptured = true;
 }
 
 
@@ -270,8 +324,11 @@ public Action timer_StartCheckingGhostPos(Handle timer)
 
 public Action timer_CheckPos(Handle timer, int ghost)
 {
-	if (!IsValidEntity(ghost))
+	if (ghost == 0 || !IsValidEntity(ghost) || g_bGhostIsCaptured)
 	{
+		#if DEBUG
+		PrintToServer("[ghostpos] timer_CheckPos Invalid ghost or iscaptured! %d", ghost);
+		#endif
 		ghCheckPosTimer = INVALID_HANDLE;
 		return Plugin_Stop;
 	}
@@ -281,14 +338,14 @@ public Action timer_CheckPos(Handle timer, int ghost)
 	// RoundToCeil(currentPos[0]);
 	// RoundToCeil(currentPos[1]);
 	// RoundToCeil(currentPos[2]);
+
+	#if DEBUG
 	int m_hGroundEntity = GetEntPropEnt(ghost, Prop_Data, "m_hGroundEntity");
 	// 0 = World (aka on ground) | -1 = In air | Any other positive value = CBaseEntity entity-index below player. (?)
-
 	int m_fFlags = GetEntProp(ghost, Prop_Data, "m_fFlags");
 	int m_iEFlags = GetEntProp(ghost, Prop_Data, "m_iEFlags");
 	int m_iState = GetEntProp(ghost, Prop_Send, "m_iState");
 
-	#if DEBUG
 	PrintToServer("[ghostpos] ghost %d m_fFlags %d, m_hGroundEntity %d m_vecAbsOrigin %f %f %f \
 m_iEFlags %d flcompare %d m_iState %d",
 	ghost, m_fFlags, m_hGroundEntity, currentPos[0], currentPos[1], currentPos[2],
@@ -299,27 +356,23 @@ m_iEFlags %d flcompare %d m_iState %d",
 
 	if (FloatCompare(currentPos[2], gfMinimumHeight) == -1) // we're too low and not on ground
 	{
-		// if (!IsImmobile(currentPos))
+		// if (!IsImmobile(currentPos)) // probably not needed, let's make it snappier
 		// 	return Plugin_Continue;
 
 		#if DEBUG
 		PrintToServer("[ghostpos] Ghost seems to be OOB. Getting last known valid coords.");
 		#endif
 
-		// if (giCoordsBuffer_head > 0)
-		// 	giCoordsBuffer_head--;
-
-		// if (gfCoordsBuffer[giCoordsBuffer_head][0] == 0.0
-		// && gfCoordsBuffer[giCoordsBuffer_head][1] == 0.0
-		// && gfCoordsBuffer[giCoordsBuffer_head][2] == 0.0)
-		// {
-		// 	ThrowError("[ghostpos] Stored valid coords where NULL_VECTOR. Aborting."); // FIXME: maybe rewind in the array here?
-		// 	ghCheckPosTimer = INVALID_HANDLE;
-		// 	return Plugin_Stop;
-		// }
-
 		float fCoords[3];
-		fCoords = GetNextValidCoods(gfLastUsedValidCoords); // get at current cursor
+
+
+		while (IsNullVector(fCoords))
+		{
+			fCoords = GetNextValidCoods(gfLastUsedValidCoords); // get at current cursor
+
+			if (IsNullVector(fCoords))
+				fCoords = GetNextValidCoodsStatic(fCoords);
+		}
 
 		gfLastUsedValidCoords = fCoords;
 
@@ -331,7 +384,7 @@ m_iEFlags %d flcompare %d m_iState %d",
 		float vecVel[3];
 		vecVel[2] += 1.0;
 
-		TeleportEntity(ghost, fCoords, NULL_VECTOR, vecVel); // FIXME lower z axis to avoid prop falling?
+		TeleportEntity(ghost, fCoords, NULL_VECTOR, vecVel);
 		// ChangeEdictState(ghost);
 
 		bTeleported = true;
@@ -343,13 +396,14 @@ m_iEFlags %d flcompare %d m_iState %d",
 		if (g_bGhostIsHeld)
 		{
 			bool bOnGround = GetEntityFlags(g_iGhostCarrier) & FL_ONGROUND ? true : false;
+
 			#if DEBUG
-			PrintToServer("owner: %N (%s)",
-			g_iGhostCarrier, bOnGround ? "is on ground" : "is NOT on ground" );
+			PrintToServer("[ghostpos] Ghost carrier: %N (%s)", g_iGhostCarrier,
+			bOnGround ? "is on ground" : "is NOT on ground" );
 			#endif
 
-			if (bOnGround /*&& StandsFirm(g_iGhostCarrier)*/)
-				StoreCoords(currentPos, 20.0); // TODO: only pass if low velocity?
+			if (bOnGround /*&& StandsFirm(g_iGhostCarrier)*/) // TODO: only pass if low velocity?
+				StoreCoords(currentPos, 20.0); // offset to avoid teleporting in solid
 
 			return Plugin_Continue;
 		}
@@ -358,14 +412,15 @@ m_iEFlags %d flcompare %d m_iState %d",
 		{
 			if (!bTeleported)
 			{
-				StoreCoords(currentPos);
+				StoreStaticCoords(currentPos);
 			}
+
 			bTeleported = false;
 			ghCheckPosTimer = INVALID_HANDLE;
+
 			return Plugin_Stop;
 		}
 	}
-
 	return Plugin_Continue;
 }
 
@@ -408,6 +463,23 @@ bool IsImmobile(float[3] currentCoords)
 }
 
 
+void StoreStaticCoords(float[3] validCoords)
+{
+	gStaticCursor++;
+	gStaticCursor %= sizeof(gfLastStaticValidCoords);
+
+	gfLastStaticValidCoords[gCursor][0] = validCoords[0];
+	gfLastStaticValidCoords[gCursor][1] = validCoords[1];
+	gfLastStaticValidCoords[gCursor][2] = validCoords[2];
+
+	#if DEBUG
+	PrintToServer("[ghostpos] Stored STATIC coords {%f %f %f} at cursor %d",
+	validCoords[0], validCoords[1], validCoords[2], gStaticCursor);
+	#endif
+	return;
+}
+
+
 void StoreCoords(float[3] validCoords, float offset=0.0)
 {
 	gCursor++;
@@ -421,20 +493,12 @@ void StoreCoords(float[3] validCoords, float offset=0.0)
 	PrintToServer("[ghostpos] Stored coords {%f %f %f} at cursor %d",
 	validCoords[0], validCoords[1], validCoords[2], gCursor);
 	#endif
-
 }
 
 
 float[3] GetNextValidCoods(float[3] ignored)
 {
-	if (AreVectorsEqual(ignored, NULL_VECTOR))
-	{
-		#if DEBUG
-		PrintToServer("[ghostpos] GetNextValidCoods(NULL_VECTOR), returning (%f %f %) at cursor %d",
-		gfLastValidCoords[gCursor][0], gfLastValidCoords[gCursor][1], gfLastValidCoords[gCursor][2], gCursor);
-		#endif
-		return gfLastValidCoords[gCursor];
-	}
+	float result[3];
 
 	int attempts;
 	while (AreVectorsEqual(gfLastValidCoords[gCursor], ignored))
@@ -449,10 +513,40 @@ float[3] GetNextValidCoods(float[3] ignored)
 			gCursor = sizeof(gfLastValidCoords) - 1;
 	}
 
-	if (IsNullVector(gfLastValidCoords[gCursor]))
-		return GetNextValidCoods(gfLastValidCoords[gCursor]);
+	result = gfLastValidCoords[gCursor];
+	gfLastValidCoords[gCursor] = NULL_VECTOR;
 
-	return gfLastValidCoords[gCursor];
+	if (IsNullVector(result))
+	{
+		result = GetNextValidCoodsStatic(result);
+	}
+	return result;
+}
+
+
+float[3] GetNextValidCoodsStatic(float[3] ignored)
+{
+	float result[3];
+
+	int attempts;
+	while (AreVectorsEqual(gfLastStaticValidCoords[gStaticCursor], ignored))
+	{
+		++attempts;
+		if (attempts > sizeof(gfLastStaticValidCoords))
+			break;
+
+		--gStaticCursor;
+
+		if (gStaticCursor < 0)
+			gStaticCursor = sizeof(gfLastStaticValidCoords) - 1;
+	}
+
+	if (IsNullVector(gfLastStaticValidCoords[gStaticCursor]))
+		return gfInitialGhostPosition; // last resort
+
+	result = gfLastStaticValidCoords[gStaticCursor];
+	gfLastStaticValidCoords[gStaticCursor] = NULL_VECTOR;
+	return result;
 }
 
 
@@ -485,13 +579,13 @@ stock bool StandsFirm(int client)
 	{
 		CloseHandle(trace);
 		#if DEBUG
-		PrintToServer("[ghostpos] Tracehull HIT")
+		PrintToServer("[ghostpos] Tracehull HIT");
 		#endif
 		return true;
 	}
 
 	#if DEBUG
-	PrintToServer("[ghostpos] Tracehull NO")
+	PrintToServer("[ghostpos] Tracehull NO");
 	#endif
 	CloseHandle(trace);
 	return false;
@@ -540,14 +634,3 @@ public bool HullFilter (int entity, int contentsMask, any data)
 // }
 
 
-// public void OnGameFrame()
-// {
-// 	if(!g_iGhost)
-// 		return;
-
-// 	int m_iEFlags = GetEntProp(g_iGhost, Prop_Data, "m_iEFlags");
-// 	if (m_iEFlags & (1<<13))
-// 		PrintToChatAll("ghost has flag %d", m_iEFlags);
-// 	else
-// 		PrintToChatAll("ghost no flag %d", m_iEFlags);
-// }
