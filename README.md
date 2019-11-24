@@ -45,6 +45,8 @@
 
 **nt_visualmarker**: places a marker in the world to indicate a point of interest to your team mates, like a spotted opponent.
 
+**nt_detpack_tweaks**: destructible detpacks, invisible at a distance, remote can be dropped on death, detpack can be retrieved with +use and dropped on death.
+
 Donger model here: https://www.mediafire.com/?6y352ceczvs3oc1
 
 ~~**Funvotes-NT**: Modified Sourcemod default "funvote" plugin with a specific neotokyo public vote to restart the game. Obsolete (merged in nt_votes.sp for nt_teamdeathmatch)~~

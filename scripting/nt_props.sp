@@ -824,7 +824,7 @@ public int StrapDongMenuHandler(Menu menu, MenuAction action, int param1, int pa
 		Client preferences
 ==================================*/
 
-bool Has_Anyone_Opted_Out()
+stock bool Has_Anyone_Opted_Out()
 {
 	for (int i = 1; i <= MaxClients; i++)
 	{
@@ -1237,7 +1237,7 @@ void DestroyAttachedPropForClient(int client)
 	PrintToServer("[nt_props] DEBUG: DestroyAttachedPropForClient() Checking if need to remove strapped entity %d on client %N.", g_AttachmentEnt[client], client);
 	#endif
 
-	if (g_AttachmentEnt[client] != -1 && IsValidEntity(g_AttachmentEnt[client]))
+	if (MaxClients > g_AttachmentEnt[client] > 0 && IsValidEntity(g_AttachmentEnt[client]))
 	{
 		#if DEBUG
 		PrintToServer("[nt_props] DEBUG: Yup, killing strapped entity %d of client %d.", g_AttachmentEnt[client], client);
@@ -3067,6 +3067,7 @@ public Action TimerKillEntity(Handle timer, int entref)
 	int prop = EntRefToEntIndex(entref);
 	if(IsValidEdict(prop) && prop > MaxClients)
 	{
+		LogAction(-1, -1, "Timer killing entity %d", prop);
 		AcceptEntityInput(prop, "kill");
 	}
 	return Plugin_Handled;
@@ -3075,8 +3076,9 @@ public Action TimerKillEntity(Handle timer, int entref)
 
 public Action OnTouchEntityRemove(int propindex, int client)
 {
-	if(client <= MaxClients && propindex > 0 && !IsFakeClient(client) && IsValidEntity(client) && IsClientInGame(client) /*&& IsPlayerAlive(client)*/ && IsValidEdict(propindex))
+	if(0 < client <= MaxClients && propindex > 0 && !IsFakeClient(client) && IsValidEntity(propindex))
 	{
+		LogAction(client, -1, "OnTouchEntityRemove entity %d by %N", propindex, client);
 		AcceptEntityInput(propindex, "kill");
 	}
 	return Plugin_Continue;

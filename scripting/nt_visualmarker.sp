@@ -73,6 +73,7 @@ public void OnPluginStart()
 	gCvarShowOpponents = CreateConVar("sm_marker_opponents", "0",
 	"Display visual pings to ennemy team members", _, true, 0.0, true, 1.0);
 
+	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("game_round_end", OnRoundEnd);
 	// HookEvent("player_team", OnPlayerTeam);
@@ -209,6 +210,15 @@ public Action OnPlayerSpawn(Event event, const char[] name, bool dontbroadcast)
 }
 
 
+public Action OnPlayerDeath(Event event, const char[] name, bool dontbroadcast)
+{
+	int client = GetClientOfUserId(GetEventInt(event, "userid"));
+
+	gbCanPlace[client] = false;
+
+	return Plugin_Continue;
+}
+
 // public Action OnPlayerTeam(Event event, const char[] name, bool dontbroadcast)
 // {
 // 	int client = GetClientOfUserId(GetEventInt(event, "userid"));
@@ -225,16 +235,23 @@ public void OnClientDisconnect(int client)
 }
 
 
+public void OnMapEnd()
+{
+	for (int i = 1; i <= MaxClients; ++i)
+	{
+		SDKUnhook(giBeaconSprite[i][TARGET], SDKHook_SetTransmit, Hook_SetTransmit);
+		SDKUnhook(giBeaconSprite[i][QMARK], SDKHook_SetTransmit, Hook_SetTransmit);
+		SDKUnhook(giBeaconSprite[i][CIRCLE], SDKHook_SetTransmit, Hook_SetTransmit);
+
+		DestroyBeacon(i);
+	}
+
+}
+
 public Action OnRoundEnd(Event event, const char[] name, bool dontbroadcast)
 {
 	for (int i = 1; i <= MaxClients; ++i)
 	{
-		if (ghToggleTimer[i] != INVALID_HANDLE)
-		{
-			KillTimer(ghToggleTimer[i]);
-			ghToggleTimer[i] = INVALID_HANDLE;
-		}
-
 		SDKUnhook(giBeaconSprite[i][TARGET], SDKHook_SetTransmit, Hook_SetTransmit);
 		SDKUnhook(giBeaconSprite[i][QMARK], SDKHook_SetTransmit, Hook_SetTransmit);
 		SDKUnhook(giBeaconSprite[i][CIRCLE], SDKHook_SetTransmit, Hook_SetTransmit);
@@ -361,11 +378,11 @@ int CreateTargetProp(int client, char[] sTag, bool attachtoclient=true)
 	DispatchKeyValue(iEnt, "model", FAKEPROPMDL);
 
 	// stupid hacks because Source Engine is weird! (info_target is not a networked entity)
-	// with renderfx EF_PARENT_ANIMATES https://developer.valvesoftware.com/wiki/Effect_flags 
+	// with renderfx EF_PARENT_ANIMATES https://developer.valvesoftware.com/wiki/Effect_flags
 	// updates the sprite's position, but TE beam fails to find the target?
 	// same problem with m_iEFlags EFL_FORCE_CHECK_TRANSMIT = (1<<7) (see smlib entities.inc)
 	// SetEntProp(iEnt, Prop_Data, "m_iEFlags", (1<<7));
-	DispatchKeyValue(iEnt,"renderfx","0"); 
+	DispatchKeyValue(iEnt,"renderfx","0");
 	DispatchKeyValue(iEnt,"damagetoenablemotion","0");
 	DispatchKeyValue(iEnt,"forcetoenablemotion","0");
 	DispatchKeyValue(iEnt,"Damagetype","0");
@@ -687,7 +704,7 @@ public Action timer_ToggleBeaconOff(Handle timer, int userid)
 	int client = GetClientOfUserId(userid);
 
 	// This may happen if timer keeps running after round ended
-	if (!IsValidEntity(giBeaconSprite[client][QMARK]) 
+	if (!IsValidEntity(giBeaconSprite[client][QMARK])
 	|| !IsValidEntity(giBeaconSprite[client][CIRCLE]))
 	{
 		ghToggleTimer[client] = INVALID_HANDLE;
@@ -733,23 +750,23 @@ void DestroyBeacon(int client)
 		#endif
 		AcceptEntityInput(giBeaconSprite[client][QMARK], "ClearParent");
 		AcceptEntityInput(giBeaconSprite[client][QMARK], "kill");
-		giBeaconSprite[client][QMARK] = -1;
 	}
+	giBeaconSprite[client][QMARK] = -1;
 	if (IsValidEntity(giBeaconSprite[client][CIRCLE]) && giBeaconSprite[client][CIRCLE] > MaxClients){
 		#if DEBUG
 		PrintToServer("[visualmarker] Removing CIRCLE for %N", client);
 		#endif
 		AcceptEntityInput(giBeaconSprite[client][CIRCLE], "ClearParent");
 		AcceptEntityInput(giBeaconSprite[client][CIRCLE], "kill");
-		giBeaconSprite[client][CIRCLE] = -1;
 	}
+	giBeaconSprite[client][CIRCLE] = -1;
 	if (IsValidEntity(giBeaconSprite[client][TARGET]) && giBeaconSprite[client][TARGET] > MaxClients){
 		#if DEBUG
 		PrintToServer("[visualmarker] Removing TARGET for %N", client);
 		#endif
 		AcceptEntityInput(giBeaconSprite[client][TARGET], "kill");
-		giBeaconSprite[client][TARGET] = -1;
 	}
+	giBeaconSprite[client][TARGET] = -1;
 
 	#if !USE_TE
 	if (giBeaconBeam[client] > MaxClients);

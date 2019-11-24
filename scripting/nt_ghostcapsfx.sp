@@ -188,8 +188,18 @@ public void OnNTMenuReady(Handle aTopMenu)
 	BuildTopMenu();
 }
 
-
 public void OnConfigsExecuted()
+{
+	// Late loading, players should head by default
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsValidClient(i) || IsFakeClient(i))
+			continue;
+		ProcessCookies(i);
+	}
+}
+
+public void OnMapStart()
 {
 	for(int snd = 0; snd < sizeof(g_sRadioChatterSoundEffect); snd++)
 	{
@@ -198,14 +208,6 @@ public void OnConfigsExecuted()
 	for(int snd = 0; snd < sizeof(g_sSoundEffect); snd++)
 	{
 		PrecacheSound(g_sSoundEffect[snd], true);
-	}
-
-	// Late loading, players should head by default
-	for (int i = 1; i <= MaxClients; i++)
-	{
-		if (!IsValidClient(i) || IsFakeClient(i))
-			continue;
-		ProcessCookies(i);
 	}
 }
 

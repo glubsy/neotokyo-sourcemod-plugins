@@ -176,10 +176,10 @@ public OnMapStart()
 
 	// laser beam
 	// g_modelLaser = PrecacheModel("sprites/laser.vmt");
-	g_modelLaser = PrecacheModel("sprites/laserdot.vmt");
+	g_modelLaser = PrecacheModel("sprites/laserdot.vmt", true);
 
 	// laser halo
-	g_modelHalo = PrecacheModel("materials/sprites/halo01.vmt");
+	g_modelHalo = PrecacheModel("materials/sprites/halo01.vmt", true);
 	// g_modelHalo = PrecacheModel("materials/sprites/autoaim_1a.vmt");
 	// g_modelHalo = PrecacheModel("materials/sprites/blackbeam.vmt");
 	// g_modelHalo = PrecacheModel("materials/sprites/dot.vmt");
@@ -189,7 +189,7 @@ public OnMapStart()
 
 	// laser dot
 	// g_imodelLaserDot = PrecacheDecal("materials/sprites/laserdot.vmt");
-	PrecacheDecal("materials/sprites/redglow1.vmt"); // good!
+	PrecacheDecal("materials/sprites/redglow1.vmt", true); // good!
 	// g_imodelLaserDot = PrecacheModel("materials/sprites/laser.vmt");
 	// g_imodelLaserDot = PrecacheDecal("materials/decals/Blood5.vmt");
 }
@@ -250,6 +250,7 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 	}
 }
 
+// NOTE: beware, this is called twice on convar changed!
 public void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] newValue)
 {
 	#if DEBUG
@@ -2302,6 +2303,7 @@ public Action timer_CheckSequence(Handle timer, DataPack datapack)
 }
 
 
+// TODO input the right sequences
 void SetSwitchModeSequence(int viewmodel, WeaponType weapontype)
 {
 	int sequence;

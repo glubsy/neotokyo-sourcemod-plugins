@@ -69,7 +69,11 @@ public void OnConfigsExecuted()
 		g_bPluginDisabled = true;
 		return;
 	}
+}
 
+
+public void OnMapStart()
+{
 	for(int snd = 0; snd < sizeof(g_sCustomJumpSound); snd++)
 	{
 		PrecacheSound(g_sCustomJumpSound[snd], true);
@@ -81,7 +85,6 @@ public void OnConfigsExecuted()
 	{
 		PrecacheSound(g_sStockSound[snd], true);
 	}
-
 }
 
 public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)

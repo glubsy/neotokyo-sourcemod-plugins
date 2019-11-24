@@ -142,6 +142,13 @@ public void OnConfigsExecuted()
 	HookEvent("player_disconnect", Event_OnPlayerDisconnect);
 	#endif
 
+	// reset arrays for all
+	UpdateAffectedArrayForAlivePlayers(-1);
+}
+
+
+public void OnMapStart()
+{
 	for(int snd = 0; snd < sizeof(g_sCustomGirlHurtSound); snd++)
 	{
 		PrecacheSound(g_sCustomGirlHurtSound[snd], true);
@@ -149,9 +156,6 @@ public void OnConfigsExecuted()
 		Format(buffer, sizeof(buffer), "sound/%s", g_sCustomGirlHurtSound[snd]);
 		AddFileToDownloadsTable(buffer);
 	}
-
-	// reset arrays for all
-	UpdateAffectedArrayForAlivePlayers(-1);
 }
 
 

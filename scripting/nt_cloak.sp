@@ -30,12 +30,15 @@ public Plugin:myinfo =
 
 public void OnPluginStart()
 {
-	PrecacheSound(DENIEDSND, true);
-
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("game_round_start", OnRoundStart);
 	HookEvent("player_hurt", OnPlayerHurt/*, EventHookMode_Pre*/);
+}
+
+public void OnMapStart()
+{
+	PrecacheSound(DENIEDSND, true);
 }
 
 
