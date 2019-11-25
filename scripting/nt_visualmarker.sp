@@ -76,11 +76,8 @@ public void OnPluginStart()
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("game_round_end", OnRoundEnd);
+	HookEvent("game_round_start", OnRoundStart);
 	// HookEvent("player_team", OnPlayerTeam);
-
-	#if DEBUG
-	HookConVarChange(FindConVar("neo_restart_this"), OnNeoRestartThis);
-	#endif
 
 	AutoExecConfig(true, "nt_visualmarker");
 
@@ -130,43 +127,6 @@ public void OnMapStart()
 	PrecacheSound(BEEPSND);
 	PrecacheModel(FAKEPROPMDL);
 }
-
-#if DEBUG
-public void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] newValue)
-{
-	for (int i = 1; i <= MaxClients; ++i)
-	{
-		if (IsValidEntity(giBeaconSprite[i][TARGET])){
-			AcceptEntityInput(giBeaconSprite[i][TARGET], "ClearParent");
-			AcceptEntityInput(giBeaconSprite[i][TARGET], "kill");
-		}
-		if (IsValidEntity(giBeaconSprite[i][CIRCLE])){
-			AcceptEntityInput(giBeaconSprite[i][CIRCLE], "ClearParent");
-			AcceptEntityInput(giBeaconSprite[i][CIRCLE], "kill");
-		}
-		if (IsValidEntity(giBeaconSprite[i][QMARK])){
-			AcceptEntityInput(giBeaconSprite[i][QMARK], "ClearParent");
-			AcceptEntityInput(giBeaconSprite[i][QMARK], "kill");
-		}
-		giBeaconSprite[i][TARGET] = -1;
-		giBeaconSprite[i][QMARK] = -1;
-		giBeaconSprite[i][CIRCLE] = -1;
-
-		#if !USE_TE
-		if (IsValidEntity(giBeaconBeam[i])){
-			AcceptEntityInput(giBeaconBeam[i], "ClearParent");
-			AcceptEntityInput(giBeaconBeam[i], "kill");
-			giBeaconBeam[i] = -1;
-		}
-		if (IsValidEntity(giTargetEnd[i])){
-			AcceptEntityInput(giTargetEnd[i], "ClearParent");
-			AcceptEntityInput(giTargetEnd[i], "kill");
-			giTargetEnd[i] = -1;
-		}
-		#endif // !USE_TE
-	}
-}
-#endif // DEBUG
 
 public Action OnPlayerSpawn(Event event, const char[] name, bool dontbroadcast)
 {
@@ -258,6 +218,64 @@ public Action OnRoundEnd(Event event, const char[] name, bool dontbroadcast)
 
 		DestroyBeacon(i);
 	}
+}
+
+public Action OnRoundStart(Event event, const char[] name, bool dontbroadcast)
+{
+	#if DEBUG
+	PrintToServer("[visualmarker] OnRoundStart");
+	#endif
+
+	for (int i = 1; i <= MaxClients; ++i)
+	{
+		DestroyBeacon(i);
+
+		#if !USE_TE
+		if (IsValidEntity(giBeaconBeam[i])){
+			AcceptEntityInput(giBeaconBeam[i], "ClearParent");
+			AcceptEntityInput(giBeaconBeam[i], "kill");
+		}
+		giBeaconBeam[i] = -1;
+		if (IsValidEntity(giTargetEnd[i])){
+			AcceptEntityInput(giTargetEnd[i], "ClearParent");
+			AcceptEntityInput(giTargetEnd[i], "kill");
+		}
+		giTargetEnd[i] = -1;
+		#endif // !USE_TE
+	}
+}
+
+
+void DestroyBeacon(int client)
+{
+	if (IsValidEntity(giBeaconSprite[client][QMARK]) && giBeaconSprite[client][QMARK] > MaxClients){
+		#if DEBUG
+		PrintToServer("[visualmarker] Removing QMARK for %N", client);
+		#endif
+		AcceptEntityInput(giBeaconSprite[client][QMARK], "ClearParent");
+		AcceptEntityInput(giBeaconSprite[client][QMARK], "kill");
+	}
+	giBeaconSprite[client][QMARK] = -1;
+	if (IsValidEntity(giBeaconSprite[client][CIRCLE]) && giBeaconSprite[client][CIRCLE] > MaxClients){
+		#if DEBUG
+		PrintToServer("[visualmarker] Removing CIRCLE for %N", client);
+		#endif
+		AcceptEntityInput(giBeaconSprite[client][CIRCLE], "ClearParent");
+		AcceptEntityInput(giBeaconSprite[client][CIRCLE], "kill");
+	}
+	giBeaconSprite[client][CIRCLE] = -1;
+	if (IsValidEntity(giBeaconSprite[client][TARGET]) && giBeaconSprite[client][TARGET] > MaxClients){
+		#if DEBUG
+		PrintToServer("[visualmarker] Removing TARGET for %N", client);
+		#endif
+		AcceptEntityInput(giBeaconSprite[client][TARGET], "kill");
+	}
+	giBeaconSprite[client][TARGET] = -1;
+
+	#if !USE_TE
+	if (giBeaconBeam[client] > MaxClients);
+		AcceptEntityInput(giBeaconBeam[client], "kill");
+	#endif
 }
 
 
@@ -737,40 +755,6 @@ void ToggleBeacon(int client)
 	PrintToServer("[visualmarker] TurnOff BEAM");
 	#endif
 	AcceptEntityInput(giBeaconBeam[client], "TurnOff");
-	#endif
-}
-
-
-
-void DestroyBeacon(int client)
-{
-	if (IsValidEntity(giBeaconSprite[client][QMARK]) && giBeaconSprite[client][QMARK] > MaxClients){
-		#if DEBUG
-		PrintToServer("[visualmarker] Removing QMARK for %N", client);
-		#endif
-		AcceptEntityInput(giBeaconSprite[client][QMARK], "ClearParent");
-		AcceptEntityInput(giBeaconSprite[client][QMARK], "kill");
-	}
-	giBeaconSprite[client][QMARK] = -1;
-	if (IsValidEntity(giBeaconSprite[client][CIRCLE]) && giBeaconSprite[client][CIRCLE] > MaxClients){
-		#if DEBUG
-		PrintToServer("[visualmarker] Removing CIRCLE for %N", client);
-		#endif
-		AcceptEntityInput(giBeaconSprite[client][CIRCLE], "ClearParent");
-		AcceptEntityInput(giBeaconSprite[client][CIRCLE], "kill");
-	}
-	giBeaconSprite[client][CIRCLE] = -1;
-	if (IsValidEntity(giBeaconSprite[client][TARGET]) && giBeaconSprite[client][TARGET] > MaxClients){
-		#if DEBUG
-		PrintToServer("[visualmarker] Removing TARGET for %N", client);
-		#endif
-		AcceptEntityInput(giBeaconSprite[client][TARGET], "kill");
-	}
-	giBeaconSprite[client][TARGET] = -1;
-
-	#if !USE_TE
-	if (giBeaconBeam[client] > MaxClients);
-		AcceptEntityInput(giBeaconBeam[client], "kill");
 	#endif
 }
 
