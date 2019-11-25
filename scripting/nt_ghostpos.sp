@@ -32,7 +32,7 @@ public Plugin:myinfo =
 	url = "https://github.com/glubsy"
 };
 
-// Adds up to 20 last known positions coords in circular buffers, then 
+// Adds up to 20 last known positions coords in circular buffers, then
 // restore position coordinates until a valid one is found
 
 // TODO: check against a set of known hull coordinates which can be problematic
@@ -108,7 +108,8 @@ public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 	g_bGhostIsCaptured = false;
 	ResetCoordArrays();
 	UpdateGhostRef();
-	// TagGhost();
+	// GhostShouldTakeDamage();
+	// HookGhost();
 }
 
 
@@ -154,18 +155,18 @@ public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 }
 
 
-void TagGhost(int entity)
+void GhostShouldTakeDamage(int entity)
 {
-	#if DEBUG
-	PrintToServer("[ghostpos] TagGhost %d", entity);
-	#endif
-
-	SetEntProp(entity, Prop_Data, "m_takedamage", 1); // 0 takes no damage, 1 buddha, 2 mortal, 3 ?
-
-	SDKHook(entity, SDKHook_TraceAttackPost, OnTraceAttackPost);
-	HookSingleEntityOutput(entity, "OnPlayerPickup", OnPlayerPickup, false); // works
-
+	// 0 takes no damage, 1 buddha, 2 mortal, 3 ?
+	SetEntProp(entity, Prop_Data, "m_takedamage", 1);
 	ChangeEdictState(entity);
+}
+
+
+void HookGhost(int entity)
+{
+	SDKHook(entity, SDKHook_TraceAttackPost, OnTraceAttackPost);
+	HookSingleEntityOutput(entity, "OnPlayerPickup", OnPlayerPickup, false);
 }
 
 
@@ -190,11 +191,6 @@ void ResetCoordArrays()
 
 public void OnGhostSpawn(int entref)
 {
-	#if !DEBUG
-	if (!gbCheckPosEnabled)
-		return;
-	#endif
-
 	int entity = EntRefToEntIndex(entref);
 
 	if (!IsValidEntity(entity))
@@ -211,7 +207,13 @@ public void OnGhostSpawn(int entref)
 	#endif
 	g_iGhost = entref;
 
-	TagGhost(entity);
+	GhostShouldTakeDamage(entity);
+	HookGhost(entity);
+
+	#if !DEBUG
+	if (!gbCheckPosEnabled)
+		return;
+	#endif
 
 	CreateTimer(10.0, timer_StoreInitialPos, entref, TIMER_FLAG_NO_MAPCHANGE);
 
@@ -283,9 +285,14 @@ public void OnPlayerPickup(const char[] output, int caller, int activator, float
 	caller, activator);
 	#endif
 
-	g_bGhostIsHeld = true;
 	g_iGhostCarrier = GetEntPropEnt(caller, Prop_Send, "m_hOwnerEntity");
 
+	#if !DEBUG
+	if (!gbCheckPosEnabled)
+		return;
+	#endif
+
+	g_bGhostIsHeld = true;
 	if (ghCheckPosTimer == INVALID_HANDLE)
 		ghCheckPosTimer = CreateTimer(0.5, timer_CheckPos, caller, TIMER_REPEAT);
 }
@@ -732,13 +739,13 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	{
 		if (buttons & IN_JUMP && gbPreventJump[client])
 		{
-			buttons &= ~IN_JUMP;
+			buttons &= ~IN_JUMP; //FIXME is there a better way to achieve this?
 		}
 		else if (buttons & IN_JUMP)
 		{
 			gbPreventJump[client] = true;
 			if (ghTimerJump == INVALID_HANDLE)
-				ghTimerJump = CreateTimer(1.5, timer_ClearPreventJump, client, TIMER_FLAG_NO_MAPCHANGE);
+				ghTimerJump = CreateTimer(1.2, timer_ClearPreventJump, client, TIMER_FLAG_NO_MAPCHANGE);
 		}
 	}
 	return Plugin_Continue;
