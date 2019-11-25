@@ -24,7 +24,7 @@ float g_vecOrigin[3];
 float g_fFuzzRepeatDelay = 0.0;
 
 Handle convar_ghostexplodes, convar_ghostexplosiondamages, convar_roundtimelimit,
-convar_nt_doublecap_version, convar_nt_ghostcap_version, convar_ghost_sounds_enabled = INVALID_HANDLE;
+convar_nt_ghostcap_version, convar_ghost_sounds_enabled = INVALID_HANDLE;
 
 Handle GhostTimer[SOUND_INSTANCES] = { INVALID_HANDLE, ...};
 Handle AnnouncerTimer[MAX_ANNOUNCER_OCCURENCES] = { INVALID_HANDLE, ...};
@@ -121,7 +121,6 @@ public void OnPluginStart()
 
 	convar_roundtimelimit = FindConVar("neo_round_timelimit");
 
-	convar_nt_doublecap_version = FindConVar("nt_doublecap_version");
 	convar_nt_ghostcap_version = FindConVar("sm_ntghostcap_version");
 
 	RegConsoleCmd("sm_ghostsounds", Command_Hate_Sounds_Toggle, "Toggle your preference to not hear custom ghost capture sound effects.");
@@ -134,14 +133,6 @@ public void OnPluginStart()
 		ThrowError("[nt_ghostcapsfx] Couldn't find nt_ghostcap plugin. Wrong version? Aborting.");
 	if(GetConVarFloat(convar_nt_ghostcap_version) < 1.70000000)
 		ThrowError("[nt_ghostcapsfx] nt_ghostcap plugin is outdated (version is %f and should be at least 1.6)! Aborting.", GetConVarFloat(convar_nt_ghostcap_version));
-
-	// currently we need doublecap to remove the ghost properly and stuff
-	if(convar_nt_doublecap_version == INVALID_HANDLE)
-		ThrowError("[nt_ghostcapsfx] Couldn't find nt_doublecap plugin. Wrong version? Aborting.");
-	// We need the version of nt_doublecap where the ghost is removed with RemoveEdict(), not AcceptEntityInput() otherwise they will crash the server!
-	if(GetConVarFloat(convar_nt_doublecap_version) < 0.43)
-		ThrowError("[nt_ghostcapsfx] nt_doublecap plugin is outdated (version is %f and should be at least 0.43)! Aborting.", GetConVarFloat(convar_nt_doublecap_version));
-
 
 	// late loading read cookies
 	for (int i = 0; i <= MaxClients; i++)

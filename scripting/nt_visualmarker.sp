@@ -23,23 +23,27 @@ int giTargetStart[NEO_MAX_CLIENTS+1] = {-1, ...};
 int giTargetEnd[NEO_MAX_CLIENTS+1] = {-1, ...};
 #endif
 
-int g_modelHalo, g_modelLaser, giCircleModel, giQmarkModel;
+int g_modelHalo, g_modelLaser;
 bool gbIsObserver[NEO_MAX_CLIENTS+1];
 bool gbCanUpdatePos[NEO_MAX_CLIENTS+1];
 int giRadiusInc[NEO_MAX_CLIENTS+1];
 int giHiddenEnts[NEO_MAX_CLIENTS+1][MAX][NEO_MAX_CLIENTS+1]; // assuming opposing team will never have more than 20 players
-Handle gCvarTimeToLive, gCvarAllowedClasses, gCvarShowSpectators, gCvarShowOpponents = INVALID_HANDLE;
+Handle gCvarTimeToLive, gCvarAllowedClasses = INVALID_HANDLE;
+// Handle gCvarShowSpectators, gCvarShowOpponents = INVALID_HANDLE;
 Handle ghToggleTimer[NEO_MAX_CLIENTS+1] = INVALID_HANDLE;
 bool gbKeyHeld[NEO_MAX_CLIENTS+1];
 bool gbCanPlace[NEO_MAX_CLIENTS+1], gbLimitToClass;
 
 #define LASERMDL "materials/sprites/redglow1.vmt" // good for animation, but no ignorez and only red
+#define HALOMDL "materials/sprites/halo01.vmt"
 #define BEEPSND "buttons/button15.wav"
 // #define LASERMDL "custom/radio.vmt"
 // #define LASERMDL "materials/sprites/laser.vmt"
 // #define BEEPSND "sound/buttons/button16.wav"
 // #define BEEPSND "sound/buttons/button18.wav"
 #define FAKEPROPMDL "models/nt/props_debris/can01.mdl"
+#define QMARKMDL "materials/vgui/hud/cp/cp_none.vmt"
+#define CIRCLEMDL "materials/vgui/hud/ctg/g_beacon_circle.vmt"
 
 public Plugin:myinfo =
 {
@@ -57,7 +61,7 @@ TODO:
 - share spotted beacon from ghost carrier when clicking while aiming at a beacon/player
 - only show visual pings from people in same squad (only if requested because clutter)
 - display a small halo ring upon creation -> could animate surrounding sprite with dynamic scaling? (see Prop_Send properties)
-- what happens when a beacon is placed at the last second of a round? Check timers.
+- display visual pings to ennemy team members?
 */
 
 
@@ -68,10 +72,10 @@ public void OnPluginStart()
 	gCvarAllowedClasses = CreateConVar("sm_marker_classes", "7",
 	"Classes allowed to place markers, as an octal representation. 1: recons 2: assaults 4: supports. 7 means all, 0 means nobody!",
 	_, true, 0.0, true, 7.0);
-	gCvarShowSpectators = CreateConVar("sm_marker_spectators", "1",
-	"Display visual pings to spectators", _, true, 0.0, true, 1.0);
-	gCvarShowOpponents = CreateConVar("sm_marker_opponents", "0",
-	"Display visual pings to ennemy team members", _, true, 0.0, true, 1.0);
+	// gCvarShowSpectators = CreateConVar("sm_marker_spectators", "1",
+	// "Display visual pings to spectators", _, true, 0.0, true, 1.0);
+	// gCvarShowOpponents = CreateConVar("sm_marker_opponents", "0",
+	// "Display visual pings to ennemy team members", _, true, 0.0, true, 1.0);
 
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("player_spawn", OnPlayerSpawn);
@@ -118,11 +122,11 @@ public Action timer_AdvertiseHelp(Handle timer, int userid)
 public void OnMapStart()
 {
 	// g_modelLaser = PrecacheModel("materials/sprites/laser.vmt");
-	g_modelLaser = PrecacheModel(LASERMDL);
-	g_modelHalo = PrecacheModel("materials/sprites/halo01.vmt");
+	g_modelLaser = PrecacheModel(LASERMDL, true);
+	g_modelHalo = PrecacheModel(HALOMDL, true);
 
-	giQmarkModel = PrecacheModel("materials/vgui/hud/cp/cp_none.vmt"); // question mark
-	giCircleModel = PrecacheModel("materials/vgui/hud/ctg/g_beacon_circle.vmt"); // circle
+	PrecacheModel(QMARKMDL, true); // question mark
+	PrecacheModel(CIRCLEMDL, true); // circle
 
 	PrecacheSound(BEEPSND);
 	PrecacheModel(FAKEPROPMDL);
@@ -288,7 +292,7 @@ int CreateSpriteEnt(SpriteType type)
 
 	if (type == QMARK)
 	{
-		DispatchKeyValue(iEnt, "model", "materials/vgui/hud/cp/cp_none.vmt");
+		DispatchKeyValue(iEnt, "model", QMARKMDL);
 
 		DispatchKeyValue(iEnt, "rendermode", "5"); // 3 glow keeps size, 9 doesn't, 1,5,8 ignore z buffer
 		DispatchKeyValueFloat(iEnt, "GlowProxySize", 2.0);
@@ -308,7 +312,7 @@ int CreateSpriteEnt(SpriteType type)
 	}
 	else if (type == CIRCLE)
 	{
-		DispatchKeyValue(iEnt, "model", "materials/vgui/hud/ctg/g_beacon_circle.vmt");
+		DispatchKeyValue(iEnt, "model", CIRCLEMDL);
 
 		DispatchKeyValue(iEnt, "rendermode", "5"); // 3 glow keeps size, 9 doesn't, 1,5,8 ignore z buffer
 		DispatchKeyValueFloat(iEnt, "GlowProxySize", 2.0);
@@ -850,26 +854,29 @@ void BuildFilter(int client, int entity, SpriteType type, bool hidden=false)
 		{
 			if (!IsValidClient(i))
 				continue;
+
 			if (i == client)
 			{
-				giHiddenEnts[i][type][client] = -1;
+				giHiddenEnts[i][type][client] = -1; // don't hide
 				continue;
 			}
 
-			giHiddenEnts[i][type][client] = entity;
+			giHiddenEnts[i][type][client] = entity; // hide this entity to i
 		}
 		return;
 	}
 
 	int team = GetClientTeam(client);
+
 	for (int i = MaxClients; i; --i)
 	{
-		if (!IsValidClient(i) || GetClientTeam(i) == team)
+		if ((!IsValidClient(i) || GetClientTeam(i) == team || i == client))
 		{
-			giHiddenEnts[i][type][client] = -1;
+			giHiddenEnts[i][type][client] = -1; // don't hide
 			continue;
 		}
-		giHiddenEnts[i][type][client] = entity;
+
+		giHiddenEnts[i][type][client] = entity; // hide this entity to i
 
 		#if DEBUG
 		PrintToServer("[visualmarker] giHiddenEnts[%d][%s][%d]=%d", i,

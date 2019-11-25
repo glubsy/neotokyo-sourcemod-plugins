@@ -82,6 +82,10 @@ bool gbIsRecon[NEO_MAX_CLIENTS+1];
 bool gbCanSprint[NEO_MAX_CLIENTS+1];
 bool gbZoomForceOn;
 
+bool gbSpawnHook[NEO_MAX_CLIENTS+1];
+bool gbWeaponSwitchHook[NEO_MAX_CLIENTS+1];
+bool gbWeaponEquipHook[NEO_MAX_CLIENTS+1];
+bool gbWeaponDropHook[NEO_MAX_CLIENTS+1];
 
 bool gbHeldKeys[NEO_MAX_CLIENTS+1][MAXKEYS];
 bool gbVisionActive[NEO_MAX_CLIENTS+1];
@@ -108,21 +112,31 @@ public Plugin:myinfo =
 };
 
 // TODO: use return GetEntProp(weapon, Prop_Data, "m_iState") to check if weapon is being carried by a player (see smlib/weapons.inc)
-// TODO: make checking for in_zoom state a forward (for other plugins to use)?
 // TODO: setup two beams, a normal one for spectators, a thicker one for night vision?
-
-//TODO: animation (changemode or fireempty) on toggle laser command
-//TODO: look at what texture the L4D2 SDK uses for laser beams (particles)
-//TODO: show the entire laser beam to players hit by traceray when pointed directly at their head
-//TODO: have laser color / alpha in a convar
-//TODO: fix observers having laser ability with right click
+// TODO: animation (changemode or fireempty) on toggle laser command
+// TODO: show the entire laser beam to players hit by traceray when pointed directly at their head
+// TODO: have laser color / alpha in a convar
 
 #define TEMP_ENT 1 // use TE every game frame, instead of actual env_beam (obsolete)
 #define METHOD 0
 
+#define LASERMDL "materials/sprites/laser.vmt"
+#define HALOMDL "materials/sprites/halo01.vmt"
+// #define HALOMDL "materials/sprites/autoaim_1a.vmt"
+// #define HALOMDL "materials/sprites/blackbeam.vmt"
+// #define HALOMDL "materials/sprites/dot.vmt"
+// #define HALOMDL "materials/sprites/laserdot.vmt"
+// #define HALOMDL "materials/sprites/crosshair_h.vmt"
+// #define HALOMDL "materials/sprites/blood.vmt"
+#define DOTMDL "materials/sprites/redglow1.vmt" // looks decent, with halo
+// #define DOTMDL "materials/sprites/laserdot.vmt"
+// #define DOTMDL "materials/sprites/laser.vmt"
+// #define DOTMDL "materials/decals/Blood5.vmt"
 
 public void OnPluginStart()
 {
+	PrintToServer("[lasersight] OnPluginStart()");
+
 	CVAR_LaserAlpha = CreateConVar("sm_lasersight_alpha", "20.0",
 	"Transparency amount for laser beam", _, true, 0.0, true, 255.0);
 	laser_color[3] = GetConVarInt(CVAR_LaserAlpha); //TODO: hook convar change
@@ -146,52 +160,56 @@ g_sLaserWeaponNames \"%s\" (length: %i) in index %i.", LONGEST_WEP_NAME,
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("game_round_start", OnRoundStart);
 	HookEvent("game_round_end", OnRoundEnd);
-	HookConVarChange(FindConVar("neo_restart_this"), OnNeoRestartThis);
+	// HookConVarChange(FindConVar("neo_restart_this"), OnNeoRestartThis);
 }
 
 
-#if DEBUG
 public void OnConfigsExecuted()
 {
-	// for late loading only
+	#if DEBUG
+	PrintToServer("[lasersight] OnConfigExectured()");
+	#endif
+
+	// for late loading
 	for (int client = 1; client <= MaxClients; ++client)
 	{
-		if (!IsValidClient(client))
+		if (!IsValidClient(client) || IsFakeClient(client))
 			continue;
 
+		#if DEBUG
 		PrintToServer("[lasersight] Hooking client %d", client);
-		SDKHook(client, SDKHook_SpawnPost, OnClientSpawned_Post);
-		SDKHook(client, SDKHook_WeaponSwitchPost, OnWeaponSwitch_Post);
-		SDKHook(client, SDKHook_WeaponEquipPost, OnWeaponEquip);
-		SDKHook(client, SDKHook_WeaponDropPost, OnWeaponDrop);
+		#endif
+
+		if (!gbSpawnHook[client])
+			gbSpawnHook[client] = SDKHookEx(client, SDKHook_SpawnPost, OnClientSpawned_Post);
+		if (!gbWeaponSwitchHook[client])
+			gbWeaponSwitchHook[client] = SDKHookEx(client, SDKHook_WeaponSwitchPost, OnWeaponSwitch_Post);
+		if (!gbWeaponEquipHook[client])
+			gbWeaponEquipHook[client] = SDKHookEx(client, SDKHook_WeaponEquipPost, OnWeaponEquip);
+		if (!gbWeaponDropHook[client])
+			gbWeaponDropHook[client] = SDKHookEx(client, SDKHook_WeaponDropPost, OnWeaponDrop);
 	}
 }
-#endif
+
 
 public OnMapStart()
 {
 	#if DEBUG
-	PrintToChatAll("onmapstart");
+	PrintToServer("[lasersight] OnMapStart()");
 	#endif
 
-	// laser beam
+	// TE laser beam (not used)
 	// g_modelLaser = PrecacheModel("sprites/laser.vmt");
-	g_modelLaser = PrecacheModel("sprites/laserdot.vmt", true);
+	g_modelLaser = PrecacheModel("sprites/laserdot.vmt");
+
+	// laser beam
+	PrecacheModel(LASERMDL, true);
 
 	// laser halo
-	g_modelHalo = PrecacheModel("materials/sprites/halo01.vmt", true);
-	// g_modelHalo = PrecacheModel("materials/sprites/autoaim_1a.vmt");
-	// g_modelHalo = PrecacheModel("materials/sprites/blackbeam.vmt");
-	// g_modelHalo = PrecacheModel("materials/sprites/dot.vmt");
-	// g_modelHalo = PrecacheModel("materials/sprites/laserdot.vmt");
-	// g_modelHalo = PrecacheModel("materials/sprites/crosshair_h.vmt");
-	// g_modelHalo = PrecacheModel("materials/sprites/blood.vmt");
+	g_modelHalo = PrecacheModel(HALOMDL);
 
 	// laser dot
-	// g_imodelLaserDot = PrecacheDecal("materials/sprites/laserdot.vmt");
-	PrecacheDecal("materials/sprites/redglow1.vmt", true); // good!
-	// g_imodelLaserDot = PrecacheModel("materials/sprites/laser.vmt");
-	// g_imodelLaserDot = PrecacheDecal("materials/decals/Blood5.vmt");
+	PrecacheDecal(DOTMDL, true);
 }
 
 
@@ -211,19 +229,29 @@ public void OnEntityDestroyed(int entity)
 
 public void OnClientPutInServer(int client)
 {
+	if (IsFakeClient(client))
+		return;
+
 	gbShouldEmitLaser[client] = false;
 	giOwnBeam[client] = -1;
 	gbIsObserver[client] = true;
 
-	SDKHook(client, SDKHook_SpawnPost, OnClientSpawned_Post);
-	SDKHook(client, SDKHook_WeaponSwitchPost, OnWeaponSwitch_Post);
-	SDKHook(client, SDKHook_WeaponEquipPost, OnWeaponEquip);
-	SDKHook(client, SDKHook_WeaponDropPost, OnWeaponDrop);
+	// ResetAllEntitiesForClient(client);
+
+	if (!gbSpawnHook[client])
+		gbSpawnHook[client] = SDKHookEx(client, SDKHook_SpawnPost, OnClientSpawned_Post);
+	if (!gbWeaponSwitchHook[client])
+		gbWeaponSwitchHook[client] = SDKHookEx(client, SDKHook_WeaponSwitchPost, OnWeaponSwitch_Post);
+	if (!gbWeaponEquipHook[client])
+		gbWeaponEquipHook[client] = SDKHookEx(client, SDKHook_WeaponEquipPost, OnWeaponEquip);
+	if (!gbWeaponDropHook[client])
+		gbWeaponDropHook[client] = SDKHookEx(client, SDKHook_WeaponDropPost, OnWeaponDrop);
 }
 
 
 public void OnClientDisconnect(int client)
 {
+	ResetAllEntitiesForClient(client);
 	gbShouldEmitLaser[client] = false;
 	// TODO clean up here?
 
@@ -232,6 +260,10 @@ public void OnClientDisconnect(int client)
 	// SDKUnhook(client, SDKHook_WeaponSwitchPost, OnWeaponSwitch_Post);
 	// SDKUnhook(client, SDKHook_WeaponEquipPost, OnWeaponEquip);
 	// SDKUnhook(client, SDKHook_WeaponDropPost, OnWeaponDrop);
+	gbSpawnHook[client] = false;
+	gbWeaponSwitchHook[client] = false;
+	gbWeaponEquipHook[client] = false;
+	gbWeaponDropHook[client] = false;
 }
 
 
@@ -251,51 +283,49 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 }
 
 // NOTE: beware, this is called twice on convar changed!
-public void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] newValue)
+stock void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] newValue)
 {
 	#if DEBUG
 	PrintToServer("[lasersight] OnNeoRestartThis()");
 	#endif
-	ResetAllEntities();
-}
-
-
-public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
-{
-	#if DEBUG
-	PrintToServer("[lasersight] OnRoundEnd()");
-	#endif
-	ResetAllEntities();
-}
-
-
-void ResetAllEntities()
-{
-	for (int i = 1; i < sizeof(iAffectedWeapons); ++i)
+	for (int client = MaxClients; client; --client)
 	{
-		giAttachedInfoTarget[i] = 0;
-		giLaserDot[i] = 0;
-		giLaserBeam[i] = 0;
-		giActiveWeapon[i] = -1;
-
-		// #if DEBUG
-		if (giViewModelLaserBeam[i] > 0 && IsValidEntity(giViewModelLaserBeam[i]))
-		{
-			AcceptEntityInput(giViewModelLaserBeam[i], "kill");
-			giViewModelLaserBeam[i] = 0;
-		}
-		if (giViewModelLaserStart[i] > 0 && IsValidEntity(giViewModelLaserStart[i]))
-		{
-			AcceptEntityInput(giViewModelLaserStart[i], "kill");
-			giViewModelLaserStart[i] = 0;
-		}
-		if (giViewModelLaserEnd[i] > 0 && IsValidEntity(giViewModelLaserEnd[i]))
-		{
-			AcceptEntityInput(giViewModelLaserEnd[i], "kill");
-			giViewModelLaserEnd[i] = 0;
-		}
-		// #endif
+		ResetAllEntitiesForClient(client);
 	}
+	for (int weapon = 0; weapon < sizeof(iAffectedWeapons); ++weapon)
+	{
+		ResetAllEntitiesForWeapon(weapon);
+	}
+
+}
+
+
+void ResetAllEntitiesForClient(int client)
+{
+	giActiveWeapon[client] = -1;
+
+	if (giViewModelLaserBeam[client] > 0 && IsValidEntity(giViewModelLaserBeam[client]))
+	{
+		AcceptEntityInput(giViewModelLaserBeam[client], "kill");
+	}
+	giViewModelLaserBeam[client] = 0;
+	if (giViewModelLaserStart[client] > 0 && IsValidEntity(giViewModelLaserStart[client]))
+	{
+		AcceptEntityInput(giViewModelLaserStart[client], "kill");
+	}
+	giViewModelLaserStart[client] = 0;
+	if (giViewModelLaserEnd[client] > 0 && IsValidEntity(giViewModelLaserEnd[client]))
+	{
+		AcceptEntityInput(giViewModelLaserEnd[client], "kill");
+	}
+	giViewModelLaserEnd[client] = 0;
+}
+
+void ResetAllEntitiesForWeapon(int weapon)
+{
+	giAttachedInfoTarget[weapon] = 0;
+	giLaserDot[weapon] = 0;
+	giLaserBeam[weapon] = 0;
 }
 
 
@@ -304,6 +334,15 @@ public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 	#if DEBUG
 	PrintToServer("[lasersight] OnRoundStart()");
 	#endif
+
+	for (int client = MaxClients; client; --client)
+	{
+		ResetAllEntitiesForClient(client);
+	}
+	for (int weapon = 0; weapon < sizeof(iAffectedWeapons); ++weapon)
+	{
+		ResetAllEntitiesForWeapon(weapon);
+	}
 
 	gbZoomForceOn = GetConVarBool(CVAR_ZoomResetOn);
 
@@ -320,8 +359,34 @@ public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 }
 
 
-public void OnPluginEnd(){
-	ResetAllEntities();
+public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
+{
+	#if DEBUG
+	PrintToServer("[lasersight] OnRoundEnd()");
+	#endif
+	// for (int client = MaxClients; client; --client)
+	// {
+	// 	ResetAllEntitiesForclient(client);
+	// }
+	// for (int weapon = 0; weapon < sizeof(iAffectedWeapons); ++weapon)
+	// {
+	// 	ResetAllEntitiesForWeapon(weapon);
+	// }
+}
+
+
+public void OnPluginEnd()
+{
+	for (int client = MaxClients; client; --client)
+	{
+		ResetAllEntitiesForClient(client);
+	}
+	for (int weapon = 0; weapon < sizeof(iAffectedWeapons); ++weapon)
+	{
+		ResetAllEntitiesForWeapon(weapon);
+	}
+
+	#if DEBUG
 	for (int i = 1; i <= MaxClients; ++i){
 		if (!IsClientInGame(i) || IsFakeClient(i))
 			continue;
@@ -332,6 +397,7 @@ public void OnPluginEnd(){
 		SDKUnhook(giViewModel[i], SDKHook_SetTransmit, Hook_SetTransmitViewModel);
 		SDKUnhook(giViewModelLaserBeam[i], SDKHook_SetTransmit, Hook_SetTransmitViewModel);
 	}
+	#endif
 }
 
 
@@ -731,7 +797,7 @@ bool CreateLaserDot(int weaponIndex, int weaponEnt)
 }
 
 
-// for player disconnect? // FIXME
+// FIXME for player disconnect?
 void DestroyLaserDot(int client)
 {
 	if (giLaserDot[giActiveWeapon[client]] > 0 && IsValidEntity(giLaserDot[giActiveWeapon[client]]))
@@ -837,7 +903,7 @@ int CreateLaserDotEnt(int weapon)
 	DispatchKeyValue(ent, "rendermode", "9"); // 3 glow, makes it smaller?, 9 world space glow 5 additive,
 	DispatchKeyValueFloat(ent, "GlowProxySize", 0.2); // not sure if this works
 	DispatchKeyValueFloat(ent, "HDRColorScale", 1.0); // needs testing
-	DispatchKeyValue(ent, "renderamt", "160"); // transparency
+	DispatchKeyValue(ent, "renderamt", "110"); // transparency
 	DispatchKeyValue(ent, "disablereceiveshadows", "1");
 	// DispatchKeyValue(ent, "renderfx", "15"); //distort
 	DispatchKeyValue(ent, "renderfx", "23"); //cull by distance
@@ -1011,6 +1077,33 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 			else // world model
 			{
 				WritePackString(dp, "muzzle_flash"); // FIXME doesn't find the attachment point somehow!?
+				WritePackFloat(dp, -1.0);
+				WritePackFloat(dp, 0.9);
+				WritePackFloat(dp, 0.0);
+			}
+		}
+
+		case WPN_srm, WPN_srm_s:
+		{
+			if (viewmodel)
+			{
+				WritePackString(dp, "muzzle");
+				if (bStartPoint)
+				{
+					WritePackFloat(dp, 0.1); // forward axis
+					WritePackFloat(dp, 4.0); // up/down axis pitch
+					WritePackFloat(dp, 0.0); // horizontal yaw
+				}
+				else
+				{
+					WritePackFloat(dp, 90.1); // forward axis
+					WritePackFloat(dp, 7.1); // up down axis (pitch, + = up)
+					WritePackFloat(dp, 0.1); // horizontal (- = left / + = right)
+				}
+			}
+			else // world model
+			{
+				WritePackString(dp, "muzzle");
 				WritePackFloat(dp, -1.0);
 				WritePackFloat(dp, 0.9);
 				WritePackFloat(dp, 0.0);
@@ -1327,9 +1420,9 @@ int CreateViewModelLaserBeamEnt(int ViewModel, int client)
 	// SetEntPropVector(laser_entity, Prop_Data, "m_vecEndPos", beam_end_pos);
 
 	// Setting Appearance
-	DispatchKeyValue(laser_entity, "texture", "materials/sprites/laser.vmt");
-	// DispatchKeyValue(laser_entity, "model", "materials/sprites/laser.vmt"); // seems unnecessary
-	// SetEntityModel(laser_entity,  "materials/sprites/laser.vmt"); // seems unnecessary
+	DispatchKeyValue(laser_entity, "texture", LASERMDL);
+	// DispatchKeyValue(laser_entity, "model", LASERMDL); // seems unnecessary
+	// SetEntityModel(laser_entity,  LASERMDL); // seems unnecessary
 	// DispatchKeyValue(laser_entity, "decalname", "redglowalpha");
 
 	DispatchKeyValue(laser_entity, "renderamt", "255");
@@ -1337,7 +1430,7 @@ int CreateViewModelLaserBeamEnt(int ViewModel, int client)
 	DispatchKeyValue(laser_entity, "rendercolor", "200 25 25");
 	// DispatchKeyValue(laser_entity, "rendermode", "1");
 	SetVariantInt(190); AcceptEntityInput(laser_entity, "alpha"); // this works! (needs proper renderfx)
-	DispatchKeyValue(laser_entity, "BoltWidth", "1.5");
+	DispatchKeyValue(laser_entity, "BoltWidth", "1.1");
 	DispatchKeyValue(laser_entity, "spawnflags", "256"); // fade towards ending entity
 	DispatchKeyValue(laser_entity, "life", "0.0");
 	DispatchKeyValue(laser_entity, "StrikeTime", "0");
@@ -1356,7 +1449,7 @@ int CreateViewModelLaserBeamEnt(int ViewModel, int client)
 
 void ToggleViewModelLaserBeam(int client, int activate=0)
 {
-	if (giViewModelLaserBeam[client] <= 0){
+	if (giViewModelLaserBeam[client] <= 0 || !IsValidEntity(giViewModelLaserBeam[client])){
 		#if DEBUG
 		PrintToServer("[lasersight] ToggleViewModelLaserBeam() laser beam for %N is invalid!", client);
 		#endif
@@ -1403,7 +1496,7 @@ void ToggleLaserBeam(int client, int weapon, bool activate)
 }
 
 
-// maybe needed on player disconnect?
+// FIXME maybe needed on player disconnect?
 void DestroyLaserBeam(int weapon)
 {
 	if (!IsValidEntity(giLaserBeam[weapon]))
@@ -1447,7 +1540,7 @@ int CreateLaserBeamEnt(int weaponEnt)
 	// SetEntPropVector(laser_entity, Prop_Data, "m_vecEndPos", beam_end_pos);
 
 	// Setting Appearance
-	DispatchKeyValue(laser_entity, "texture", "materials/sprites/laser.vmt");
+	DispatchKeyValue(laser_entity, "texture", LASERMDL);
 	DispatchKeyValue(laser_entity, "decalname", "redglowalpha");
 
 	DispatchKeyValue(laser_entity, "renderamt", "100"); // TODO(?): low renderamt, increase when activate
@@ -1469,7 +1562,7 @@ int CreateLaserBeamEnt(int weaponEnt)
 
 
 	DispatchSpawn(laser_entity);
-	SetEntityModel(laser_entity,  "materials/sprites/laser.vmt");
+	SetEntityModel(laser_entity, LASERMDL);
 
 	ActivateEntity(laser_entity); // not sure what that is (for texture animation?)
 
@@ -1797,7 +1890,6 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 	}
 
 
-
 	if (buttons & IN_ATTACK)
 	{
 		gbHeldKeys[client][KEY_ATTACK] = true;
@@ -2077,14 +2169,14 @@ public Action timer_CheckSRSSequence(Handle timer, int client)
 	}
 	int sequence = GetEntProp(giActiveWeapon[client], Prop_Data, "m_nSequence", 4);
 	if (sequence && (sequence == 6 || sequence == 11))
-		return Plugin_Continue;
+	{
+		#if DEBUG
+		PrintToChatAll("Sequence playing / not aimed weapon.");
+		#endif
+		return Plugin_Continue; // keep checking
+	}
 	else
 		return Plugin_Stop;
-
-	#if DEBUG
-	PrintToChatAll("Sequence playing / not aimed weapon.");
-	#endif
-	return Plugin_Continue; // keep checking
 }
 
 
@@ -2158,6 +2250,7 @@ void OnReloadKeyPressed(int client)
 	#if DEBUG
 	int weapon = GetPlayerWeaponSlot(client, SLOT_PRIMARY);
 	SetWeaponAmmo(client, GetAmmoType(GetActiveWeapon(client)), 90);
+	return; // DEBUG blocks turning off
 	#endif
 
 	// check if we are still in a reload animation, block accordingly
@@ -2303,7 +2396,7 @@ public Action timer_CheckSequence(Handle timer, DataPack datapack)
 }
 
 
-// TODO input the right sequences
+// TODO input the right sequences here
 void SetSwitchModeSequence(int viewmodel, WeaponType weapontype)
 {
 	int sequence;
@@ -2311,7 +2404,7 @@ void SetSwitchModeSequence(int viewmodel, WeaponType weapontype)
 	{
 		case WPN_mpn:
 		{
-			sequence = 7;
+			sequence = 13; // 13 changemode
 		}
 		case WPN_NONE:
 		{
@@ -2324,6 +2417,9 @@ void SetSwitchModeSequence(int viewmodel, WeaponType weapontype)
 	}
 
 	SetEntProp(viewmodel, Prop_Send, "m_nSequence", sequence);
+	// TODO need a SDKHook_PostThinkPost on the weapon to reset the sequence once finished
+	// https://github.com/Kxnrl/NeptuniaCSGO/blob/0397f92f39856e492d81c2b0efa72062f962ba6c/csgo/addons/sourcemod/scriptings/extended/fpvm_interface.sp#L68
+
 }
 
 
@@ -2339,7 +2435,9 @@ void ToggleLaserOff(int client, int weapon_index, int viewmodel)
 {
 	ToggleLaserDot(client, weapon_index, false);
 	ToggleLaserBeam(client, weapon_index, false);
+	#if !DEBUG
 	ToggleViewModelLaserBeam(client, viewmodel);
+	#endif
 	g_bNeedUpdateLoop = NeedUpdateLoop();
 }
 
@@ -2378,7 +2476,7 @@ void ToggleLaserActivity(int client, int weapon_index, bool advertise=true)
 	else
 		ToggleLaserOff(client, weapon_index, VIEWMDL_OFF);
 
-	SetSwitchModeSequence(giViewModel[client], giWpnType[weapon_index]);
+	//SetSwitchModeSequence(giViewModel[client], giWpnType[weapon_index]); // unfinished
 }
 
 
