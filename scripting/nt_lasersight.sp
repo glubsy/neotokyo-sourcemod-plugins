@@ -1652,28 +1652,8 @@ public void OnGameFrame()
 			GetEndPositionFromClient(client, vecEnd);
 
 			// Update Laser dot sprite position here
-			if (IsValidEntity(giLaserDot[giActiveWeapon[client]])){
-
-				// attempts to smooth out position updates by adding velocity?
-				float vecDir[3], vecVel[3];
-
-				// get previous position and apply velocity from new position difference
-				GetEntPropVector(giLaserTarget[giActiveWeapon[client]],
-				Prop_Data, "m_vecAbsOrigin", vecDir); //vecAbsOrigin or vecOrigin?
-
-				// not sure if this actually works
-				SubtractVectors(vecEnd, vecDir, vecVel);
-				ScaleVector(vecVel, 1000.0);
-
-				#if DEBUG > 2
-				PrintToChatAll("[lasersight] Dot m_vecAbsOrigin: %.3f %.3f %.3f, \
-velocity %.3f %.3f %.3f",
-				vecDir[0], vecDir[1], vecDir[2], vecVel[0], vecVel[1], vecVel[2]);
-				#endif
-
-				TeleportEntity(giLaserTarget[giActiveWeapon[client]], vecEnd, NULL_VECTOR, vecVel);
-			}
-
+			// if (IsValidEntity(giLaserDot[giActiveWeapon[client]]))
+			TeleportEntity(giLaserTarget[giActiveWeapon[client]], vecEnd, NULL_VECTOR, NULL_VECTOR);
 
 			#if METHOD TEMP_ENT // not used anymore
 			if (IsValidEntity(giAttachedInfoTarget[giActiveWeapon[client]]))
