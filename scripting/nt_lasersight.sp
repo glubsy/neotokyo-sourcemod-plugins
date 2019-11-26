@@ -116,6 +116,7 @@ public Plugin:myinfo =
 // TODO: animation (changemode or fireempty) on toggle laser command
 // TODO: show the entire laser beam to players hit by traceray when pointed directly at their head
 // TODO: have laser color / alpha in a convar
+// TODO: place a halo glow on a player's head when they use a vision mode for ennemies to see
 
 #define TEMP_ENT 1 // use TE every game frame, instead of actual env_beam (obsolete)
 #define METHOD 0

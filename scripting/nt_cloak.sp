@@ -39,6 +39,8 @@ public void OnPluginStart()
 public void OnMapStart()
 {
 	PrecacheSound(DENIEDSND, true);
+	// fixes SV_StartSound: ^player/therm_off.wav not precached (0) error message
+	PrecacheSound("player/therm_off.wav", true);
 }
 
 

@@ -30,6 +30,7 @@ public OnPluginStart()
 {
 	RegConsoleCmd("sm_dropwpn", Commmand_DropWpn, "drop grenade slot weapon.");
 	HookEvent("game_round_start", OnRoundStart);
+	HookEvent("player_death", OnPlayerDeath);
 }
 
 // TODO: when a detpack is destroyed, remove the remote control (weapon_remotedet) from owner of projectile grenade_detapack
@@ -38,6 +39,15 @@ public OnPluginStart()
 // TODO: press USE on a dropped detpack should put it back in inventory
 // TODO: make detpacks totally invisible to opponents unless they use vision modes?
 // TODO: drop remote on death for others to use, drop detpack if not already used
+
+
+
+public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
+{
+	int victim = GetClientOfUserId(GetEventInt(event, "userid"));
+
+	DropGrenadeSlot(victim);
+}
 
 
 public void OnEntityCreated(int entity, const char[] classname)
@@ -64,7 +74,7 @@ public void OnEntityCreated(int entity, const char[] classname)
 }
 
 
-// Trying to make detpacks collide / take damage from bullets
+
 public Action timer_RemoteDet(Handle timer, DataPack dp)
 {
 	ResetPack(dp);
@@ -167,6 +177,7 @@ public void OnRemote1(const char[] output, int caller, int activator, float dela
 }
 
 
+// Trying to make detpacks collide / take damage from bullets
 public Action timer_GrenadeDetapack(Handle timer, DataPack dp)
 {
 	ResetPack(dp);
@@ -320,6 +331,13 @@ public Action OnTraceAttack(int victim, int &attacker, int &inflictor, float &da
 
 public Action Commmand_DropWpn(int client, int args)
 {
+	DropGrenadeSlot(client);
+}
+
+
+// TODO: make sure we can pickup the remote somehow
+void DropGrenadeSlot(int client)
+{
 	int weapon = GetPlayerWeaponSlot(client, SLOT_GRENADE);
 	char classname[30];
 	GetEntityClassname(weapon, classname, sizeof(classname));
@@ -362,10 +380,10 @@ void CreatePhysicsProp(int child)
 	SetEntProp(iEnt, Prop_Data, "m_CollisionGroup", 11);
 	SetEntProp(iEnt, Prop_Send, "m_CollisionGroup", 11);
 
-	int m_iEFlags = GetEntProp(entity, Prop_Data, "m_iEFlags");
+	int m_iEFlags = GetEntProp(iEnt, Prop_Data, "m_iEFlags");
 	m_iEFlags &= ~(1<<1); // EFL_DORMANT
 	m_iEFlags |= (1<<14); // EFL_DIRTY_SURR_COLLISION_BOUNDS call after changing collision properties
-	SetEntProp(entity, Prop_Data, "m_iEFlags", m_iEFlags);
+	SetEntProp(iEnt, Prop_Data, "m_iEFlags", m_iEFlags);
 
 	// SetEntProp(iEnt, Prop_Data, "m_MoveCollide", 2);
 	DispatchSpawn(iEnt);
