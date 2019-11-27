@@ -13,6 +13,9 @@ bool gbHeldKey[NEO_MAX_CLIENTS+1];
 bool gbCanCloak[NEO_MAX_CLIENTS+1];
 float flRoundStartTime;
 int giReceivingClients[NEO_MAX_CLIENTS];
+Handle gh_AntiCamping = INVALID_HANDLE;
+int giSpotLight[NEO_MAX_CLIENTS+1];
+
 #define DENIEDSND "buttons/combine_button2.wav"
 
 public Plugin:myinfo =
@@ -20,29 +23,36 @@ public Plugin:myinfo =
 	name = "NEOTOKYO cloak tweaks",
 	author = "glub",
 	description = "Adds a one-time cloaking ability to supports.",
-	version = "0.2",
+	version = "0.3",
 	url = "https://github.com/glubsy"
 };
-
 
 // Supports get one cloak use, which lasts forever.
 // However, it gets disabled permanently once they take ennemy damage.
 
+//TODO should be able to toggle it off (but can't turn it on again)
+
 public void OnPluginStart()
 {
+	gh_AntiCamping = CreateConVar("nt_cloak_anticamp", "1", "Prevents supports\
+ from camping while cloaked by making them glow.", _, true, 0.0, true, 1.0);
+
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("game_round_start", OnRoundStart);
 	HookEvent("player_hurt", OnPlayerHurt/*, EventHookMode_Pre*/);
+
+	RegConsoleCmd("sm_cloaktest", Command_Testlight, "DEBUG test.");
+
 }
 
 public void OnMapStart()
 {
 	PrecacheSound(DENIEDSND, true);
+
 	// fixes SV_StartSound: ^player/therm_off.wav not precached (0) error message
 	PrecacheSound("player/therm_off.wav", true);
 }
-
 
 public Action OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
 {
@@ -123,11 +133,8 @@ public Action OnPlayerHurt(Event event, const char[] name, bool dontbroadcast)
 	if (GetClientTeam(client) == GetClientTeam(attacker))
 		return Plugin_Continue;
 
-	#if DEBUG
-	LogAction(client, -1, "[nt_cloak] Cloak turned off for %N", client);
-	#endif
-
 	SetEntProp(client, Prop_Send, "m_iThermoptic", 0);
+	ToggleHighlightEffect(client, true);
 	return Plugin_Continue;
 }
 
@@ -147,21 +154,32 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 		{
 			gbHeldKey[client] = true;
 
-			#if DEBUG > 1
-			int prop = GetEntProp(client, Prop_Send, "m_iThermoptic");
-			SetEntProp(client, Prop_Send, "m_iThermoptic", prop ? 0 : 1);
-			#endif
-
 			if (gbCanCloak[client])
 			{
 				#if DEBUG <= 1
 				SetEntProp(client, Prop_Send, "m_iThermoptic", 1);
+				ToggleHighlightEffect(client);
 				gbCanCloak[client] = false;
 				#endif
 				PrintCenterText(client, "You have used your one-time only cloak.");
 			}
 			else
 			{
+				#if DEBUG
+				int prop = GetEntProp(client, Prop_Send, "m_iThermoptic");
+				SetEntProp(client, Prop_Send, "m_iThermoptic", prop ? 0 : 1);
+				ToggleHighlightEffect(client, true);
+				gbCanCloak[client] = true;
+				return Plugin_Continue;
+				#endif
+
+				if (GetEntProp(client, Prop_Send, "m_iThermoptic"))
+				{
+					SetEntProp(client, Prop_Send, "m_iThermoptic", 0);
+					ToggleHighlightEffect(client, true);
+					return Plugin_Continue;
+				}
+
 				PrintCenterText(client, "You have aleady used your one-time only cloak.");
 				giReceivingClients[0] = client;
 				EmitSound(giReceivingClients, 1, DENIEDSND,
@@ -216,4 +234,103 @@ bool IsPlayerReallyDead(int client)
 	if (GetEntProp(client, Prop_Send, "deadflag") || GetEntProp(client, Prop_Send, "m_iHealth") <= 1)
 		return true;
 	return false;
+}
+
+
+// For debug only, prefer the spot_light method for more control
+stock void ToggleBrightlightEffect(int client, bool turnoff=false)
+{
+	int m_fEffects = GetEntProp(client , Prop_Data, "m_fEffects");
+
+	if (turnoff)
+	{
+		m_fEffects &= ~(1 << 1);
+		SetEntProp(client, Prop_Data, "m_fEffects", m_fEffects);
+		return;
+	}
+
+	if (m_fEffects & (1 << 1))
+	{
+		m_fEffects &= ~(1 << 1); // 4 EF_DIMLIGHT 2 EF_BRIGHTLIGHT
+	}
+	else
+	{
+		m_fEffects |= (1 << 1);
+	}
+	SetEntProp(client, Prop_Data, "m_fEffects", m_fEffects);
+}
+
+
+public Action Command_Testlight(int client, int args)
+{
+	if (GetCmdArgs() >= 1 && giSpotLight[client] > MaxClients){
+		PrintToChatAll("Killing %d", giSpotLight[client]);
+		AcceptEntityInput(giSpotLight[client], "kill");
+		giSpotLight[client] = -1;
+		return Plugin_Handled;
+	}
+
+	static int active;
+	active = active ? 0 : 1;
+	ToggleHighlightEffect(client, active ? true : false);
+	return Plugin_Handled;
+}
+
+
+void ToggleHighlightEffect(int client, bool turnoff=false)
+{
+	if (!GetConVarBool(gh_AntiCamping))
+		return;
+
+	CreateLightPoint(client);
+	if (giSpotLight[client] <= 0)
+		return;
+
+	if (turnoff)
+	{
+		AcceptEntityInput(giSpotLight[client], "TurnOff");
+		PrintToChatAll("TurnOff");
+		return;
+	}
+
+	AcceptEntityInput(giSpotLight[client], "TurnOn");
+	PrintToChatAll("TurnOn");
+}
+
+void CreateLightPoint(int client)
+{
+	if (giSpotLight[client] > 0)
+		return;
+
+	int spot_light = CreateEntityByName("light_dynamic");
+	PrintToChatAll("created light_dynamic");
+
+	DispatchKeyValueFloat(spot_light, "spotlight_radius", 10.0);
+	DispatchKeyValueFloat(spot_light, "distance", 50.0);
+	DispatchKeyValue(spot_light, "_inner_cone", "0");
+	DispatchKeyValue(spot_light, "_cone", "0");
+	DispatchKeyValue(spot_light, "_light", "150 150 150 70");
+	DispatchKeyValue(spot_light, "style", "11");
+	// DispatchKeyValue(spot_light, "target", "10");
+	DispatchKeyValue(spot_light, "brightness", "5");
+	// DispatchKeyValue(spot_light, "spawnflags", "1");
+
+	SetVariantString("!activator");
+	AcceptEntityInput(spot_light, "SetParent", client, client, 0);
+
+	CreateTimer(0.1, timer_SetAttachement, spot_light);
+
+	DispatchSpawn(spot_light);
+
+	float vecOrigin[3];
+	vecOrigin[2] -= 4.0;
+	SetEntPropVector(spot_light, Prop_Send, "m_vecOrigin", vecOrigin);
+	giSpotLight[client] = spot_light;
+}
+
+public Action timer_SetAttachement(Handle timer, int entity)
+{
+	SetVariantString("grenade2");
+	AcceptEntityInput(entity, "SetParentAttachment");
+	return Plugin_Handled;
 }

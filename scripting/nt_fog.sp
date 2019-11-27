@@ -13,8 +13,9 @@ new const g_iFogColor[] = {25, 25, 25, 220};
 // OBJECTIVE: set a thick black fog on the ghost carrier for spooky effect
 
 // TODO: see whether it's possible to set transparency for player models with render effects / transparency
-// TODO: cloak: check most suspicious variable properties on game frame while cloaked and see what moves
-// -> CMaterialModifyControl (netprop)
+// -> probably can't do
+// TODO: cloak investigations: check most suspicious variable properties on game frame while cloaked and see what moves
+// -> CMaterialModifyControl (netprop)?
 
 public Plugin:myinfo =
 {
@@ -27,6 +28,8 @@ public Plugin:myinfo =
 
 public void OnPluginStart()
 {
+	RegConsoleCmd("sm_flashlight", Command_Flashlight, "DEBUG Toggle flashlight effect.");
+
 	OnConfigsExectured();
 
 	#if DEBUG
@@ -49,7 +52,8 @@ public void OnConfigsExectured()
 	{
 		if (!IsClientInGame(i))
 			continue;
-		// SetTransparency(i);
+
+		SetTransparency(i);
 
 		if (!IsFakeClient(i))
 			ChangeFogForPlayer(i);
@@ -238,12 +242,24 @@ stock void ChangeGlobalFogParams(int client)
 
 stock void SetTransparency(int client)
 {
-	// doesn't really work, not true transparency
-	DispatchKeyValue(client, "rendermode", "4");
-	DispatchKeyValue(client, "renderamt", "90");
+	// DispatchKeyValue(client, "skin", "1");
+	// DispatchKeyValue(client, "body", "1");
+	// DispatchKeyValue(client, "SetBodyGroup", "1");
 
-	SetVariantInt(90);
-	AcceptEntityInput(client, "alpha");
+	PrintToServer("BEFORE %N has m_iNMFlash %d", client, GetEntProp(client, Prop_Send, "m_iThermoptic"));
+	SetEntProp(client, Prop_Send, "m_iThermoptic", 1);
+	// SetEntProp(client, Prop_Send, "m_nRenderFX", 22);
+	PrintToServer("AFTER %N has m_iNMFlash %d", client, GetEntProp(client, Prop_Send, "m_iThermoptic"));
+	// ToggleFlashlightEffect(client);
+
+	// PrintToServer("%N has Skin %d", client, GetEntProp(client, Prop_Send, "m_nSkin"));
+
+	// doesn't really work, not true transparency
+	DispatchKeyValue(client, "rendermode", "0");
+	// DispatchKeyValue(client, "renderamt", "90");
+
+	// SetVariantInt(90);
+	// AcceptEntityInput(client, "alpha");
 }
 
 // Check hsm_visibility Plugin for potential better invisiblity:
@@ -276,4 +292,27 @@ stock void SetTransparency(int client)
 	SetEntPropVector(client, Prop_Send, "m_vecMaxs", cflHiddenMaxs)
 }*/
 
+public Action Command_Flashlight(int client, int args)
+{
+	ToggleFlashlightEffect(client);
+	return Plugin_Handled;
+}
 
+// this effect places a dynamic light at the origin (player's feet)
+// but also activates the flashlight on the client side!
+void ToggleFlashlightEffect(int client)
+{
+	int m_fEffects = GetEntProp(client , Prop_Data, "m_fEffects");
+
+	if (m_fEffects & (2 << 1))
+	{
+		m_fEffects &= ~(2 << 1); // 4 EF_DIMLIGHT 2 EF_BRIGHTLIGHT
+	}
+	else
+	{
+		m_fEffects |= (2 << 1);
+	}
+	SetEntProp(client, Prop_Data, "m_fEffects", m_fEffects);
+
+	// ChangeEdictState(client);
+}

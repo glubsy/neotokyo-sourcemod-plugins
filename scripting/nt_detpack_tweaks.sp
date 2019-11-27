@@ -74,7 +74,7 @@ public void OnEntityCreated(int entity, const char[] classname)
 }
 
 
-
+// TODO make sure we can collide / touch the entity once it stops thinking in order to pick it up
 public Action timer_RemoteDet(Handle timer, DataPack dp)
 {
 	ResetPack(dp);
@@ -174,6 +174,7 @@ m_lifeState %d, movetype %d, m_iEFlags %d, m_flGravity %f, m_flFriction %f, m_fl
 public void OnRemote1(const char[] output, int caller, int activator, float delay)
 {
 	PrintToServer("OnRemote1()");
+	PrintToChatAll("OnRemote1()");
 }
 
 
