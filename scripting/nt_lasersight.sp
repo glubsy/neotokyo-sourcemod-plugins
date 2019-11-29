@@ -798,7 +798,7 @@ bool CreateLaserDot(int weaponIndex, int weaponEnt)
 
 
 // FIXME for player disconnect?
-void DestroyLaserDot(int client)
+stock void DestroyLaserDot(int client)
 {
 	if (giLaserDot[giActiveWeapon[client]] > 0 && IsValidEntity(giLaserDot[giActiveWeapon[client]]))
 	{
@@ -810,7 +810,7 @@ void DestroyLaserDot(int client)
 }
 
 
-void ToggleLaserDot(int client, int weapon_index, bool activate)
+void ToggleLaserDot(int weapon_index, bool activate)
 {
 	// if (giLaserDot[giActiveWeapon[client]] < 0 || !IsValidEntity(giLaserDot[giActiveWeapon[client]]))
 	// 	return;
@@ -1475,7 +1475,7 @@ void ToggleViewModelLaserBeam(int client, int activate=0)
 }
 
 
-void ToggleLaserBeam(int client, int weapon, bool activate)
+void ToggleLaserBeam(int weapon, bool activate)
 {
 	if (activate)
 	{
@@ -1487,17 +1487,11 @@ void ToggleLaserBeam(int client, int weapon, bool activate)
 		AcceptEntityInput(giLaserBeam[weapon], "TurnOff");
 		SDKUnhook(giLaserBeam[weapon], SDKHook_SetTransmit, Hook_SetTransmitLaserBeam);
 	}
-
-	#if DEBUG
-	PrintToServer("[lasersight] laser beam %d for %N should be %s.",
-	giLaserBeam[weapon], client, 	// giLaserBeam[giActiveWeapon[client]]
-	gbShouldEmitLaser[client] ? "Turned On" : "Turned Off");
-	#endif
 }
 
 
 // FIXME maybe needed on player disconnect?
-void DestroyLaserBeam(int weapon)
+stock void DestroyLaserBeam(int weapon)
 {
 	if (!IsValidEntity(giLaserBeam[weapon]))
 	{
@@ -1838,7 +1832,7 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 	{
 		if (gbHeldKeys[client][KEY_RELOAD])
 		{
-			buttons &= ~IN_RELOAD;
+			buttons &= ~IN_RELOAD; // FIXME avoid removing keys, not good practice, can break other plugins
 		}
 		else
 		{
@@ -1935,19 +1929,15 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 
 	if ((buttons & IN_VISION) && gbIsRecon[client])
 	{
-		if(gbHeldKeys[client][KEY_VISION])
-		{
-			buttons &= ~IN_VISION; // release
-		}
-		else
+		if(!gbHeldKeys[client][KEY_VISION])
 		{
 			if (gbVisionActive[client])
 				// gbVisionActive[client] = GetEntProp(client, Prop_Send, "m_iVision") == 2 ? true : false;
 				gbVisionActive[client] = false;
 			else
 				gbVisionActive[client] = true; // we assume vision is active client-side
-			gbHeldKeys[client][KEY_VISION] = true;
 		}
+		gbHeldKeys[client][KEY_VISION] = true;
 	}
 	else if (gbIsRecon[client])
 	{
@@ -2377,7 +2367,7 @@ public Action timer_CheckSequence(Handle timer, DataPack datapack)
 
 
 // TODO input the right sequences here
-void SetSwitchModeSequence(int viewmodel, WeaponType weapontype)
+stock void SetSwitchModeSequence(int viewmodel, WeaponType weapontype)
 {
 	int sequence;
 	switch (weapontype)
@@ -2405,16 +2395,16 @@ void SetSwitchModeSequence(int viewmodel, WeaponType weapontype)
 
 void ToggleLaserOn(int client, int weapon_index, int viewmodel)
 {
-	ToggleLaserDot(client, weapon_index, true);
-	ToggleLaserBeam(client, weapon_index, true);
+	ToggleLaserDot(weapon_index, true);
+	ToggleLaserBeam(weapon_index, true);
 	ToggleViewModelLaserBeam(client, viewmodel);
 	g_bNeedUpdateLoop = NeedUpdateLoop();
 }
 
 void ToggleLaserOff(int client, int weapon_index, int viewmodel)
 {
-	ToggleLaserDot(client, weapon_index, false);
-	ToggleLaserBeam(client, weapon_index, false);
+	ToggleLaserDot(weapon_index, false);
+	ToggleLaserBeam(weapon_index, false);
 	#if !DEBUG
 	ToggleViewModelLaserBeam(client, viewmodel);
 	#endif

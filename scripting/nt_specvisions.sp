@@ -9,6 +9,7 @@ bool g_bCantUseVisions[MAXPLAYERS+1];
 
 // TODO: simplify code according to Soft's version https://github.com/softashell/neotokyo-sourcemod-plugins/blob/master/scripting/nt_specvisions.sp
 // the only change needed is the timer on death event to prevent spamming vision key for a few seconds
+// TODO: change observer target for the victim to their killer, if we keep this timer at all...
 
 public Plugin:myinfo = 
 {
