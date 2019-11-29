@@ -157,7 +157,7 @@ public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 
 void GhostShouldTakeDamage(int entity)
 {
-	// 0 takes no damage, 1 buddha, 2 mortal, 3 ?
+	// 0 takes no damage, 1 buddha, 2 DAMAGE_YES, 3 DAMAGE_AIM
 	SetEntProp(entity, Prop_Data, "m_takedamage", 1);
 	ChangeEdictState(entity);
 }
@@ -410,16 +410,18 @@ m_iEFlags %d flcompare %d m_iState %d",
 
 			#if DEBUG
 			PrintToServer("[ghostpos] Ghost carrier: %N (%s)", g_iGhostCarrier,
-			bOnGround ? "is on ground" : "is NOT on ground" );
+			bOnGround ? "is on ground" : "is NOT on ground");
 			#endif
 
-			if (bOnGround && !VectorsEqual(gfLastValidCoords[gCursor], currentPos, 80.0, true) /*&& StandsFirm(g_iGhostCarrier)*/) // TODO: only pass if low velocity?
+			// TODO: only pass if low velocity?
+			if (bOnGround && !VectorsEqual(gfLastValidCoords[gCursor], currentPos, 80.0, true) /*&& StandsFirm(g_iGhostCarrier)*/) 
 				StoreCoords(currentPos, 20.0); // offset to avoid teleporting in solid
 
 			return Plugin_Continue;
 		}
 
-		if (IsImmobile(currentPos)) // wish we could detect props being at rest on the ground :(
+		// wish we could detect props being at rest on the ground :(
+		if (IsImmobile(currentPos)) 
 		{
 			if (!bTeleported)
 			{

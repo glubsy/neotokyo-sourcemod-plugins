@@ -304,6 +304,8 @@ int CreateSpriteEnt(SpriteType type)
 		DispatchKeyValue(iEnt, "alpha", "125"); // this doesn't seem to work
 		DispatchKeyValue(iEnt, "m_bWorldSpaceScale", "0");
 
+		SetEntProp(iEnt, Prop_Send, "m_nRenderFX", RENDERFX_CLAMP_MIN_SCALE);
+
 		SetVariantFloat(0.1);
 		AcceptEntityInput(iEnt, "SetScale");  // this works
 		// SetEntPropFloat(ent, Prop_Data, "m_flSpriteScale", 0.2); // doesn't seem to work
@@ -322,6 +324,8 @@ int CreateSpriteEnt(SpriteType type)
 		// DispatchKeyValue(iEnt, "renderfx", "19"); // 19 clamp max size
 		DispatchKeyValue(iEnt, "rendercolor", YELLOWCOLOR);
 		DispatchKeyValue(iEnt, "alpha", "125"); // this doesn't seem to work
+
+		SetEntProp(iEnt, Prop_Send, "m_nRenderFX", RENDERFX_CLAMP_MIN_SCALE);
 
 		SetVariantFloat(0.2);
 		AcceptEntityInput(iEnt, "SetScale");  // this works

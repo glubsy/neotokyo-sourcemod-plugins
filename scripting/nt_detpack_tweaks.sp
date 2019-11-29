@@ -444,9 +444,11 @@ public void OnEntityDestroyed(int entindex)
 			int owner = GetEntPropEnt(EntRefToEntIndex(entityref), Prop_Data, "m_hThrower");
 			PrintToServer("m_hThrower was %N", owner);
 
-			int remote = INVALID_ENT_REFERENCE;
-			while ((remote = FindEntityByClassname(remote, "weapon_remotedet")) != INVALID_ENT_REFERENCE)
+			int remote = -1;
+			while ((remote = FindEntityByClassname(remote, "weapon_remotedet")) != -1)
 			{
+				// int ref = EntIndexToEntRef(remote);
+
 				char remotename[60], lookup[60];
 				Format(lookup, sizeof(lookup), "remotedet%s", entityref);
 				GetEntPropString(remote, Prop_Data, "m_target", remotename, sizeof(remotename));
@@ -512,7 +514,7 @@ m_hDamageFilter %d m_iszDamageFilterName %s m_iEFlags %d",
 	m_takedamage, m_iMaxHealth, m_iHealth, m_hDamageFilter, m_iszDamageFilterName, 
 	m_iEFlags);
 
-	SetEntProp(ghost, Prop_Data, "m_takedamage", 2); // 0 takes no damage, 1 buddha, 2 mortal, 3 ?
+	SetEntProp(ghost, Prop_Data, "m_takedamage", 2); // 0 takes no damage, 1 buddha, 2 mortal, 3 DAMAGE_AIM
 	SetEntProp(ghost, Prop_Data, "m_iMaxHealth", 600);
 	SetEntProp(ghost, Prop_Data, "m_iHealth", 600);
 

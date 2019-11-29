@@ -406,7 +406,7 @@ public void OnClientDisconnect(int client)
 	if (GetConVarBool(convar_ghost_sounds_enabled))
 	{
 		g_bWantsGhostSFX[client] = false;
-		CreateTimer(0.2, timer_UpdateArrays, -1, TIMER_FLAG_NO_MAPCHANGE);
+		CreateTimer(0.1, timer_UpdateArrays, -1, TIMER_FLAG_NO_MAPCHANGE);
 	}
 }
 
@@ -606,7 +606,7 @@ void BuildAffectedTeamArray()
 	g_iNumAffectedAlive[CARRYING_TEAM] = 0;
 	g_iNumAffectedAlive[OPPOSING_TEAM] = 0;
 	g_iNumAffectedAlive[ALL_ALIVE] = 0;
-	for (int thisClient = 1; thisClient <= MaxClients; thisClient++)
+	for (int thisClient = MaxClients; thisClient; --thisClient)
 	{
 		if (!IsValidClient(thisClient))
 			continue;
