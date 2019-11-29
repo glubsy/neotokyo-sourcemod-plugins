@@ -13,8 +13,15 @@ bool gbHeldKey[NEO_MAX_CLIENTS+1];
 bool gbCanCloak[NEO_MAX_CLIENTS+1];
 float flRoundStartTime;
 int giReceivingClients[NEO_MAX_CLIENTS];
-Handle gh_AntiCamping = INVALID_HANDLE;
-int giSpotLight[NEO_MAX_CLIENTS+1];
+
+Handle ghAntiCamping = INVALID_HANDLE;
+bool gbAntiCamp;
+int giSpotLight[NEO_MAX_CLIENTS+1] = { -1, ...};
+Handle ghTimerCheckVelocity[NEO_MAX_CLIENTS+1] = {INVALID_HANDLE, ...};
+bool gbLightIsActive[NEO_MAX_CLIENTS+1];
+int hMyWeapons;
+int giLight[NEO_MAX_CLIENTS] = { -1, ...}
+int giLightCursor;
 
 #define DENIEDSND "buttons/combine_button2.wav"
 
@@ -30,21 +37,22 @@ public Plugin:myinfo =
 // Supports get one cloak use, which lasts forever.
 // However, it gets disabled permanently once they take ennemy damage.
 
-//TODO should be able to toggle it off (but can't turn it on again)
 
 public void OnPluginStart()
 {
-	gh_AntiCamping = CreateConVar("nt_cloak_anticamp", "1", "Prevents supports\
- from camping while cloaked by making them glow.", _, true, 0.0, true, 1.0);
+	ghAntiCamping = CreateConVar("nt_cloak_anticamp", "1", "Place a light halo around \
+immobile cloaked supports.", _, true, 0.0, true, 1.0);
 
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("game_round_start", OnRoundStart);
+	HookEvent("game_round_end", OnRoundEnd);
 	HookEvent("player_hurt", OnPlayerHurt/*, EventHookMode_Pre*/);
 
-	RegConsoleCmd("sm_cloaktest", Command_Testlight, "DEBUG test.");
-
+	if(!hMyWeapons && (hMyWeapons = FindSendPropInfo("CBasePlayer", "m_hMyWeapons")) == -1)
+		ThrowError("Failed to obtain offset: \"m_hMyWeapons\"!");
 }
+
 
 public void OnMapStart()
 {
@@ -52,7 +60,19 @@ public void OnMapStart()
 
 	// fixes SV_StartSound: ^player/therm_off.wav not precached (0) error message
 	PrecacheSound("player/therm_off.wav", true);
+
+	gbAntiCamp = GetConVarBool(ghAntiCamping);
+
+	if (gbAntiCamp)
+	{
+		for (int i = 0; i < sizeof(giLight); ++i)
+		{
+			giLight[i] = INVALID_ENT_REFERENCE;
+		}
+		giLightCursor = 0;
+	}
 }
+
 
 public Action OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
 {
@@ -87,9 +107,98 @@ public Action OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
 
 public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 {
-	int victim = GetClientOfUserId(GetEventInt(event, "userid"));
+	int client = GetClientOfUserId(GetEventInt(event, "userid"));
 
-	gbIsSupport[victim] = false;
+	gbIsSupport[client] = false;
+
+	if (ghTimerCheckVelocity[client] != INVALID_HANDLE)
+		CloseHandle(ghTimerCheckVelocity[client]);
+
+	Cleanup(client);
+}
+
+
+// NOTE killing light_dynamic (or removing edict) doesn't remove them!
+void Cleanup(int client)
+{
+	int entIndex = giSpotLight[client];
+
+	if (entIndex > MaxClients && IsValidEntity(entIndex))
+	{
+		#if DEBUG
+		char classname[50];
+		GetEntityClassname(entIndex, classname, sizeof(classname));
+		PrintToServer("[cloak] Cleanup for %N: %d (%s)",
+		client, entIndex, classname);
+		#endif
+
+		MoveEntAway(entIndex);
+	}
+	giSpotLight[client] = -1;
+}
+
+
+void MoveEntAway(int entIndex)
+{
+	#if DEBUG
+	PrintToServer("[cloak] Moving %d awayyy~", entIndex);
+	#endif
+
+	AcceptEntityInput(entIndex, "ClearParent");
+
+	#if !DEBUG
+	float vec[3] = {-999999.0, 999999.0, -999999.0};
+	#else
+	float vec[3] = {-3097.843750, 1288.937500, 140.031250};
+	#endif
+
+	TeleportEntity(entIndex, vec, NULL_VECTOR, NULL_VECTOR);
+
+	#if !DEBUG
+	int flags = GetEntProp(entIndex, Prop_Send, "m_fEffects");
+	flags |= (1 << 5); // add EF_NODRAW
+	SetEntProp(entIndex, Prop_Send, "m_fEffects", flags);
+
+	AcceptEntityInput(entIndex, "TurnOff");
+
+	// if we kill them, they toggle back on client-side!
+	// this is an old known bug which we have to work around
+	AcceptEntityInput(entIndex, "Kill");
+	// RemoveEdict(entIndex);
+	#endif
+}
+
+
+// public void OnEntityDestroyed(int entity)
+// {
+// 	for (int i = MaxClients; i; --i)
+// 	{
+// 		if (giSpotLight[i] == entity)
+// 		{
+// 			char classname[15];
+// 			GetEntityClassname(entity, classname, sizeof(classname));
+// 			PrintToServer("Calling moveaway on entity destroyed %d %s", entity, classname);
+// 			MoveEntAway(entity);
+// 		}
+// 	}
+// }
+
+
+public void OnClientDisconnect(int client)
+{
+	Cleanup(client);
+}
+
+
+public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
+{
+	for (int i = MaxClients; i; --i)
+	{
+		// Cleanup(i); // too late!?
+
+		if (IsValidClient(i))
+			ghTimerCheckVelocity[i] = INVALID_HANDLE;
+	}
 }
 
 
@@ -97,6 +206,7 @@ public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
 	gbFreezeTime = true;
 	flRoundStartTime = GetGameTime();
+	// SeekPreviousLightEnts();
 }
 
 
@@ -112,7 +222,6 @@ public void OnGameFrame()
 			gbFreezeTime = false;
 	}
 }
-
 
 public Action OnPlayerHurt(Event event, const char[] name, bool dontbroadcast)
 {
@@ -134,7 +243,12 @@ public Action OnPlayerHurt(Event event, const char[] name, bool dontbroadcast)
 		return Plugin_Continue;
 
 	SetEntProp(client, Prop_Send, "m_iThermoptic", 0);
-	ToggleHighlightEffect(client, true);
+
+	if (gbAntiCamp)
+	{
+		ghTimerCheckVelocity[client] = INVALID_HANDLE;
+		ToggleHighlightEffect(client, true);
+	}
 	return Plugin_Continue;
 }
 
@@ -156,19 +270,30 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 
 			if (gbCanCloak[client])
 			{
-				#if DEBUG <= 1
 				SetEntProp(client, Prop_Send, "m_iThermoptic", 1);
-				ToggleHighlightEffect(client);
+
+				if (gbAntiCamp)
+				{
+					ToggleHighlightEffect(client);
+
+					ghTimerCheckVelocity[client] = CreateTimer(0.5, timer_CheckVelocity,
+					EntIndexToEntRef(client), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+				}
+
 				gbCanCloak[client] = false;
-				#endif
-				PrintCenterText(client, "You have used your one-time only cloak.");
+
+				//PrintCenterText(client, "You have used your one-time only cloak.");
 			}
 			else
 			{
 				#if DEBUG
 				int prop = GetEntProp(client, Prop_Send, "m_iThermoptic");
 				SetEntProp(client, Prop_Send, "m_iThermoptic", prop ? 0 : 1);
-				ToggleHighlightEffect(client, true);
+				if (gbAntiCamp)
+				{
+					KillTimer(ghTimerCheckVelocity[client]);
+					ToggleHighlightEffect(client, true);
+				}
 				gbCanCloak[client] = true;
 				return Plugin_Continue;
 				#endif
@@ -176,7 +301,11 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 				if (GetEntProp(client, Prop_Send, "m_iThermoptic"))
 				{
 					SetEntProp(client, Prop_Send, "m_iThermoptic", 0);
-					ToggleHighlightEffect(client, true);
+					if (gbAntiCamp)
+					{
+						KillTimer(ghTimerCheckVelocity[client]);
+						ToggleHighlightEffect(client, true);
+					}
 					return Plugin_Continue;
 				}
 
@@ -209,6 +338,7 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 	return Plugin_Continue;
 }
 
+
 // Warning: upcon first connection, Health = 100, observermode = 0, and deadflag = 0!
 bool IsPlayerObserving(int client)
 {
@@ -237,100 +367,251 @@ bool IsPlayerReallyDead(int client)
 }
 
 
-// For debug only, prefer the spot_light method for more control
-stock void ToggleBrightlightEffect(int client, bool turnoff=false)
+// For debug only, prefer the light_dynamic method for more control
+// stock void DEBUG_ToggleBrightlightEffect(int client, bool turnoff=false)
+// {
+// 	int m_fEffects = GetEntProp(client , Prop_Data, "m_fEffects");
+
+// 	if (turnoff)
+// 	{
+// 		m_fEffects &= ~(1 << 1);
+// 		SetEntProp(client, Prop_Data, "m_fEffects", m_fEffects);
+// 		return;
+// 	}
+
+// 	if (m_fEffects & (1 << 1))
+// 	{
+// 		m_fEffects &= ~(1 << 1); // 4 EF_DIMLIGHT 2 EF_BRIGHTLIGHT
+// 	}
+// 	else
+// 	{
+// 		m_fEffects |= (1 << 1);
+// 	}
+// 	SetEntProp(client, Prop_Data, "m_fEffects", m_fEffects);
+// }
+
+
+// We don't store them fore reuse anymore since we now kill them anyway
+stock void StoreLightEnt(int light)
 {
-	int m_fEffects = GetEntProp(client , Prop_Data, "m_fEffects");
+	if (giLightCursor > sizeof(giLight))
+		ThrowError("Attempted to store a light_dynamic out of array bounds!")
+	
+	if (giLight[giLightCursor] != -1)
+		++giLightCursor;
+	
+	#if DEBUG
+	PrintToServer("[cloak] Storing light entref %d at cursor %d", light, giLightCursor);
+	#endif
 
-	if (turnoff)
-	{
-		m_fEffects &= ~(1 << 1);
-		SetEntProp(client, Prop_Data, "m_fEffects", m_fEffects);
-		return;
-	}
-
-	if (m_fEffects & (1 << 1))
-	{
-		m_fEffects &= ~(1 << 1); // 4 EF_DIMLIGHT 2 EF_BRIGHTLIGHT
-	}
-	else
-	{
-		m_fEffects |= (1 << 1);
-	}
-	SetEntProp(client, Prop_Data, "m_fEffects", m_fEffects);
+	giLight[giLightCursor] = light;
 }
 
+// stock void SeekPreviousLightEnts()
+// {
+// 	#if DEBUG
+// 	PrintToServer("[cloak] Looking for previous light_dynamic in the map...");
+// 	#endif
 
-public Action Command_Testlight(int client, int args)
+// 	int light = INVALID_ENT_REFERENCE;
+// 	while ((light = FindEntityByClassname(light, "light_dynamic")) != INVALID_ENT_REFERENCE)
+// 	{
+// 		#if DEBUG
+// 		PrintToServer("[cloak] Found light_dynamic %d, checking target...", light);
+// 		#endif
+// 		char targetname[10];
+// 		GetEntPropString(light, Prop_Send, "m_target", targetname, sizeof(targetname));
+// 		if (StrEqual("ntlight", targetname))
+// 		{
+// 			StoreLightEnt(EntIndexToEntRef(light));
+// 		}
+// 	}
+// }
+
+
+int GetLightEnt()
 {
-	if (GetCmdArgs() >= 1 && giSpotLight[client] > MaxClients){
-		PrintToChatAll("Killing %d", giSpotLight[client]);
-		AcceptEntityInput(giSpotLight[client], "kill");
-		giSpotLight[client] = -1;
-		return Plugin_Handled;
-	}
+	if (giLightCursor == 0 && giLight[giLightCursor] == -1)
+		return CreateLightPoint();
 
-	static int active;
-	active = active ? 0 : 1;
-	ToggleHighlightEffect(client, active ? true : false);
-	return Plugin_Handled;
+	int lightref = giLight[giLightCursor];
+	giLight[giLightCursor] = -1;
+
+	#if DEBUG
+	PrintToServer("[cloak] Getting light ref %d at cursor %d", lightref, giLightCursor);
+	#endif
+
+	if (giLightCursor > 0)
+		--giLightCursor;
+
+	return lightref;
 }
 
 
 void ToggleHighlightEffect(int client, bool turnoff=false)
 {
-	if (!GetConVarBool(gh_AntiCamping))
+	if (!gbAntiCamp)
 		return;
 
-	CreateLightPoint(client);
-	if (giSpotLight[client] <= 0)
+	if (giSpotLight[client] == -1)
+	{
+		giSpotLight[client] = GetLightEnt();
+
+		#if DEBUG
+		char classname[60];
+		GetEntityClassname(giSpotLight[client], classname, sizeof(classname));
+		PrintToServer("[cloak] GetLightEnt returned a %s.", classname);
+		#endif
+
+		MakeParent(giSpotLight[client], client);
+	}
+
+	if (giSpotLight[client] == -1)
+	{
+		ThrowError("Couldn't create a new light_dynamic entity! Aborting.")
 		return;
+	}
 
 	if (turnoff)
 	{
 		AcceptEntityInput(giSpotLight[client], "TurnOff");
-		PrintToChatAll("TurnOff");
+		gbLightIsActive[client] = false;
+		#if DEBUG
+		PrintToChatAll("[cloak] Light TurnOff for %N (%d), light %d", 
+		client, client, giSpotLight[client]);
+		#endif
 		return;
 	}
 
-	AcceptEntityInput(giSpotLight[client], "TurnOn");
-	PrintToChatAll("TurnOn");
+	if (!gbLightIsActive[client])
+	{
+		AcceptEntityInput(EntRefToEntIndex(giSpotLight[client]), "TurnOn");
+		gbLightIsActive[client] = true;
+		#if DEBUG
+		PrintToChatAll("[cloak] Light TurnOn for %N (%d), light %d", 
+		client, client, giSpotLight[client]);
+		#endif
+		ToggleShadowOnWeapons(client);
+	}
 }
 
-void CreateLightPoint(int client)
+// Weapon shadow are still cast when cloak is active, so we reduce them
+// NOTE probably not worth setting them back on again, they still work just fine?
+void ToggleShadowOnWeapons(int client)
 {
-	if (giSpotLight[client] > 0)
-		return;
+	for(int slot = 0; slot <= 5; ++slot)
+	{
+		int weapon = GetEntDataEnt2(client, hMyWeapons + (slot * 4));
 
-	int spot_light = CreateEntityByName("light_dynamic");
-	PrintToChatAll("created light_dynamic");
+		if(!IsValidEntity(weapon))
+			continue;
 
-	DispatchKeyValueFloat(spot_light, "spotlight_radius", 10.0);
-	DispatchKeyValueFloat(spot_light, "distance", 50.0);
-	DispatchKeyValue(spot_light, "_inner_cone", "0");
-	DispatchKeyValue(spot_light, "_cone", "0");
-	DispatchKeyValue(spot_light, "_light", "150 150 150 70");
-	DispatchKeyValue(spot_light, "style", "11");
-	// DispatchKeyValue(spot_light, "target", "10");
-	DispatchKeyValue(spot_light, "brightness", "5");
-	// DispatchKeyValue(spot_light, "spawnflags", "1");
+		DispatchKeyValue(weapon, "shadowcastdist", "3.0");
+		// AcceptEntityInput(weapon, "DisableShadow");
+	}
+}
+
+
+public Action timer_CheckVelocity(Handle timer, int clientref)
+{
+	int client = EntRefToEntIndex(clientref);
+
+	if (client < 0 || ghTimerCheckVelocity[client] == INVALID_HANDLE)
+		return Plugin_Stop;
+	
+	if (!IsValidClient(client) || !IsPlayerAlive(client))
+	{
+		ghTimerCheckVelocity[client] = INVALID_HANDLE;
+		return Plugin_Stop;
+	}
+
+	float vec;
+	vec = GetEntPropFloat(client, Prop_Send, "m_vecVelocity[1]");
+
+	#if DEBUG > 1
+	PrintToServer("[cloak] client %N velocity %f", client, vec);
+	#endif
+
+	if (FloatCompare(vec, 0.0) == 0) // we're immobile, activate halo
+		ToggleHighlightEffect(client, false);
+	else if (gbLightIsActive[client])
+		ToggleHighlightEffect(client, true);
+
+	return Plugin_Continue;
+}
+
+
+// NOTE: use r_drawlights to debug
+int CreateLightPoint()
+{
+	int lightEnt = CreateEntityByName("light_dynamic");
+
+	#if DEBUG
+	PrintToServer("[cloak] Created light_dynamic %d", lightEnt);
+	#endif
+
+	DispatchKeyValueFloat(lightEnt, "spotlight_radius", 5.0);
+	DispatchKeyValueFloat(lightEnt, "distance", 40.0);
+	DispatchKeyValue(lightEnt, "_inner_cone", "0"); // 0 = omnidirectional, 89
+	DispatchKeyValue(lightEnt, "_cone", "0");  // 0 = omnidirectional, 89
+	// DispatchKeyValue(lightEnt, "pitch","89");
+	DispatchKeyValue(lightEnt, "_light", "150 150 220 90");
+	DispatchKeyValue(lightEnt, "style", "11");
+	// DispatchKeyValue(lightEnt, "target", "10");
+	DispatchKeyValue(lightEnt, "brightness", "10");
+	// DispatchKeyValue(lightEnt, "spawnflags", "1");
+
+	DispatchSpawn(lightEnt);
+
+	// if not using the grenade2 attachement only!
+	// NOTE: other axes are world absolute
+	// float vecOrigin[3];
+	// vecOrigin[2] += 35.0; // +up -down
+	// SetEntPropVector(lightEnt, Prop_Data, "m_vecOrigin", vecOrigin);
+
+	return lightEnt;
+}
+
+
+void MakeParent(int entity, int parent)
+{
+	char name[10];
+	Format(name, sizeof(name), "ntlight");
+	DispatchKeyValue(entity, "targetname", name);
+
+	SetEntPropEnt(entity, Prop_Send, "m_hOwnerEntity", parent);
 
 	SetVariantString("!activator");
-	AcceptEntityInput(spot_light, "SetParent", client, client, 0);
+	if (!AcceptEntityInput(entity, "SetParent", parent, parent, 0))
+		LogError("Failed to call SetParent on light_dynamic %d to %d", entity, parent);
 
-	CreateTimer(0.1, timer_SetAttachement, spot_light);
-
-	DispatchSpawn(spot_light);
-
-	float vecOrigin[3];
-	vecOrigin[2] -= 4.0;
-	SetEntPropVector(spot_light, Prop_Send, "m_vecOrigin", vecOrigin);
-	giSpotLight[client] = spot_light;
+	CreateTimer(0.1, timer_SetAttachement, entity);
 }
 
+
+// place light source slightly in front and close to the ground
 public Action timer_SetAttachement(Handle timer, int entity)
 {
-	SetVariantString("grenade2");
+	SetVariantString("lfoot"); // grenade2 or lfeet
 	AcceptEntityInput(entity, "SetParentAttachment");
+
+	float vecOrigin[3];
+	// for grenade2
+	// vecOrigin[0] -= 10.0; // - down + up
+	// vecOrigin[1] = 0.0; // - left + right
+	// vecOrigin[2] += 15.0; // + forward - backward
+
+	// for none
+	// vecOrigin[0] -= 6.0; // - right + left
+	// vecOrigin[1] -= 10.0; // forward backward
+	// vecOrigin[2] += 13.0; // + up - down
+
+	// for lfoot
+	vecOrigin[0] -= 16.0; // - up + down
+	vecOrigin[1] += 3.0; // - backwards + forward
+	vecOrigin[2] += 14.0; // - left + right
+
+	SetEntPropVector(entity, Prop_Send, "m_vecOrigin", vecOrigin);
+
 	return Plugin_Handled;
 }
