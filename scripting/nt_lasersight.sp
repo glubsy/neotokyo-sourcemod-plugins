@@ -2248,32 +2248,38 @@ void OnReloadKeyPressed(int client)
 		#endif
 	}
 
-	// the above check will not trigger right after key press, need delay
+	// the above check will not pass right after key press, we need a short delay
 	if (ghTimerCheckReload[client] == INVALID_HANDLE)
-		ghTimerCheckReload[client] = CreateTimer(0.1, timer_CheckForReload, client, TIMER_FLAG_NO_MAPCHANGE);
+		ghTimerCheckReload[client] = CreateTimer(0.1, timer_CheckForReload,
+		client, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 
 public Action timer_CheckForReload(Handle timer, int client)
 {
-	//check until "m_bInReload" in weapon_srs is released -> TODO in any weapon?
-	if (view_as<bool>(GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Data, "m_bInReload")))
+	ghTimerCheckReload[client] = INVALID_HANDLE; // not repeating anyway
+
+	int activeWeapon = giActiveWeapon[client];
+	if (activeWeapon < 0)
+		return Plugin_Handled;
+
+	// check until "m_bInReload" in weapon_srs is released
+	if (view_as<bool>(GetEntProp(iAffectedWeapons[activeWeapon], Prop_Data, "m_bInReload")))
 	{
 		#if DEBUG
 		int weapon = GetPlayerWeaponSlot(client, SLOT_PRIMARY);
 		PrintToServer("[lasersight] IN_RELOAD weapon %d m_bInReload is %d. Toggling laser off.",
-		weapon, GetEntProp(iAffectedWeapons[giActiveWeapon[client]], Prop_Data, "m_bInReload"));
+		weapon, GetEntProp(iAffectedWeapons[activeWeapon], Prop_Data, "m_bInReload"));
 		#endif
 
 		gbInZoomState[client] = false;
 		gbShouldEmitLaser[client] = false;
 		if (gbActiveWeaponIsSRS[client] || gbActiveWeaponIsZRL[client])
-			ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_ON);
+			ToggleLaserOff(client, activeWeapon, VIEWMDL_ON);
 		else
-			ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_OFF);
+			ToggleLaserOff(client, activeWeapon, VIEWMDL_OFF);
 	}
 
-	ghTimerCheckReload[client] = INVALID_HANDLE;
 	return Plugin_Handled;
 }
 
