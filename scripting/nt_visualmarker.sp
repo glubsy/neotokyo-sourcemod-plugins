@@ -7,7 +7,7 @@
 	#define DEBUG 0
 #endif
 
-#define USE_TE 1
+#define USE_TE 1 // use a TempEnt to draw the beam to marker
 #define REDCOLOR "240 12 0"
 #define YELLOWCOLOR "200 200 20"
 #define PINKCOLOR "240 12 210"
@@ -59,9 +59,11 @@ TODO:
 - have a "ignore z" laser too (need proper sprite vmt)
 - have emitter's name displayed at the ping location -> impossible?
 - share spotted beacon from ghost carrier when clicking while aiming at a beacon/player
-- only show visual pings from people in same squad (only if requested because clutter)
+- only show visual markers from people in same squad (only if requested because clutter)
 - display a small halo ring upon creation -> could animate surrounding sprite with dynamic scaling? (see Prop_Send properties)
-- display visual pings to ennemy team members?
+- display the visual markers to ennemy team?
+
+FIXME: marker not disappearing sometimes (need ent ref?)
 */
 
 
@@ -195,7 +197,11 @@ public void OnClientDisconnect(int client)
 {
 	// if (ghToggleTimer[client] != INVALID_HANDLE)
 	// 	TriggerTimer(ghToggleTimer[client])
-	DestroyBeacon(client);
+	DestroyMarkerEnts(client);
+
+	#if !USE_TE
+	DestroyBeam(client);
+	#endif
 }
 
 
@@ -207,7 +213,11 @@ public void OnMapEnd()
 		SDKUnhook(giBeaconSprite[i][QMARK], SDKHook_SetTransmit, Hook_SetTransmit);
 		SDKUnhook(giBeaconSprite[i][CIRCLE], SDKHook_SetTransmit, Hook_SetTransmit);
 
-		DestroyBeacon(i);
+		DestroyMarkerEnts(i);
+
+		#if !USE_TE
+		DestroyBeam(i);
+		#endif
 	}
 
 }
@@ -216,11 +226,17 @@ public Action OnRoundEnd(Event event, const char[] name, bool dontbroadcast)
 {
 	for (int i = 1; i <= MaxClients; ++i)
 	{
+		ghToggleTimer[i] = INVALID_HANDLE;
+
 		SDKUnhook(giBeaconSprite[i][TARGET], SDKHook_SetTransmit, Hook_SetTransmit);
 		SDKUnhook(giBeaconSprite[i][QMARK], SDKHook_SetTransmit, Hook_SetTransmit);
 		SDKUnhook(giBeaconSprite[i][CIRCLE], SDKHook_SetTransmit, Hook_SetTransmit);
 
-		DestroyBeacon(i);
+		DestroyMarkerEnts(i);
+
+		#if !USE_TE
+		DestroyBeam(i);
+		#endif
 	}
 }
 
@@ -232,25 +248,40 @@ public Action OnRoundStart(Event event, const char[] name, bool dontbroadcast)
 
 	for (int i = 1; i <= MaxClients; ++i)
 	{
-		DestroyBeacon(i);
+		ResetMarkerRefsForClient(i);
 
 		#if !USE_TE
-		if (IsValidEntity(giBeaconBeam[i])){
-			AcceptEntityInput(giBeaconBeam[i], "ClearParent");
-			AcceptEntityInput(giBeaconBeam[i], "kill");
-		}
-		giBeaconBeam[i] = -1;
-		if (IsValidEntity(giTargetEnd[i])){
-			AcceptEntityInput(giTargetEnd[i], "ClearParent");
-			AcceptEntityInput(giTargetEnd[i], "kill");
-		}
-		giTargetEnd[i] = -1;
-		#endif // !USE_TE
+		ResetBeamRef(i);
+		#endif
 	}
 }
 
+stock void DestroyBeam(int client)
+{
+	if (IsValidEntity(giBeaconBeam[client])){
+		AcceptEntityInput(giBeaconBeam[client], "ClearParent");
+		AcceptEntityInput(giBeaconBeam[client], "kill");
+	}
+	if (IsValidEntity(giTargetEnd[client])){
+		AcceptEntityInput(giTargetEnd[client], "ClearParent");
+		AcceptEntityInput(giTargetEnd[client], "kill");
+	}
+}
 
-void DestroyBeacon(int client)
+stock void ResetBeamRef(int client)
+{
+	giBeaconBeam[client] = -1;
+	giTargetEnd[client] = -1;
+}
+
+void ResetMarkerRefsForClient(int client)
+{
+	giBeaconSprite[client][QMARK] = -1;
+	giBeaconSprite[client][CIRCLE] = -1;
+	giBeaconSprite[client][TARGET] = -1;
+}
+
+void DestroyMarkerEnts(int client)
 {
 	if (IsValidEntity(giBeaconSprite[client][QMARK]) && giBeaconSprite[client][QMARK] > MaxClients){
 		#if DEBUG
@@ -259,7 +290,7 @@ void DestroyBeacon(int client)
 		AcceptEntityInput(giBeaconSprite[client][QMARK], "ClearParent");
 		AcceptEntityInput(giBeaconSprite[client][QMARK], "kill");
 	}
-	giBeaconSprite[client][QMARK] = -1;
+
 	if (IsValidEntity(giBeaconSprite[client][CIRCLE]) && giBeaconSprite[client][CIRCLE] > MaxClients){
 		#if DEBUG
 		PrintToServer("[visualmarker] Removing CIRCLE for %N", client);
@@ -267,14 +298,13 @@ void DestroyBeacon(int client)
 		AcceptEntityInput(giBeaconSprite[client][CIRCLE], "ClearParent");
 		AcceptEntityInput(giBeaconSprite[client][CIRCLE], "kill");
 	}
-	giBeaconSprite[client][CIRCLE] = -1;
+
 	if (IsValidEntity(giBeaconSprite[client][TARGET]) && giBeaconSprite[client][TARGET] > MaxClients){
 		#if DEBUG
 		PrintToServer("[visualmarker] Removing TARGET for %N", client);
 		#endif
 		AcceptEntityInput(giBeaconSprite[client][TARGET], "kill");
 	}
-	giBeaconSprite[client][TARGET] = -1;
 
 	#if !USE_TE
 	if (giBeaconBeam[client] > MaxClients);
@@ -304,7 +334,7 @@ int CreateSpriteEnt(SpriteType type)
 		DispatchKeyValue(iEnt, "alpha", "125"); // this doesn't seem to work
 		DispatchKeyValue(iEnt, "m_bWorldSpaceScale", "0");
 
-		SetEntProp(iEnt, Prop_Send, "m_nRenderFX", RENDERFX_CLAMP_MIN_SCALE);
+		// SetEntProp(iEnt, Prop_Send, "m_nRenderFX", RENDERFX_CLAMP_MIN_SCALE);
 
 		SetVariantFloat(0.1);
 		AcceptEntityInput(iEnt, "SetScale");  // this works
@@ -325,7 +355,7 @@ int CreateSpriteEnt(SpriteType type)
 		DispatchKeyValue(iEnt, "rendercolor", YELLOWCOLOR);
 		DispatchKeyValue(iEnt, "alpha", "125"); // this doesn't seem to work
 
-		SetEntProp(iEnt, Prop_Send, "m_nRenderFX", RENDERFX_CLAMP_MIN_SCALE);
+		// SetEntProp(iEnt, Prop_Send, "m_nRenderFX", RENDERFX_CLAMP_MIN_SCALE);
 
 		SetVariantFloat(0.2);
 		AcceptEntityInput(iEnt, "SetScale");  // this works
@@ -489,7 +519,7 @@ public Action timer_SetAttachment(Handle timer, DataPack dp)
 
 	float origin[3];
 	GetEntPropVector(iEnt, Prop_Send, "m_vecOrigin", origin);
-	DispatchSpawn(iEnt);
+	DispatchSpawn(iEnt); // FIXME not needed?
 
 	origin[0] += 12.0; // forward axis
 	origin[1] += 15.9; // up down axis
@@ -523,8 +553,8 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		{
 			if (gbCanUpdatePos[client])
 			{
-				gbCanUpdatePos[client] = false;
 				PlaceFinalMarker(client, angles);
+				gbCanUpdatePos[client] = false;
 			}
 		}
 		gbKeyHeld[client] = false;
@@ -576,10 +606,10 @@ bool CreateMarker(int client)
 		BuildFilter(client, giBeaconSprite[client][QMARK], QMARK, true);
 		BuildFilter(client, giBeaconSprite[client][CIRCLE], CIRCLE, true);
 
-		// FIXME: this is redundant, we should already be hooked?
-		// SDKHook(giBeaconSprite[client][TARGET], SDKHook_SetTransmit, Hook_SetTransmit);
-		// SDKHook(giBeaconSprite[client][QMARK], SDKHook_SetTransmit, Hook_SetTransmit);
-		// SDKHook(giBeaconSprite[client][CIRCLE], SDKHook_SetTransmit, Hook_SetTransmit);
+		// this is not redundant, we unhook after toggling off
+		SDKHook(giBeaconSprite[client][TARGET], SDKHook_SetTransmit, Hook_SetTransmit);
+		SDKHook(giBeaconSprite[client][QMARK], SDKHook_SetTransmit, Hook_SetTransmit);
+		SDKHook(giBeaconSprite[client][CIRCLE], SDKHook_SetTransmit, Hook_SetTransmit);
 
 		// revert back to etheral state
 		DispatchKeyValue(giBeaconSprite[client][QMARK], "rendercolor", YELLOWCOLOR);
@@ -638,6 +668,15 @@ bool CreateMarker(int client)
 
 void PlaceFinalMarker(int client, float[3] vecAngle)
 {
+	if (giBeaconSprite[client][TARGET] < MaxClients ||
+		giBeaconSprite[client][QMARK] < MaxClients ||
+		giBeaconSprite[client][CIRCLE] < MaxClients )
+	{
+		LogError("PlaceFinalMarker had an invalid entity! %d %d %d",
+		giBeaconSprite[client][TARGET], giBeaconSprite[client][QMARK], giBeaconSprite[client][CIRCLE]);
+		return;
+	}
+
 	float vecEnd[3], vecStart[3]/*, vecAngle[3]*/;
 	GetClientEyePosition(client, vecStart);
 	// GetClientEyeAngles(client, vecAngle);
@@ -692,7 +731,8 @@ void PlaceFinalMarker(int client, float[3] vecAngle)
 	// CreateTimer(0.1, timer_IncreaseEndRadius, client, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 
 	if (ghToggleTimer[client] == INVALID_HANDLE)
-		ghToggleTimer[client] = CreateTimer(GetConVarFloat(gCvarTimeToLive), timer_ToggleBeaconOff, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
+		ghToggleTimer[client] = CreateTimer(GetConVarFloat(gCvarTimeToLive),
+		timer_ToggleBeaconOff, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 }
 
 stock Action timer_IncreaseEndRadius(Handle timer, int client)
@@ -729,6 +769,9 @@ public Action timer_ToggleBeaconOff(Handle timer, int userid)
 {
 	int client = GetClientOfUserId(userid);
 
+	if (ghToggleTimer[client] == INVALID_HANDLE)
+		return Plugin_Stop;
+
 	// This may happen if timer keeps running after round ended
 	if (!IsValidEntity(giBeaconSprite[client][QMARK])
 	|| !IsValidEntity(giBeaconSprite[client][CIRCLE]))
@@ -754,6 +797,7 @@ void ToggleBeacon(int client)
 	#if DEBUG
 	PrintToServer("[visualmarker] TurnOff SPRITEs");
 	#endif
+
 	AcceptEntityInput(giBeaconSprite[client][QMARK], "HideSprite");
 	AcceptEntityInput(giBeaconSprite[client][CIRCLE], "HideSprite");
 	// AcceptEntityInput(giBeaconSprite[client][LABEL], "Disable");
