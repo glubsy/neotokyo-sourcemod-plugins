@@ -1880,11 +1880,13 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 				{
 					// check if we're automatically reloading due to empty clip
 					DataPack dp = CreateDataPack();
-					ghTimerCheckSequence[client] = CreateTimer(2.5,
-					timer_CheckSequence, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
 					WritePackCell(dp, GetClientUserId(client));
 					WritePackCell(dp, EntIndexToEntRef(iAffectedWeapons[giActiveWeapon[client]]));
 					WritePackCell(dp, GetIgnoredSequencesForWeapon(giActiveWeaponType[client]));
+
+					ghTimerCheckSequence[client] = CreateTimer(2.5,
+					timer_CheckSequence, dp, TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE);
+
 				}
 			}
 		}
@@ -2322,35 +2324,43 @@ public Action timer_CheckSequence(Handle timer, DataPack datapack)
 {
 	ResetPack(datapack);
 	int client = GetClientOfUserId(ReadPackCell(datapack));
-	int weapon = EntRefToEntIndex(ReadPackCell(datapack)); // FIXME weapon might have been dropped by now!
+
+	if (!IsValidClient(client) || ghTimerCheckSequence[client] == INVALID_HANDLE)
+	{
+		ghTimerCheckSequence[client] = INVALID_HANDLE;
+		return Plugin_Stop;
+	}
+
+	// WARNING weapon might have been dropped by now! See below
+	int affectedWeapon = EntRefToEntIndex(ReadPackCell(datapack));
 	// int weapon = GetPlayerWeaponSlot(client, SLOT_PRIMARY);
 	int ignored_sequence = ReadPackCell(datapack);
 
-	if (!IsValidClient(client)){
+	if (!IsValidEdict(affectedWeapon)){
+		LogError("timer_CheckSequence !IsValidEdict(%d) Aborting checks.", affectedWeapon);
 		ghTimerCheckSequence[client] = INVALID_HANDLE;
 		return Plugin_Stop;
 	}
 
-	if (!IsValidEdict(weapon)){
-		#if DEBUG
-		PrintToServer("[lasersight] !IsValidEdict: %i", weapon);
-		#endif
+	// check if weapon has been dropped by now
+	// NOTE m_iState=2 means in player's hands, 1 not active weapon, 0 tossed in the world
+	if (GetEntProp(affectedWeapon, Prop_Send, "m_iState") != 2)
+	{
 		ghTimerCheckSequence[client] = INVALID_HANDLE;
 		return Plugin_Stop;
 	}
 
-	// gbInZoomState[client] = GetInReload(weapon);
 	#if DEBUG
+	// int activewpn = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
 	PrintToServer("[lasersight] m_nSequence: %d, ammo: %d",
-	GetEntProp(weapon, Prop_Data, "m_nSequence", 4),
-	GetWeaponAmmo(client, GetAmmoType(GetActiveWeapon(client))));
+	GetEntProp(affectedWeapon, Prop_Data, "m_nSequence", 4),
+	GetWeaponAmmo(client, GetAmmoType(affectedWeapon)));
 	#endif
 
-
-	if ((GetEntProp(weapon, Prop_Send, "m_iClip1") <= 0) // clip empty
-	&& GetWeaponAmmo(client, GetAmmoType(GetActiveWeapon(client))))  // but we still have ammo left in backpack
+	if ((GetEntProp(affectedWeapon, Prop_Send, "m_iClip1") <= 0) // clip empty
+	&& GetWeaponAmmo(client, GetAmmoType(affectedWeapon)))  // but we still have ammo left in backpack / strapped to weapon
 	{
-		int iCurrentSequence = GetEntProp(weapon, Prop_Data, "m_nSequence", 4);
+		int iCurrentSequence = GetEntProp(affectedWeapon, Prop_Data, "m_nSequence", 4);
 		// For SRS: 3 shooting, 4 fire pressed continuously, 6 reloading, 11 bolt
 		// m_nSequence == 6 is equivalent to m_bInReload == 1, m_nSequence == 0 means stand-by
 		if (ignored_sequence > 0)
@@ -2367,12 +2377,12 @@ public Action timer_CheckSequence(Handle timer, DataPack datapack)
 	if (gbInZoomState[client])
 	{
 		if (!gbActiveWeaponIsZRL[client])
-			ToggleLaserOn(client, GetTrackedWeaponIndex(weapon), VIEWMDL_ON);
+			ToggleLaserOn(client, GetTrackedWeaponIndex(affectedWeapon), VIEWMDL_ON);
 	}
 	else
 	{
 		if (!gbActiveWeaponIsZRL[client])
-			ToggleLaserOff(client, GetTrackedWeaponIndex(weapon), VIEWMDL_OFF);
+			ToggleLaserOff(client, GetTrackedWeaponIndex(affectedWeapon), VIEWMDL_OFF);
 	}
 
 	ghTimerCheckSequence[client] = INVALID_HANDLE;
