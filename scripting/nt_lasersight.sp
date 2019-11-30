@@ -820,8 +820,8 @@ void ToggleLaserDot(int weapon_index, bool activate)
 		return;
 
 	#if DEBUG
-	PrintToServer("[lasersight] %s laser dot (dot %d target %d) for %N.",
-	activate ? "Showing" : "Hiding", giLaserDot[weapon_index], giLaserTarget[weapon_index], client);
+	PrintToServer("[lasersight] %s laser dot (dot %d target %d)",
+	activate ? "Showing" : "Hiding", giLaserDot[weapon_index], giLaserTarget[weapon_index]);
 	#endif
 
 	if (activate)
@@ -1104,8 +1104,8 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 			else // world model
 			{
 				WritePackString(dp, "muzzle");
-				WritePackFloat(dp, -1.0);
-				WritePackFloat(dp, 0.9);
+				WritePackFloat(dp, -7.0);
+				WritePackFloat(dp, 2.2);
 				WritePackFloat(dp, 0.0);
 			}
 		}
@@ -2043,7 +2043,7 @@ void OnZoomKeyPressed(int client)
 
 	if (gbActiveWeaponIsSRS[client])
 	{
-		HandleSRSQuirks(client);
+		HandleSRSQuirks(client, giActiveWeapon[client]);
 	}
 
 	#if DEBUG
@@ -2076,32 +2076,36 @@ void OnZoomKeyPressed(int client)
 			ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_OFF);
 	}
 
-	// ToggleLaser(client, giActiveWeapon[client]);
-
 	// keep checking in case we missed a beat due to their shitty input handling
 	if (ghTimerCheckAimed[client] == INVALID_HANDLE && gbShouldEmitLaser[client])
 		CreateTimer(0.5, timer_CheckForAimed, client, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 }
 
 
-void HandleSRSQuirks(int client)
+void HandleSRSQuirks(int client, int activeweapon)
 {
 	if (gbHeldKeys[client][KEY_ATTACK]){
 		if (gbInZoomState[client]){
 			// gbShouldEmitLaser[client] = true;
-			ToggleLaserOn(client, giActiveWeapon[client], VIEWMDL_OFF);
+			ToggleLaserOn(client, activeweapon, VIEWMDL_OFF);
 			return;
-		}
-		else{
+		} else {
 			// gbShouldEmitLaser[client] = false;
-			ToggleLaserOff(client, giActiveWeapon[client], VIEWMDL_ON);
+			ToggleLaserOff(client, activeweapon, VIEWMDL_ON);
 			return;
 		}
 	}
 
+	if (iAffectedWeapons[activeweapon] <= 0)
+	{
+		LogError("[lasersight] Error in HandleSRSQuirks(), active weapon = %d,\
+ affected weapon = %d", activeweapon, iAffectedWeapons[activeweapon]);
+		return;
+	}
+
 	// 5 is weapon switching animation, zoom is instantaneous! 4 is weapon empty
 	// 11 is rebolting, 3 is fired shot, 6 reloading clip
-	int sequence = GetEntProp(iAffectedWeapons[giActiveWeapon[client]],
+	int sequence = GetEntProp(iAffectedWeapons[activeweapon],
 	Prop_Data, "m_nSequence", 4)
 
 	if (sequence && (sequence == 6 || sequence == 11))
@@ -2110,34 +2114,44 @@ void HandleSRSQuirks(int client)
 		// zoom state detection when spamming Zoom key
 
 		#if DEBUG
-		PrintToChatAll("lasersight] SRS is sequence %d. Aborting checks!", sequence);
+		PrintToChatAll("[lasersight] SRS is sequence %d. Aborting checks!", sequence);
 		#endif
+
+		DataPack dp = CreateDataPack();
+		WritePackCell(dp, GetClientUserId(client));
+		WritePackCell(dp, activeweapon);
+		WritePackCell(dp, iAffectedWeapons[activeweapon]);
 
 		// Keep checking until the sequence is effectively over and bAimed it true
 		if (ghTimerCheckSRSSequence[client] == INVALID_HANDLE)
-			ghTimerCheckSRSSequence[client] = CreateTimer(0.1, timer_CheckSRSSequence, client, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE)
+			ghTimerCheckSRSSequence[client] = CreateTimer(0.1, timer_CheckSRSSequence, dp,
+			TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE|TIMER_DATA_HNDL_CLOSE)
 
 		return; // avoid toggling during bolt reload sequence (between shots)
 	}
 }
 
 
-
-public Action timer_CheckSRSSequence(Handle timer, int client)
+public Action timer_CheckSRSSequence(Handle timer, Handle dp)
 {
-	if (IsWeaponAimed(iAffectedWeapons[giActiveWeapon[client]])
-	&& !IsWeaponReloading(iAffectedWeapons[giActiveWeapon[client]]))
+	ResetPack(dp);
+	int client = GetClientOfUserId(ReadPackCell(dp));
+	int activeweapon = ReadPackCell(dp);
+	int affectedweapon = ReadPackCell(dp);
+
+	if (IsWeaponAimed(affectedweapon) && !IsWeaponReloading(affectedweapon))
 	{
 		#if DEBUG
 		PrintToChatAll("Aimed weapon.");
 		#endif
 
 		gbInZoomState[client] = true;
-		ToggleLaserOn(client, giActiveWeapon[client], 0);
+		ToggleLaserOn(client, activeweapon, 0);
 		ghTimerCheckSRSSequence[client] = INVALID_HANDLE;
 		return Plugin_Stop;
 	}
-	int sequence = GetEntProp(giActiveWeapon[client], Prop_Data, "m_nSequence", 4);
+
+	int sequence = GetEntProp(affectedweapon, Prop_Data, "m_nSequence", 4);
 	if (sequence && (sequence == 6 || sequence == 11))
 	{
 		#if DEBUG
@@ -2405,9 +2419,9 @@ void ToggleLaserOff(int client, int weapon_index, int viewmodel)
 {
 	ToggleLaserDot(weapon_index, false);
 	ToggleLaserBeam(weapon_index, false);
-	#if !DEBUG
+	// #if !DEBUG
 	ToggleViewModelLaserBeam(client, viewmodel);
-	#endif
+	// #endif
 	g_bNeedUpdateLoop = NeedUpdateLoop();
 }
 
