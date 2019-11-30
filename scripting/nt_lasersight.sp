@@ -299,26 +299,28 @@ stock void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] n
 
 }
 
-
-void ResetAllEntitiesForClient(int client)
+void KillAllEntitiesForClient(int client)
 {
-	giActiveWeapon[client] = -1;
-
 	if (giViewModelLaserBeam[client] > 0 && IsValidEntity(giViewModelLaserBeam[client]))
 	{
 		AcceptEntityInput(giViewModelLaserBeam[client], "kill");
 	}
-	giViewModelLaserBeam[client] = 0;
 	if (giViewModelLaserStart[client] > 0 && IsValidEntity(giViewModelLaserStart[client]))
 	{
 		AcceptEntityInput(giViewModelLaserStart[client], "kill");
 	}
-	giViewModelLaserStart[client] = 0;
 	if (giViewModelLaserEnd[client] > 0 && IsValidEntity(giViewModelLaserEnd[client]))
 	{
 		AcceptEntityInput(giViewModelLaserEnd[client], "kill");
 	}
-	giViewModelLaserEnd[client] = 0;
+}
+
+void ResetAllEntitiesForClient(int client)
+{
+	giActiveWeapon[client] = -1;
+	giViewModelLaserBeam[client] = -1;
+	giViewModelLaserStart[client] = -1;
+	giViewModelLaserEnd[client] = -1;
 }
 
 void ResetAllEntitiesForWeapon(int weapon)
@@ -331,15 +333,11 @@ void ResetAllEntitiesForWeapon(int weapon)
 
 public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
-	#if DEBUG
-	PrintToServer("[lasersight] OnRoundStart()");
-	#endif
-
 	for (int client = MaxClients; client; --client)
 	{
 		ResetAllEntitiesForClient(client);
 	}
-	for (int weapon = 0; weapon < sizeof(iAffectedWeapons); ++weapon)
+	for (int weapon = 0; weapon < sizeof(iAffectedWeapons); weapon++)
 	{
 		ResetAllEntitiesForWeapon(weapon);
 	}
@@ -361,13 +359,10 @@ public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 
 public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 {
-	#if DEBUG
-	PrintToServer("[lasersight] OnRoundEnd()");
-	#endif
-	// for (int client = MaxClients; client; --client)
-	// {
-	// 	ResetAllEntitiesForclient(client);
-	// }
+	for (int client = MaxClients; client; --client)
+	{
+		KillAllEntitiesForClient(client);
+	}
 	// for (int weapon = 0; weapon < sizeof(iAffectedWeapons); ++weapon)
 	// {
 	// 	ResetAllEntitiesForWeapon(weapon);
@@ -1014,7 +1009,7 @@ void UpdatePositionOnViewModel(int client, WeaponType weapontype)
 void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewmodel, bool bStartPoint=true)
 {
 	DataPack dp = CreateDataPack();
-	WritePackCell(dp, target_ent);
+	WritePackCell(dp, EntIndexToEntRef(target_ent));
 
 	switch (weapontype)
 	{
@@ -1358,7 +1353,14 @@ void UpdateAttachementPosition(WeaponType weapontype, int target_ent, bool viewm
 public Action timer_SetAttachmentPosition(Handle timer, DataPack dp)
 {
 	ResetPack(dp);
-	int entId = ReadPackCell(dp);
+	int entId = EntRefToEntIndex(ReadPackCell(dp));
+
+	if (!IsValidEntity(entId))
+	{
+		LogError("[lasersight] timer_SetAttachmentPosition info_target entId %d was invalid!", entId);
+		return Plugin_Handled;
+	}
+
 	char attachpoint[20];
 	ReadPackString(dp, attachpoint, sizeof(attachpoint));
 	float vecOrigin[3];
@@ -1475,17 +1477,20 @@ void ToggleViewModelLaserBeam(int client, int activate=0)
 }
 
 
-void ToggleLaserBeam(int weapon, bool activate)
+void ToggleLaserBeam(int laser, bool activate)
 {
+	if (laser <= MaxClients || !IsValidEntity(laser))
+		return;
+
 	if (activate)
 	{
-		AcceptEntityInput(giLaserBeam[weapon], "TurnOn");
-		SDKHook(giLaserBeam[weapon], SDKHook_SetTransmit, Hook_SetTransmitLaserBeam);
+		AcceptEntityInput(laser, "TurnOn");
+		SDKHook(laser, SDKHook_SetTransmit, Hook_SetTransmitLaserBeam);
 	}
 	else
 	{
-		AcceptEntityInput(giLaserBeam[weapon], "TurnOff");
-		SDKUnhook(giLaserBeam[weapon], SDKHook_SetTransmit, Hook_SetTransmitLaserBeam);
+		AcceptEntityInput(laser, "TurnOff");
+		SDKUnhook(laser, SDKHook_SetTransmit, Hook_SetTransmitLaserBeam);
 	}
 }
 
@@ -2426,7 +2431,7 @@ stock void SetSwitchModeSequence(int viewmodel, WeaponType weapontype)
 void ToggleLaserOn(int client, int weapon_index, int viewmodel)
 {
 	ToggleLaserDot(weapon_index, true);
-	ToggleLaserBeam(weapon_index, true);
+	ToggleLaserBeam(giLaserBeam[weapon_index], true);
 	ToggleViewModelLaserBeam(client, viewmodel);
 	g_bNeedUpdateLoop = NeedUpdateLoop();
 }
@@ -2434,7 +2439,7 @@ void ToggleLaserOn(int client, int weapon_index, int viewmodel)
 void ToggleLaserOff(int client, int weapon_index, int viewmodel)
 {
 	ToggleLaserDot(weapon_index, false);
-	ToggleLaserBeam(weapon_index, false);
+	ToggleLaserBeam(giLaserBeam[weapon_index], false);
 	// #if !DEBUG
 	ToggleViewModelLaserBeam(client, viewmodel);
 	// #endif
