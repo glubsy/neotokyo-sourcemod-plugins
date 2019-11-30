@@ -21,14 +21,15 @@ bool g_bGhostIsHeld;
 bool bTeleported;
 bool g_bGhostIsCaptured;
 bool gbPreventJump[NEO_MAX_CLIENTS+1];
-Handle ghTimerJump = INVALID_HANDLE;
+Handle ghTimerJump, ghVelTimer = INVALID_HANDLE;
+float gfDefaultFriction;
 
 public Plugin:myinfo =
 {
 	name = "NEOTOKYO anti OOB ghost and ghost-hopping",
 	author = "glub",
 	description = "Prevent out of bounds ghost positions and bunny humping while carrying the ghost.",
-	version = "0.3",
+	version = "0.4",
 	url = "https://github.com/glubsy"
 };
 
@@ -100,13 +101,11 @@ public void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] 
 
 public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
-	#if !DEBUG
-	if (!gbCheckPosEnabled)
-		return;
-	#endif
-
 	g_bGhostIsCaptured = false;
-	ResetCoordArrays();
+
+	if (gbCheckPosEnabled)
+		ResetCoordArrays();
+
 	UpdateGhostRef();
 	// GhostShouldTakeDamage();
 	// HookGhost();
@@ -141,16 +140,13 @@ int UpdateGhostRef()
 
 public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 {
-	#if !DEBUG
+	// #if !DEBUG
 	if (!gbCheckPosEnabled)
 		return;
-	#endif
+	// #endif
 
-	if (ghCheckPosTimer != INVALID_HANDLE)
-	{
-		KillTimer(ghCheckPosTimer);
-		ghCheckPosTimer = INVALID_HANDLE;
-	}
+	ghCheckPosTimer = INVALID_HANDLE;
+
 	// ResetCoordArrays();
 }
 
@@ -165,7 +161,9 @@ void GhostShouldTakeDamage(int entity)
 
 void HookGhost(int entity)
 {
-	SDKHook(entity, SDKHook_TraceAttackPost, OnTraceAttackPost);
+	if (gbCheckPosEnabled)
+		SDKHook(entity, SDKHook_TraceAttackPost, OnTraceAttackPost);
+
 	HookSingleEntityOutput(entity, "OnPlayerPickup", OnPlayerPickup, false);
 }
 
@@ -210,15 +208,15 @@ public void OnGhostSpawn(int entref)
 	GhostShouldTakeDamage(entity);
 	HookGhost(entity);
 
+	g_bGhostIsCaptured = false;
+	g_bGhostIsHeld = false;
+
 	#if !DEBUG
 	if (!gbCheckPosEnabled)
 		return;
 	#endif
 
 	CreateTimer(10.0, timer_StoreInitialPos, entref, TIMER_FLAG_NO_MAPCHANGE);
-
-	g_bGhostIsCaptured = false;
-	g_bGhostIsHeld = false;
 }
 
 
@@ -271,10 +269,8 @@ damage %f, damagetype %d, ammotype %d, hitbox %d, hitgroup %d",
 	#endif
 
 	if (ghCheckPosTimer == INVALID_HANDLE)
-	{
 		ghCheckPosTimer = CreateTimer(0.5, timer_CheckPos,
 		victim, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	}
 }
 
 
@@ -286,13 +282,15 @@ public void OnPlayerPickup(const char[] output, int caller, int activator, float
 	#endif
 
 	g_iGhostCarrier = GetEntPropEnt(caller, Prop_Send, "m_hOwnerEntity");
-
-	#if !DEBUG
-	if (!gbCheckPosEnabled)
-		return;
-	#endif
+	gfDefaultFriction = GetEntPropFloat(g_iGhostCarrier, Prop_Send, "m_flFriction");
 
 	g_bGhostIsHeld = true;
+
+	// #if !DEBUG
+	if (!gbCheckPosEnabled)
+		return;
+	// #endif
+
 	if (ghCheckPosTimer == INVALID_HANDLE)
 		ghCheckPosTimer = CreateTimer(0.5, timer_CheckPos, caller, TIMER_REPEAT);
 }
@@ -307,12 +305,15 @@ public void OnGhostDrop(int client)
 	g_bGhostIsHeld = false;
 	g_iGhostCarrier = -1;
 
-	// if (ghCheckPosTimer != INVALID_HANDLE)
-	// {
-	// 	gbStopTimer = true;
-	// }
+	if (ghVelTimer != INVALID_HANDLE)
+		ghVelTimer = INVALID_HANDLE;
+
+	if (!gbCheckPosEnabled)
+		return;
+
 	if (ghCheckPosTimer == INVALID_HANDLE)
-		ghCheckPosTimer = CreateTimer(0.5, timer_CheckPos, EntRefToEntIndex(g_iGhost), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+		ghCheckPosTimer = CreateTimer(0.5, timer_CheckPos,
+		EntRefToEntIndex(g_iGhost), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 }
 
 
@@ -327,7 +328,8 @@ public void OnGhostCapture()
 public Action timer_StartCheckingGhostPos(Handle timer)
 {
 	if (ghCheckPosTimer == INVALID_HANDLE)
-		ghCheckPosTimer = CreateTimer(5.0, timer_CheckPos, EntRefToEntIndex(g_iGhost), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+		ghCheckPosTimer = CreateTimer(5.0, timer_CheckPos,
+		EntRefToEntIndex(g_iGhost), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 	return Plugin_Handled;
 }
 
@@ -342,6 +344,9 @@ public Action timer_CheckPos(Handle timer, int ghost)
 		ghCheckPosTimer = INVALID_HANDLE;
 		return Plugin_Stop;
 	}
+
+	if (ghCheckPosTimer == INVALID_HANDLE)
+		return Plugin_Stop;
 
 	float currentPos[3];
 	GetEntPropVector(ghost, Prop_Data, "m_vecAbsOrigin", currentPos);
@@ -414,14 +419,14 @@ m_iEFlags %d flcompare %d m_iState %d",
 			#endif
 
 			// TODO: only pass if low velocity?
-			if (bOnGround && !VectorsEqual(gfLastValidCoords[gCursor], currentPos, 80.0, true) /*&& StandsFirm(g_iGhostCarrier)*/) 
+			if (bOnGround && !VectorsEqual(gfLastValidCoords[gCursor], currentPos, 80.0, true) /*&& StandsFirm(g_iGhostCarrier)*/)
 				StoreCoords(currentPos, 20.0); // offset to avoid teleporting in solid
 
 			return Plugin_Continue;
 		}
 
 		// wish we could detect props being at rest on the ground :(
-		if (IsImmobile(currentPos)) 
+		if (IsImmobile(currentPos))
 		{
 			if (!bTeleported)
 			{
@@ -741,22 +746,144 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	{
 		if (buttons & IN_JUMP && gbPreventJump[client])
 		{
-			buttons &= ~IN_JUMP; //FIXME is there a better way to achieve this?
+			// buttons &= ~(IN_JUMP);
+			SetFriction(client, 4.0); // doesn't seem to work?
 		}
 		else if (buttons & IN_JUMP)
 		{
 			gbPreventJump[client] = true;
 			if (ghTimerJump == INVALID_HANDLE)
-				ghTimerJump = CreateTimer(1.2, timer_ClearPreventJump, client, TIMER_FLAG_NO_MAPCHANGE);
+				ghTimerJump = CreateTimer(1.2, timer_ClearPreventJump,
+				GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
+
+			if (ghVelTimer == INVALID_HANDLE)
+				ghVelTimer = CreateTimer(1.0, timer_VelClamp,
+				GetClientUserId(client),
+				TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 		}
 	}
 	return Plugin_Continue;
 }
 
 
-public Action timer_ClearPreventJump(Handle timer, int client)
+public Action timer_VelClamp(Handle timer, int userid)
 {
+	int client = GetClientOfUserId(userid);
+
+	if (ghVelTimer == INVALID_HANDLE || !IsValidClient(client))
+	{
+		ghVelTimer = INVALID_HANDLE;
+		return Plugin_Stop;
+	}
+
+	static int detections;
+
+	bool bOnGround = GetEntityFlags(client) & FL_ONGROUND ? true : false;
+
+	if (bOnGround)
+	{
+		detections = 0;
+		return Plugin_Continue;
+	}
+
+	float vecVel[3];
+	GetEntPropVector(client, Prop_Data, "m_vecVelocity", vecVel);
+	bool changed;
+
+	#if DEBUG
+	PrintToServer("[ghostpos] m_vecVelocity %f %f %f",
+	vecVel[0], vecVel[1], vecVel[2]);
+	#endif
+
+	if (FloatCompare(FloatAbs(vecVel[0]), 160.0) > 0)
+	{
+		++detections;
+
+		if (detections < 3)
+			return Plugin_Continue;
+
+		#if DEBUG
+		PrintToChatAll("[ghostpos] m_vecVelocity[0] %f -130.0;", vecVel[0]);
+		#endif
+
+		if (FloatCompare(vecVel[0], 0.0) > 0)
+			vecVel[0] -= 130.0;
+		else
+			vecVel[0] += 130.0;
+
+		#if DEBUG
+		//vecVel[0] = 0.0
+		#endif
+
+		changed = true;
+	}
+	if (FloatCompare(FloatAbs(vecVel[1]), 160.0) > 0)
+	{
+		++detections;
+
+		if (detections < 3)
+			return Plugin_Continue;
+
+		#if DEBUG
+		PrintToChatAll("[ghostpos] m_vecVelocity[1] %f -130.0;", vecVel[0]);
+		#endif
+
+		if (FloatCompare(vecVel[1], 0.0) > 0)
+			vecVel[1] -= 130.0;
+		else
+			vecVel[1] += 130.0;
+
+		#if DEBUG
+		//vecVel[1] = 0.0
+		#endif
+
+		changed = true;
+	}
+
+	if (changed)
+	{
+		#if DEBUG
+		PrintToChatAll("[ghostpos] applying velocity %f %f %f",
+		vecVel[0], vecVel[1],vecVel[2]);
+		#endif
+
+		// SetEntPropVector(client, Prop_Data, "m_vecVelocity", vecVel);
+		TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vecVel);
+		PrintCenterText(client, "=== Preventing ghost-hop ===");
+	}
+	return Plugin_Continue;
+}
+
+
+public Action timer_ClearPreventJump(Handle timer, int userid)
+{
+	int client = GetClientOfUserId(userid);
+	if (!IsValidClient(client) || ghTimerJump == INVALID_HANDLE)
+	{
+		ghTimerJump = INVALID_HANDLE;
+		return Plugin_Stop;
+	}
+
 	gbPreventJump[client] = false;
+
+	#if DEBUG
+	PrintToServer("[ghostpos] Setting back default friction to %f", gfDefaultFriction);
+	#endif
+	SetFriction(client, gfDefaultFriction);
+
 	ghTimerJump = INVALID_HANDLE;
 	return Plugin_Stop;
+}
+
+
+void SetFriction(int client, float friction)
+{
+	#if DEBUG
+	float m_flFriction = GetEntPropFloat(client, Prop_Send, "m_flFriction");
+	PrintToServer("[ghostpos] Setting friction to %f (before was %f)",
+	friction, m_flFriction);
+	#endif
+
+	SetEntPropFloat(client, Prop_Send, "m_flFriction", friction);
+	DispatchKeyValueFloat(client, "friction", friction);
 }
