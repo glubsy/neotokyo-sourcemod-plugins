@@ -35,6 +35,9 @@ public Plugin:myinfo =
 // However, it gets disabled permanently once they take ennemy damage.
 // If anticamp is active, cloak gets disabled while the player stands still.
 
+// FIXME? holding aim and hugging wall turns cloak off?
+// -> improve immobility detection with coords
+// -> allow turning it back on manually?
 
 public void OnPluginStart()
 {
@@ -56,8 +59,10 @@ public void OnMapStart()
 {
 	PrecacheSound(DENIEDSND, true);
 
-	// fixes SV_StartSound: ^player/therm_off.wav not precached (0) error message
+	// seems to fix SV_StartSound: ^player/therm_off.wav not precached (0) error message
 	PrecacheSound("player/therm_off.wav", true);
+	PrecacheSound("^player/therm_off.wav", true);
+	// PrecacheSound("sound/player/therm_off.wav", true);
 
 	gbAntiCamp = GetConVarBool(ghAntiCamping);
 }
@@ -255,7 +260,7 @@ void DenyCloakCommand(int client)
 
 	// emitting for all others from the world
 	EmitSound(giReceivingClients, total, DENIEDSND,
-	SOUND_FROM_PLAYER, SNDCHAN_AUTO, 50,
+	SOUND_FROM_WORLD, SNDCHAN_AUTO, 40,
 	SND_NOFLAGS, SNDVOL_NORMAL, SNDPITCH_NORMAL);
 }
 

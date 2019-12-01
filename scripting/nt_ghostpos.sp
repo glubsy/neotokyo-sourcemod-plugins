@@ -85,12 +85,15 @@ public void OnConfigsExecuted(){ // perhaps this should simply be OnMapStart
 
 
 #if DEBUG > 2
-// NOTE: beware, this is always called twice on convar changed!
+// NOTE: beware, check old value
 public void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] newValue)
 {
 	#if DEBUG
-	PrintToChatAll("[ghostpos] OnNeoRestartThis()");
+	PrintToChatAll("[ghostpos] OnNeoRestartThis() %s->%s", oldValue, newValue);
 	#endif
+
+	if (!strcmp(oldValue, 1))
+		return;
 
 	if (!gbCheckPosEnabled)
 		return;
@@ -806,14 +809,12 @@ public Action timer_VelClamp(Handle timer, int userid)
 		PrintToChatAll("[ghostpos] m_vecVelocity[0] %f -130.0;", vecVel[0]);
 		#endif
 
-		if (FloatCompare(vecVel[0], 0.0) > 0)
-			vecVel[0] -= 130.0;
-		else
-			vecVel[0] += 130.0;
+		// if (FloatCompare(vecVel[0], 0.0) > 0)
+		// 	vecVel[0] -= 130.0;
+		// else
+		// 	vecVel[0] += 130.0;
 
-		#if DEBUG
-		//vecVel[0] = 0.0
-		#endif
+		vecVel[0] = 0.0
 
 		changed = true;
 	}
@@ -828,23 +829,23 @@ public Action timer_VelClamp(Handle timer, int userid)
 		PrintToChatAll("[ghostpos] m_vecVelocity[1] %f -130.0;", vecVel[0]);
 		#endif
 
-		if (FloatCompare(vecVel[1], 0.0) > 0)
-			vecVel[1] -= 130.0;
-		else
-			vecVel[1] += 130.0;
+		// if (FloatCompare(vecVel[1], 0.0) > 0)
+		// 	vecVel[1] -= 130.0;
+		// else
+		// 	vecVel[1] += 130.0;
 
-		#if DEBUG
-		//vecVel[1] = 0.0
-		#endif
+		vecVel[1] = 0.0
 
 		changed = true;
 	}
 
 	if (changed)
 	{
+		vecVel[2] = 0.0;
+
 		#if DEBUG
 		PrintToChatAll("[ghostpos] applying velocity %f %f %f",
-		vecVel[0], vecVel[1],vecVel[2]);
+		vecVel[0], vecVel[1], vecVel[2]);
 		#endif
 
 		// SetEntPropVector(client, Prop_Data, "m_vecVelocity", vecVel);

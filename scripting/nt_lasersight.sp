@@ -282,7 +282,7 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 	}
 }
 
-// NOTE: beware, this is called twice on convar changed!
+// NOTE: beware, this is called twice on convar changed if oldvalue not checked
 stock void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] newValue)
 {
 	#if DEBUG
@@ -1376,7 +1376,8 @@ public Action timer_SetAttachmentPosition(Handle timer, DataPack dp)
 	// PrintToServer("vecAngle {%f %f %f}", vecAngle[0], vecAngle[1], vecAngle[2]);
 
 	SetVariantString(attachpoint);
-	AcceptEntityInput(entId, "SetParentAttachment");
+	if (!AcceptEntityInput(entId, "SetParentAttachment"))
+		LogError("Failed to SetParentAttachment %s for info_target %d", attachpoint, entId);
 
 	DispatchSpawn(entId);
 

@@ -129,6 +129,8 @@ TODO: parse available models from a text file
 TODO: make sure props (d too) are not solid to avoid obstructing bullets -> use a refactored create_entity functions
 also make sure they don't block line of fire while being grabbed
 FIXME: improve static props menu, not enough items!
+
+FIXME: if supports can cloak, we need to cloak attached props too now!
 */
 
 public OnPluginStart()
@@ -1234,10 +1236,12 @@ public Action OnSpecCmd(int client, const char[] command, int args)
 void DestroyAttachedPropForClient(int client)
 {
 	#if DEBUG
-	PrintToServer("[nt_props] DEBUG: DestroyAttachedPropForClient() Checking if need to remove strapped entity %d on client %N.", g_AttachmentEnt[client], client);
+	PrintToServer("[nt_props] DEBUG: DestroyAttachedPropForClient() \
+Checking if need to remove strapped entity %d on client %N.", 
+	g_AttachmentEnt[client], client);
 	#endif
 
-	if (MaxClients > g_AttachmentEnt[client] > 0 && IsValidEntity(g_AttachmentEnt[client]))
+	if (MaxClients < g_AttachmentEnt[client] > 0 && IsValidEntity(g_AttachmentEnt[client]))
 	{
 		#if DEBUG
 		PrintToServer("[nt_props] DEBUG: Yup, killing strapped entity %d of client %d.", g_AttachmentEnt[client], client);
