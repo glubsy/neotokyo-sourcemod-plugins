@@ -47,6 +47,8 @@
 
 **nt_detpack_tweaks**: destructible detpacks, invisible at a distance, remote can be dropped on death, detpack can be retrieved with +use and dropped on death.
 
+**nt_visionglow**: places a glowing halo on player's head when using a vision mode.
+
 Donger model here: https://www.mediafire.com/?6y352ceczvs3oc1
 
 ~~**Funvotes-NT**: Modified Sourcemod default "funvote" plugin with a specific neotokyo public vote to restart the game. Obsolete (merged in nt_votes.sp for nt_teamdeathmatch)~~
