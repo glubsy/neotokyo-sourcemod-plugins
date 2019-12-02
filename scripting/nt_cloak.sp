@@ -10,15 +10,17 @@
 bool gbIsSupport[NEO_MAX_CLIENTS+1];
 bool gbFreezeTime;
 bool gbHeldKey[NEO_MAX_CLIENTS+1];
-bool gbCanCloak[NEO_MAX_CLIENTS+1];
+bool UsedCloakCharge[NEO_MAX_CLIENTS+1];
 float flRoundStartTime;
 int giReceivingClients[NEO_MAX_CLIENTS];
 
-Handle ghAntiCamping = INVALID_HANDLE;
-bool gbAntiCamp;
-Handle ghTimerCheckVelocity[NEO_MAX_CLIENTS+1] = {INVALID_HANDLE, ...};
+Handle ghAntiCamping, ghReuseAllowed = INVALID_HANDLE;
+bool gbAntiCamp, ToggleAllowed;
+Handle ghMobilityTimer[NEO_MAX_CLIENTS+1] = {INVALID_HANDLE, ...};
 int hMyWeapons;
 bool gbIsCloaked[NEO_MAX_CLIENTS +1];
+bool gbBrokenCloak[NEO_MAX_CLIENTS+1]
+float gfCoordsBuffer[NEO_MAX_CLIENTS+1][3];
 
 #define DENIEDSND "buttons/combine_button2.wav"
 
@@ -27,22 +29,21 @@ public Plugin:myinfo =
 	name = "NEOTOKYO cloak tweaks",
 	author = "glub",
 	description = "Adds a one-time cloaking ability to supports.",
-	version = "0.4",
+	version = "0.5",
 	url = "https://github.com/glubsy"
 };
 
-// Supports get one cloak use, which lasts forever.
-// However, it gets disabled permanently once they take ennemy damage.
+// Supports get one cloak charge, which lasts forever until it get broken by ennemy damage.
+// If toggle is allowed, cloak doesn't turn itself back on by itself (if moving after standing still)
+// and can be toggled off by the player at will.
 // If anticamp is active, cloak gets disabled while the player stands still.
-
-// FIXME? holding aim and hugging wall turns cloak off?
-// -> improve immobility detection with coords
-// -> allow turning it back on manually?
 
 public void OnPluginStart()
 {
-	ghAntiCamping = CreateConVar("nt_cloak_anticamp", "1", "Place a light halo around \
-immobile cloaked supports.", _, true, 0.0, true, 1.0);
+	ghAntiCamping = CreateConVar("nt_cloak_anticamp", "1", "Toggle cloak off automatically \
+if a  player stands still.", _, true, 0.0, true, 1.0);
+	ghReuseAllowed = CreateConVar("nt_cloak_allow_toggle", "1", "Allow toggling cloak on and off \
+until it gets broken.", _, true, 0.0, true, 1.0);
 
 	HookEvent("player_spawn", OnPlayerSpawn);
 	HookEvent("player_death", OnPlayerDeath);
@@ -65,6 +66,7 @@ public void OnMapStart()
 	// PrecacheSound("sound/player/therm_off.wav", true);
 
 	gbAntiCamp = GetConVarBool(ghAntiCamping);
+	ToggleAllowed = GetConVarBool(ghReuseAllowed);
 }
 
 
@@ -89,12 +91,12 @@ public Action OnPlayerSpawn(Handle event, const char[] name, bool dontBroadcast)
 	if (iClass == 3)
 	{
 		gbIsSupport[client] = true;
-		gbCanCloak[client] = true;
+		UsedCloakCharge[client] = false;
+		gbBrokenCloak[client] = false;
 		return Plugin_Continue;
 	}
 
 	gbIsSupport[client] = false;
-	gbCanCloak[client] = false; // FIXME not necessary
 	return Plugin_Continue;
 }
 
@@ -106,7 +108,7 @@ public Action OnPlayerDeath(Handle event, const char[] name, bool dontBroadcast)
 	gbIsSupport[client] = false;
 
 	if (gbAntiCamp)
-		ghTimerCheckVelocity[client] = INVALID_HANDLE
+		ghMobilityTimer[client] = INVALID_HANDLE
 }
 
 
@@ -118,7 +120,7 @@ public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 	for (int i = MaxClients; i; --i)
 	{
 		if (IsValidClient(i))
-			ghTimerCheckVelocity[i] = INVALID_HANDLE;
+			ghMobilityTimer[i] = INVALID_HANDLE;
 	}
 }
 
@@ -151,21 +153,38 @@ public Action OnPlayerHurt(Event event, const char[] name, bool dontbroadcast)
 	if (!gbIsSupport[client])
 		return Plugin_Continue;
 
-	if (gbCanCloak[client])
+	if (gbBrokenCloak[client])
 		return Plugin_Continue;
+
+	if (ToggleAllowed)
+	{
+		if (!gbIsCloaked[client])
+			return Plugin_Continue;
+	}
+	else
+	{
+		if (!UsedCloakCharge[client])
+			return Plugin_Continue;
+	}
 
 	int attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
 
+	#if !DEBUG
 	if (!attacker || !IsValidClient(attacker))
 		return Plugin_Continue;
+	#endif
 
 	if (GetClientTeam(client) == GetClientTeam(attacker))
 		return Plugin_Continue;
 
 	if (gbAntiCamp)
-		ghTimerCheckVelocity[client] = INVALID_HANDLE;
+		ghMobilityTimer[client] = INVALID_HANDLE; // kill timer
 
 	SetEntProp(client, Prop_Send, "m_iThermoptic", 0);
+
+	gbBrokenCloak[client] = true;
+
+	DenyCloakCommand(client);
 
 	return Plugin_Continue;
 }
@@ -178,55 +197,59 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 
 	if (buttons & IN_THERMOPTIC)
 	{
-		if (gbHeldKey[client])
-		{
-			buttons &= ~IN_THERMOPTIC;
-		}
-		else
+		if (!gbHeldKey[client])
 		{
 			gbHeldKey[client] = true;
 
-			if (gbCanCloak[client])
+			if (gbBrokenCloak[client])
 			{
-				SetEntProp(client, Prop_Send, "m_iThermoptic", 1);
-				gbIsCloaked[client] = true;
-				ToggleShadowOnWeapons(client);
-
-				if (gbAntiCamp)
-				{
-					ghTimerCheckVelocity[client] = CreateTimer(0.5, timer_CheckVelocity,
-					EntIndexToEntRef(client), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-				}
-
-				gbCanCloak[client] = false;
-
-				//PrintCenterText(client, "You have used your one-time only cloak.");
-			}
-			else
-			{
-				#if DEBUG
-				int prop = GetEntProp(client, Prop_Send, "m_iThermoptic");
-				SetEntProp(client, Prop_Send, "m_iThermoptic", prop ? 0 : 1);
-				gbIsCloaked[client] = false;
-				if (gbAntiCamp)
-					ghTimerCheckVelocity[client] = INVALID_HANDLE;
-				gbCanCloak[client] = true;
-				return Plugin_Continue;
-				#endif
-
-				if (gbAntiCamp && ghTimerCheckVelocity[client] != INVALID_HANDLE)
-				{
-					// KillTimer(ghTimerCheckVelocity[client]);
-					ghTimerCheckVelocity[client] = INVALID_HANDLE;
-					SetEntProp(client, Prop_Send, "m_iThermoptic", 0);
-					gbIsCloaked[client] = false;
-					return Plugin_Continue;
-				}
-
-				SetEntProp(client, Prop_Send, "m_iThermoptic", 0);
-				gbIsCloaked[client] = false;
 				DenyCloakCommand(client);
 				return Plugin_Continue;
+			}
+
+			if (ToggleAllowed)
+			{
+				if (!gbIsCloaked[client])
+				{
+					SetEntProp(client, Prop_Send, "m_iThermoptic", 1);
+					gbIsCloaked[client] = true;
+					ToggleShadowOnWeapons(client);
+
+					if (gbAntiCamp && ghMobilityTimer[client] == INVALID_HANDLE)
+					{
+						ghMobilityTimer[client] = CreateTimer(0.5, timer_CheckMobility,
+						EntIndexToEntRef(client), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+					}
+				}
+				else
+				{
+					SetEntProp(client, Prop_Send, "m_iThermoptic", 0);
+					gbIsCloaked[client] = false;
+
+					if (gbAntiCamp && ghMobilityTimer[client] != INVALID_HANDLE)
+						ghMobilityTimer[client] = INVALID_HANDLE; // kill timer
+				}
+			}
+			else // !ToggleAllowed
+			{
+				if (!UsedCloakCharge[client])
+				{
+					SetEntProp(client, Prop_Send, "m_iThermoptic", 1);
+					gbIsCloaked[client] = true;
+					UsedCloakCharge[client] = true;
+					ToggleShadowOnWeapons(client);
+
+					if (gbAntiCamp && ghMobilityTimer[client] == INVALID_HANDLE)
+					{
+						ghMobilityTimer[client] = CreateTimer(0.5, timer_CheckMobility,
+						EntIndexToEntRef(client), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+					}
+				}
+				else
+				{
+					DenyCloakCommand(client);
+					return Plugin_Continue;
+				}
 			}
 		}
 	}
@@ -240,7 +263,11 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 
 void DenyCloakCommand(int client)
 {
-	PrintCenterText(client, "You have aleady used your one-time only cloak.");
+	if (ToggleAllowed)
+		PrintCenterText(client, "Your cloak has been broken!");
+	else
+		PrintCenterText(client, "You have aleady used your one-time only cloak.");
+
 	giReceivingClients[0] = client;
 
 	// emitting sound for this one client
@@ -265,19 +292,50 @@ void DenyCloakCommand(int client)
 }
 
 
-public Action timer_CheckVelocity(Handle timer, int clientref)
+public Action timer_CheckMobility(Handle timer, int clientref)
 {
 	int client = EntRefToEntIndex(clientref);
 
-	if (client < 0 || ghTimerCheckVelocity[client] == INVALID_HANDLE)
+	if (client < 0 || ghMobilityTimer[client] == INVALID_HANDLE)
 		return Plugin_Stop;
 
-	if (!IsValidClient(client) || !IsPlayerAlive(client))
+	if (!IsValidClient(client) || !IsPlayerAlive(client) || gbBrokenCloak[client])
 	{
-		ghTimerCheckVelocity[client] = INVALID_HANDLE;
+		ghMobilityTimer[client] = INVALID_HANDLE;
 		return Plugin_Stop;
 	}
 
+	if (!HasVelocity(client) || IsImmobile(client)) // we're immobile
+	{
+		if (gbIsCloaked[client])
+		{
+			SetEntProp(client, Prop_Send, "m_iThermoptic", 0);
+			gbIsCloaked[client] = false;
+		}
+
+		if (!ToggleAllowed)
+			return Plugin_Continue;
+		else
+		{	// we stop checking and wait for the player's next invocation of the cloak
+			ghMobilityTimer[client] = INVALID_HANDLE;
+			return Plugin_Stop;
+		}
+	}
+	else if (!ToggleAllowed && !gbIsCloaked[client]) // we're moving
+	{
+		SetEntProp(client, Prop_Send, "m_iThermoptic", 1);
+		gbIsCloaked[client] = true;
+		return Plugin_Continue;
+	}
+	else
+	{
+		return Plugin_Continue;
+	}
+}
+
+
+bool HasVelocity(int client)
+{
 	float vec;
 	vec = GetEntPropFloat(client, Prop_Send, "m_vecVelocity[1]");
 
@@ -285,25 +343,12 @@ public Action timer_CheckVelocity(Handle timer, int clientref)
 	PrintToServer("[cloak] client %N velocity %f", client, vec);
 	#endif
 
-	if (FloatCompare(vec, 0.0) == 0) // we're immobile
-	{
-		if (gbIsCloaked[client])
-		{
-			SetEntProp(client, Prop_Send, "m_iThermoptic", 0);
-			gbIsCloaked[client] = false;
-		}
-	}
-	else // moving
-	{
-		if (!gbIsCloaked[client])
-		{
-			SetEntProp(client, Prop_Send, "m_iThermoptic", 1);
-			gbIsCloaked[client] = true;
-		}
-	}
+	if (FloatCompare(vec, 0.0) == 0) // no velocity detected
+		return false;
 
-	return Plugin_Continue;
+	return true; // we're _probably_ moving
 }
+
 
 // Weapon shadow are still cast when cloak is active, so we reduce them
 // NOTE probably not worth setting them back on again, they still work just fine?
@@ -346,5 +391,33 @@ stock bool IsPlayerReallyDead(int client)
 {
 	if (GetEntProp(client, Prop_Send, "deadflag") || GetEntProp(client, Prop_Send, "m_iHealth") <= 1)
 		return true;
+	return false;
+}
+
+
+bool VectorsEqual(float vec1[3], float vec2[3], float tolerance=0.0, bool squared=false)
+{
+	float distance = GetVectorDistance(vec1, vec2, squared);
+
+	return distance <= (tolerance * tolerance);
+}
+
+
+bool IsImmobile(int client)
+{
+	float currentPos[3];
+	GetEntPropVector(client, Prop_Data, "m_vecAbsOrigin", currentPos);
+
+	if (VectorsEqual(currentPos, gfCoordsBuffer[client], 2.0, true))
+	{
+		#if DEBUG
+		PrintToServer("[cloak] %N seems immobile at {%f %f %f}",
+		client, currentPos[0], currentPos[1], currentPos[2]);
+		#endif
+		// gfCoordsBuffer = currentCoords
+		return true;
+	}
+
+	gfCoordsBuffer[client] = currentPos;
 	return false;
 }
