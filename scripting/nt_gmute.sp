@@ -27,6 +27,8 @@ Removes a player's ability to use text, voice, nickchange.");
 Restores a player's ability to use text, voice, nickchange.");
 	RegAdminCmd("sm_gmute_userid", Command_Mute_UserId, ADMFLAG_CHAT, "sm_gmute_userid <userID> - \
 Removes a player's ability to use text, voice, nickchange.");
+	RegAdminCmd("sm_gmute_status", Command_Status, ADMFLAG_CHAT, "List all globally muted players \
+currently connected.");
 
 	HookEvent("player_changename", OnPlayerChangeName, EventHookMode_Pre);
 	// HookEvent("player_info", OnPlayerChangeName, EventHookMode_Pre);
@@ -82,6 +84,22 @@ stock void ToggleCookieClient(int client)
 }
 
 
+public Action Command_Status(int client, int args)
+{
+	PrintToConsole(client, "[gmuted] Players affected currently connected:");
+	for (int i = MaxClients; i; --i)
+	{
+		if (!IsClientInGame(i) || IsFakeClient(i))
+			continue;
+		if (g_Muted[i])
+			PrintToConsole(client, "%L is globally muted.", i);
+	}
+	PrintToConsole(client, "----------------------------\n");
+
+	return Plugin_Handled;
+}
+
+
 public Action Command_Mute_UserId(int client, int args)
 {
 	if (args < 1)
@@ -106,7 +124,7 @@ public Action Command_Mute_UserId(int client, int args)
 	userid, targetclient);
 	#endif
 
-	LogAction(client, -1, "[gmute] %N issued a global mute on client %L",
+	LogAction(client, -1, "%N issued a global mute on client %L",
 	client, targetclient);
 
 	ToggleCookieClient(targetclient);
@@ -280,9 +298,19 @@ public Action OnClientSayCommand(client, const String:command[], const String:sA
 		else // dead
 			Format(buffer, sizeof(buffer), "[DEAD]%s %N: %s", teamtag, client, sArgs);
 
-		SendFakeUserMessage(client, buffer);
+		int players[1];
+		players[0] = client;
+		SendFakeUserMessage(client, players, 1, buffer); // only send to this same player
 
-		LogAction(client, -1, "Sent back \"%s\" to gmuted %N.", buffer, client);
+		LogAction(client, -1, "%L got their message sent back: \"%s\"", client, buffer);
+
+		for (int i = MaxClients; i; --i)
+		{
+			if (!IsClientInGame(i) || IsFakeClient(i) || i == client)
+				continue;
+			if (GetUserFlagBits(i) != 0)
+				PrintToChat(i, "[MUTED]%s", buffer);
+		}
 
 		return Plugin_Handled; // this blocks the usermessage
 	}
@@ -290,16 +318,13 @@ public Action OnClientSayCommand(client, const String:command[], const String:sA
 }
 
 
-void SendFakeUserMessage(int client, char[] buffer, bool grey=false)
+void SendFakeUserMessage(int client, int[] players, int playersNum, char[] buffer, bool grey=false)
 {
-	int players[1];
-	players[0] = client; // only send to this same player
-
-	Handle message = StartMessageEx(GetUserMessageId("SayText"), players, sizeof(players));
+	Handle message = StartMessageEx(GetUserMessageId("SayText"), players, playersNum);
 	BfWrite bf = UserMessageToBfWrite(message);
 
 	if (!grey)
-		BfWriteByte(bf, client);
+		BfWriteByte(bf, client); // originating client?
 	else
 		BfWriteByte(bf, 0);
 	// BfWriteByte(bf, 0); // seems to block the message
@@ -313,7 +338,7 @@ void SendFakeUserMessage(int client, char[] buffer, bool grey=false)
 	EndMessage();
 }
 
-	#if DEBUG
+#if DEBUG
 public Action OnSayText(UserMsg msg_id, Handle bf, players[], playersNum, bool reliable, bool init)
 {
 	// if(!reliable)
@@ -349,14 +374,27 @@ public Action OnPlayerChangeName(Handle event, const char[] name, bool Dontbroad
 	GetEventString(event, "newname", userName, sizeof(userName));
 	GetEventString(event, "oldname", oldName, sizeof(oldName));
 
-	LogAction(client, -1, "Player \"%s\" is gmuted, blocking name change to \"%s\".",
-	oldName, userName);
+	LogAction(client, -1, "Player \"%s\" attempted to change their name to \"%s\" \
+while being gmuted.", oldName, userName);
+
+	for (int i = MaxClients; i; --i)
+	{
+		if (!IsClientInGame(i) || IsFakeClient(i))
+			continue;
+		if (GetUserFlagBits(i) != 0)
+			PrintToChat(i, "[gmuted] %N attempted to change their name to \"%s\" \
+but got blocked.", client, userName);
+	}
+
 	SetEventString(event, "newname", oldName); // only sets the event parameters
 	SetClientName(client, oldName); // actually overrides name change with old name
 
 	char buffer[255];
 	Format(buffer, sizeof(buffer), "%s changed name to %s", oldName, userName);
-	SendFakeUserMessage(client, buffer, true);
+
+	int players[1];
+	players[0] = client; // send buffer to the offending client only
+	SendFakeUserMessage(client, players, 1, buffer, true);
 
 	return Plugin_Continue;
 }
