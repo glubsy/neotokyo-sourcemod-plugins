@@ -8,6 +8,7 @@
 #endif
 Handle g_hCookie = INVALID_HANDLE;
 bool g_Muted[NEO_MAX_CLIENTS+1];
+Handle ghAntiFloodTimer[NEO_MAX_CLIENTS+1] = {INVALID_HANDLE, ...};
 
 public Plugin:myinfo =
 {
@@ -241,9 +242,15 @@ public void OnClientCookiesCached(int client)
 	if (!client || IsFakeClient(client))
 		return;
 
-	EnforceNeutralName(client);
+	bool badname = EnforceNeutralName(client);
 
 	g_Muted[client] = ReadCookies(client);
+
+	if (badname && g_Muted[client])
+	{
+		LogAction(client, -1, "Renamed gmuted player \"%N\" to \"NeotokyoScum\".", client);
+		SetClientName(client, "NeotokyoScum");
+	}
 
 	SetClientListeningFlags(client, VOICE_MUTED);
 }
@@ -255,9 +262,9 @@ public void OnPlayerDisconnect(int client)
 }
 
 // prevent haters from spreading hate
-char BannedWords[][] = {"fuck"};
+char BannedWords[][] = {"crap", "shitty", "fuck"};
 
-void EnforceNeutralName(client)
+bool EnforceNeutralName(client)
 {
 	char name[MAX_NAME_LENGTH];
 	GetClientName(client, name, sizeof(name));
@@ -267,54 +274,156 @@ void EnforceNeutralName(client)
 	{
 		if (StrContains(name, BannedWords[i], false) != -1)
 		{
-			LogAction(client, -1, "Found banned word \"%s\" in player name \
-\"%s\". Changed to \"NeotokyoScum\"", BannedWords[i], name);
-			SetClientName(client, "NeotokyoScum");
+			LogAction(client, -1, "Found banned word \"%s\" in player name \"%s\".",
+			BannedWords[i], name);
+			return true;
 		}
 	}
+	return false;
 }
+
+char Love[][] = {
+	"I love you all! <3", "Yay :D", "Ah! <3", "We need to play this game more often!",
+	"Oh yeah~", "Nice~", "Got me!", "I love this game.", "nice :3", "(+. +)/",
+	"Please :D", "Haha~", "Yeah man! :)", "xD", ":D", "(^-^)~ø", "=)", "Love you too <3", "hehe :)",
+	"let's git gud :)", "much fun! ^_^", "rawr~ :3", "I'm a lil tiger~", "meow~", "woof woof!" };
 
 // This returns the original text message to the client, as if it was sent to others.
 public Action OnClientSayCommand(client, const String:command[], const String:sArgs[])
 {
-	if (client && g_Muted[client])
+	if (!client || !g_Muted[client])
+		return Plugin_Continue;
+
+	char buffer[255], teamtag[12], nicebuffer[255];
+	int team = GetClientTeam(client);
+	switch (team)
 	{
-		char buffer[255], teamtag[12];
-		int team = GetClientTeam(client);
-		switch (team)
-		{
-			case 2: // TEAM_JINRAI
-				strcopy(teamtag, sizeof(teamtag), "[Jinrai]");
-			case 3: // TEAM_NSF
-				strcopy(teamtag, sizeof(teamtag), "[NSF]");
-			default: // 0 TEAM_NONE, 1 TEAM_SPECTATOR
-				strcopy(teamtag, sizeof(teamtag), "[Spectator]");
-		}
-
-		if (IsPlayerAlive(client))
-			Format(buffer, sizeof(buffer), "%s %N: %s", teamtag, client, sArgs);
-		else if (team <= 1)
-			Format(buffer, sizeof(buffer), "%s %N: %s", teamtag, client, sArgs);
-		else // dead
-			Format(buffer, sizeof(buffer), "[DEAD]%s %N: %s", teamtag, client, sArgs);
-
-		int players[1];
-		players[0] = client;
-		SendFakeUserMessage(client, players, 1, buffer); // only send to this same player
-
-		LogAction(client, -1, "%L got their message sent back: \"%s\"", client, buffer);
-
-		for (int i = MaxClients; i; --i)
-		{
-			if (!IsClientInGame(i) || IsFakeClient(i) || i == client)
-				continue;
-			if (GetUserFlagBits(i) != 0)
-				PrintToChat(i, "[MUTED]%s", buffer);
-		}
-
-		return Plugin_Handled; // this blocks the usermessage
+		case 2: // TEAM_JINRAI
+			strcopy(teamtag, sizeof(teamtag), "[Jinrai]");
+		case 3: // TEAM_NSF
+			strcopy(teamtag, sizeof(teamtag), "[NSF]");
+		default: // 0 TEAM_NONE, 1 TEAM_SPECTATOR
+			strcopy(teamtag, sizeof(teamtag), "[Spectator]");
 	}
-	return Plugin_Continue;
+
+	if (IsPlayerAlive(client))
+	{
+		Format(buffer, sizeof(buffer), "%s %N: %s", teamtag, client, sArgs);
+
+		if (ghAntiFloodTimer[client] == INVALID_HANDLE)
+			Format(nicebuffer, sizeof(nicebuffer), "%s %N: %s", teamtag, client, Love[GetRandomLoveIndex()]);
+	}
+	else if (team <= 1)
+	{
+		Format(buffer, sizeof(buffer), "%s %N: %s", teamtag, client, sArgs);
+
+		if (ghAntiFloodTimer[client] == INVALID_HANDLE)
+			Format(nicebuffer, sizeof(nicebuffer), "%s %N: %s", teamtag, client, Love[GetRandomLoveIndex()]);
+	}
+	else // dead
+	{
+		Format(buffer, sizeof(buffer), "[DEAD]%s %N: %s", teamtag, client, sArgs);
+
+		if (ghAntiFloodTimer[client] == INVALID_HANDLE)
+			Format(nicebuffer, sizeof(nicebuffer), "[DEAD]%s %N: %s", teamtag, client, Love[GetRandomLoveIndex()]);
+	}
+
+	int players[NEO_MAX_CLIENTS];
+	players[0] = client;
+	// FIXME: slight problem, these messages are missing the trailing \n in console
+	SendFakeUserMessage(client, players, 1, buffer); // only send to this same player
+
+	LogAction(client, -1, "%L got their message sent back: \"%s\"", client, buffer);
+
+	int admins[NEO_MAX_CLIENTS], admintotal, total;
+	for (int i = MaxClients; i; --i)
+	{
+		if (!IsClientInGame(i) || IsFakeClient(i) || i == client)
+			continue;
+		if (GetUserFlagBits(i) != 0) // is admin
+		{
+			players[total++] = i;
+			admins[admintotal++] = i;
+		}
+		else // not admin
+			players[total++] = i;
+	}
+
+	if (admintotal)
+	{
+		Format(buffer, sizeof(buffer), "[MUTED]%s", buffer);
+		SendFakeUserMessage(client, admins, admintotal, buffer, true);
+	}
+
+	if (ghAntiFloodTimer[client] == INVALID_HANDLE)
+	{
+		SendFakeUserMessage(client, players, total, nicebuffer, false);
+		ghAntiFloodTimer[client] = CreateTimer(20.0, timer_ResetAntiFlood, client, TIMER_FLAG_NO_MAPCHANGE);
+	}
+
+	return Plugin_Handled; // blocks the original usermessage
+}
+
+int giUsedIndex[sizeof(Love)] = {-1, ...};
+
+int GetRandomLoveIndex()
+{
+	static int index;
+	int rand;
+
+	if (IsArrayEmpty(giUsedIndex, sizeof(giUsedIndex)))
+	{
+		for (int j = 0; j < sizeof(giUsedIndex); ++j)
+			giUsedIndex[j] = j;
+
+		// pick a random index at first
+		// rand = GetRandomInt(0, sizeof(Love) -1);
+		rand = GetURandomInt();
+		rand %= sizeof(Love);
+
+		giUsedIndex[rand] = -1;
+		index = rand;
+
+		CreateTimer(180.0, timer_WipeArray);
+
+		return index;
+	}
+
+	while (giUsedIndex[index] == -1)
+	{
+		PrintToServer("UsedIndex[%d] = -1, incrementing...", index);
+		++index;
+		if (index >= sizeof(giUsedIndex))
+			index = 0;
+	}
+	PrintToServer("Not called while loop!");
+	rand = giUsedIndex[index];
+	giUsedIndex[index] = -1;
+	return rand;
+}
+
+
+public Action timer_WipeArray(Handle timer){
+	#if DEBUG
+	PrintToServer("[gmute] Wiped array of Love indices!");
+	#endif
+	for (int j = 0; j < sizeof(giUsedIndex); ++j)
+		giUsedIndex[j] = -1;
+}
+
+
+bool IsArrayEmpty(int[] num, int size){
+	for (int i; i < size; ++i)
+		if (num[i] != -1)
+			return false;
+	return true;
+}
+
+
+public Action timer_ResetAntiFlood(Handle timer, int client)
+{
+	ghAntiFloodTimer[client] = INVALID_HANDLE;
+	return Plugin_Handled;
 }
 
 
