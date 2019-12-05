@@ -321,7 +321,7 @@ public Action timer_SpawnPost(Handle timer, int userid)
 	giClassType[client] = GetEntProp(client, Prop_Send, "m_iClassType");
 	giModelType[client] = GetModelType(client);
 
-	giTarget[client] = CreateInfoTarget(client, "eyes", giModelType[client]);
+	giTarget[client] = CreateInfoTarget(client, giModelType[client]);
 
 	#if USE_LIGHTGLOW
 	giGlow[client] = CreateGlow(giTarget[client], giClassType[client]);
@@ -475,7 +475,7 @@ stock void SetGlowColor(int glowEnt, int classType)
 
 // NOTE info_target ens are NOT removed accross rounds!
 // https://developer.valvesoftware.com/wiki/S_PreserveEnts
-int CreateInfoTarget(int client, char[] sTag, modelType model)
+int CreateInfoTarget(int client, modelType model)
 {
 	// seems to work (in this case) with EF_PARENT_ANIMATES https://developer.valvesoftware.com/wiki/Effect_flags
 	// int iEnt = CreateEntityByName("info_target");
@@ -606,29 +606,29 @@ stock int CreateSprite(int target, int classType)
 	{
 		case CLASS_RECON:
 		{
-			DispatchKeyValue(iEnt, "renderamt", "65");
+			DispatchKeyValue(iEnt, "renderamt", "95");
 			DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
 			DispatchKeyValue(iEnt, "renderfx", "26"); // 22 spotlight effect 26 fade near 23 cull distance
 			DispatchKeyValue(iEnt, "rendercolor", "74 199 1");
-			DispatchKeyValue(iEnt, "alpha", "65");
+			DispatchKeyValue(iEnt, "alpha", "95");
 			DispatchKeyValue(iEnt, "m_bWorldSpaceScale", "1");
 		}
 		case CLASS_ASSAULT:
 		{
-			DispatchKeyValue(iEnt, "renderamt", "125");
+			DispatchKeyValue(iEnt, "renderamt", "135");
 			DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
 			DispatchKeyValue(iEnt, "renderfx", "26"); // 22 spotlight effect 26 fade near 23 cull distance
 			DispatchKeyValue(iEnt, "rendercolor", "179 60 0");
-			DispatchKeyValue(iEnt, "alpha", "125");
+			DispatchKeyValue(iEnt, "alpha", "135");
 			DispatchKeyValue(iEnt, "m_bWorldSpaceScale", "1");
 		}
 		case CLASS_SUPPORT:
 		{
-			DispatchKeyValue(iEnt, "renderamt", "125");
+			DispatchKeyValue(iEnt, "renderamt", "135");
 			DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
 			DispatchKeyValue(iEnt, "renderfx", "26"); // 22 spotlight effect 26 fade near 23 cull distance
 			DispatchKeyValue(iEnt, "rendercolor", "100 100 200");
-			DispatchKeyValue(iEnt, "alpha", "125");
+			DispatchKeyValue(iEnt, "alpha", "135");
 			DispatchKeyValue(iEnt, "m_bWorldSpaceScale", "1");
 		}
 	}
@@ -660,7 +660,7 @@ public Action timer_SetAttachmentPosition(Handle timer, DataPack dp)
 
 	#if DEBUG
 	PrintToServer("[visionglow] setting position for %d model index %d",
-	entity, view_as<int>(modelType));
+	entity, view_as<int>(model));
 	#endif
 
 	SetVariantString("eyes");
@@ -671,99 +671,111 @@ public Action timer_SetAttachmentPosition(Handle timer, DataPack dp)
 	{
 		case jrecon1: // OK
 		{
-			vecPos[0] += 3.9000014; // forward 3.9000014
-			vecPos[1] += 0.1000016; // +left -right 0.1000016
+			vecPos[0] += 4.0600014; // forward 4.0600014
+			vecPos[1] += 0.2000016; // +left -right 0.2000016
 			vecPos[2] += 0.9300018; // + up - down 0.9300018
 		}
-		case jrecon2:
+		case jrecon2: // OK
 		{
-			vecPos[0] += 3.9000014; // forward 3.9000014
-			vecPos[1] += 0.1000016; // +left -right 0.1000016
-			vecPos[2] += 0.9300018; // + up - down 0.9300018
+			vecPos[0] += 2.3900014; // forward 2.3900014
+			vecPos[1] += 1.4000016; // +left -right 1.4000016
+			vecPos[2] += 0.3900018; // + up - down 0.3900018
 		}
 		case jrecon3: // Ok
 		{
-			vecPos[0] += 3.9000014; // forward 3.9000014
-			vecPos[1] += 0.1000016; // +left -right 0.1000016
-			vecPos[2] += 0.9300018; // + up - down 0.9300018
+			vecPos[0] += 4.7100014; // forward 3.9000014
+			vecPos[1] += 0.2000016; // +left -right 0.1000016
+			vecPos[2] += 0.6900018; // + up - down 0.9300018
 		}
-		case nrecon1: // BROKEN
+		case nrecon1: // OK
 		{
-			vecPos[0] += 5.9000045; // forward 5.9000045;
-			// vecPos[1] += 0.1000016; // +left -right
-			// vecPos[2] += 0.9300018; // + up - down
+			vecPos[0] += 4.1000045; // forward 4.1000045
+			vecPos[1] += 1.5000016; // +left -right 1.5000016
+			vecPos[2] += 0.1300018; // + up - down 0.1300018
 		}
-		case nrecon2: // BROKEN
+		case nrecon2: // OK
 		{
-			vecPos[0] += 6.9000515; // forward 6.9000515
-			// vecPos[1] += 0.1000016; // +left -right 0.1000016
-			// vecPos[2] += 0.9300018; // + up - down 0.9300018
+			vecPos[0] += 3.7000515; // forward 3.7000515
+			vecPos[1] += 1.4000016; // +left -right 1.4000016
+			vecPos[2] -= 0.0006018; // + up - down 0.0006018
 		}
-		case nrecon3: // BROKEN
+		case nrecon3: // OK
 		{
-			vecPos[0] += 3.9000014; // 3.9000014
-			// vecPos[1] += 0.1000016; // +left -right 0.1000016
-			// vecPos[2] += 0.9300018; // + up - down 0.9300018
+			vecPos[0] += 3.7000515; // forward 3.7000515
+			vecPos[1] += 1.4000016; // +left -right 1.4000016
+			vecPos[2] += 0.0006018; // + up - down 0.0006018
 		}
-		case jassault1:
+		case jassault1: // OK
+		{
+			vecPos[0] += 5.5000010; // +forward 5.5000010
+			vecPos[1] += 1.6300016; // - right 1.6300016
+			vecPos[2] += 0.4540018; // + up - down 0.4540018
+		}
+		case jassault2: // OK
 		{
 			vecPos[0] += 4.6; // +forward 4.6
 			vecPos[1] += 1.6300016; // - right 1.6300016
 			vecPos[2] += 0.4540018; // + up - down 0.4540018
 		}
-		case jassault2:
+		case jassault3: // OK
+		{
+			vecPos[0] += 5.010003; // +forward 5.010003
+			vecPos[1] += 0.2000016; // - right 0.2000016
+			vecPos[2] += 1.4340018; // + up - down 1.4340018
+		}
+		case nassault1: // OK
 		{
 			vecPos[0] += 4.6; // +forward 4.6
 			vecPos[1] += 1.6300016; // - right 1.6300016
 			vecPos[2] += 0.4540018; // + up - down 0.4540018
 		}
-		case jassault3:
+		case nassault2: // OK
 		{
 			vecPos[0] += 4.6; // +forward 4.6
+			vecPos[1] += 1.5900016; // - right 1.5900016
+			vecPos[2] += 0.8540018; // + up - down 0.8540018
+		}
+		case nassault3: // OK
+		{
+			vecPos[0] += 5.780000; // +forward 5.780000
 			vecPos[1] += 1.6300016; // - right 1.6300016
-			vecPos[2] += 0.4540018; // + up - down 0.4540018
+			vecPos[2] += 0.6540018; // + up - down 0.6540018
 		}
-		case nassault1:
+		case jsupport1: // OK
 		{
-			vecPos[0] += 4.6; // +forward 4.6
-			vecPos[1] += 1.6300016; // - right 1.6300016
-			vecPos[2] += 0.4540018; // + up - down 0.4540018
+			vecPos[0] += 5.711001;
+			vecPos[1] += 1.600001;
+			vecPos[2] += 0.390001;
 		}
-		case nassault2:
+		case jsupport2: // OK
 		{
-			vecPos[0] += 4.6; // +forward 4.6
-			vecPos[1] += 1.6300016; // - right 1.6300016
-			vecPos[2] += 0.4540018; // + up - down 0.4540018
+			vecPos[0] += 6.811001;
+			// vecPos[1] += 1.600001;
+			vecPos[2] += 1.990001;
 		}
-		case nassault3:
+		case jsupport3: // OK
 		{
-			vecPos[0] += 4.6; // +forward 4.6
-			vecPos[1] += 1.6300016; // - right 1.6300016
-			vecPos[2] += 0.4540018; // + up - down 0.4540018
+			vecPos[0] += 6.491001;
+			// vecPos[1] += 1.600001;
+			vecPos[2] += 1.790001;
 		}
-		case jsupport1: // TODO
+		case nsupport1: // OK
 		{
-			vecPos[0] += 6.6;
+			vecPos[0] += 5.711001;
+			vecPos[1] += 1.600001;
+			vecPos[2] += 0.390001;
 		}
-		case jsupport2:
+		case nsupport2: // OK
 		{
-			vecPos[0] += 6.6;
+			vecPos[0] += 5.811001;
+			vecPos[1] += 1.600001;
+			vecPos[2] += 0.390001;
 		}
-		case jsupport3:
+		case nsupport3: // OK
 		{
-			vecPos[0] += 6.6;
-		}
-		case nsupport1:
-		{
-			vecPos[0] += 6.6;
-		}
-		case nsupport2:
-		{
-			vecPos[0] += 6.6;
-		}
-		case nsupport3:
-		{
-			vecPos[0] += 6.6;
+			vecPos[0] += 6.211001;
+			vecPos[1] += 1.600001;
+			vecPos[2] += 0.390001;
 		}
 		default:
 		{
