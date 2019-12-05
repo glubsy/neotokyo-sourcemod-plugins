@@ -3,10 +3,36 @@
 #include <sdkhooks>
 #include <neotokyo>
 #pragma semicolon 1
+
 #define NEO_MAX_CLIENTS 32
 #if !defined DEBUG
 	#define DEBUG 0
 #endif
+
+#define USE_LIGHTGLOW 0 // previous method which doesn't work because of a bug :(
+// #define SPRITEMDL "sprites/light_glow02.vmt" // bigger
+// #define SPRITEMDL "sprites/combineball_glow_red_1.vmt"
+// #define SPRITEMDL "sprites/combineball_glow_blue_1.vmt"
+// #define SPRITEMDL "sprites/dot.vmt" // small, no glow
+// #define SPRITEMDL "sprites/fire_floor.vmt" // faded
+// #define SPRITEMDL "sprites/glow1.vmt" //
+// #define SPRITEMDL "sprites/glow01.vmt" // small center
+// #define SPRITEMDL "sprites/glow02.vmt" // bigger
+// #define SPRITEMDL "sprites/glow03.vmt" //
+// #define SPRITEMDL "sprites/glow04.vmt" //
+// #define SPRITEMDL "sprites/glow06.vmt" // faded
+// #define SPRITEMDL "sprites/greenglow1.vmt"
+// #define SPRITEMDL "sprites/halo01.vmt"
+// #define SPRITEMDL "sprites/physcannon_blueglow.vmt"
+// #define SPRITEMDL "sprites/purpleglow1.vmt"
+// #define SPRITEMDL "sprites/redglow1.vmt" // needs red color channel
+// #define SPRITEMDL "sprites/redglow2.vmt"
+// #define SPRITEMDL "sprites/redglow3.vmt"
+// #define SPRITEMDL "sprites/redglow4.vmt"
+// #define SPRITEMDL "sprites/yellowflare.vmt"
+// #define SPRITEMDL "sprites/yellowglow1.vmt"
+#define SPRITEMDL "sprites/light_glow01.vmt" // Good one.
+
 enum modelType {
 	MDL_NONE = -1, jrecon1 = 0, jrecon2, jrecon3, nrecon1, nrecon2, nrecon3,
 	jassault1, jassault2, jassault3, nassault1, nassault2, nassault3, jsupport1,
@@ -48,7 +74,7 @@ public Plugin:myinfo =
 	name = "NEOTOKYO vision glow",
 	author = "glub",
 	description = "Glowing halo when using vision mode.",
-	version = "0.1",
+	version = "0.2",
 	url = "https://github.com/glubsy"
 };
 
@@ -184,12 +210,12 @@ void KillEnts(int client)
 		#if DEBUG
 		PrintToServer("[visionglow] removing glow ent for %N (%d)", client, giGlow[client]);
 		#endif
-		#if !DEBUG
+		// #if !DEBUG
 		if (GetConVarBool(cvar_SpecOnly))
 			SDKUnhook(giGlow[client], SDKHook_SetTransmit, Hook_SetTransmitSpecOnly);
 		else
 			SDKUnhook(giGlow[client], SDKHook_SetTransmit, Hook_SetTransmit);
-		#endif
+		// #endif
 
 		// SetGlowColor(giGlow[client], 0);
 
@@ -296,14 +322,19 @@ public Action timer_SpawnPost(Handle timer, int userid)
 	giModelType[client] = GetModelType(client);
 
 	giTarget[client] = CreateInfoTarget(client, "eyes", giModelType[client]);
-	giGlow[client] = CreateGlow(giTarget[client], giClassType[client], client);
 
-	#if !DEBUG
+	#if USE_LIGHTGLOW
+	giGlow[client] = CreateGlow(giTarget[client], giClassType[client]);
+	#else
+	giGlow[client] = CreateSprite(giTarget[client], giClassType[client]);
+	#endif
+
+	// #if !DEBUG
 	if (GetConVarBool(cvar_SpecOnly))
 		SDKHook(giGlow[client], SDKHook_SetTransmit, Hook_SetTransmitSpecOnly);
 	else
 		SDKHook(giGlow[client], SDKHook_SetTransmit, Hook_SetTransmit);
-	#endif
+	// #endif
 
 	gbIsObserver[client] = false;
 	gbVisionActive[client] = false;
@@ -348,12 +379,16 @@ public void OnClientDisconnect(int client)
 }
 
 
-void SetGlowColor(int glowEnt, int classType)
+stock void SetGlowColor(int glowEnt, int classType)
 {
 	int m_clrRenderoffset = FindSendPropOffs("CLightGlow", "m_clrRender");
 
 	#if DEBUG
-	PrintToServer("[visionglow] Setting colortype %d on %d", classType, glowEnt);
+	float vecPos[3];
+	GetEntPropVector(glowEnt, Prop_Send, "m_vecOrigin", vecPos);
+
+	PrintToServer("[visionglow] Setting colortype %d on %d at %f %f %f",
+	classType, glowEnt, vecPos[0], vecPos[1], vecPos[2]);
 	int r = GetEntData(glowEnt, m_clrRenderoffset, 1);
 	int g = GetEntData(glowEnt, m_clrRenderoffset + 1, 1);
 	int b = GetEntData(glowEnt, m_clrRenderoffset + 2, 1);
@@ -423,9 +458,8 @@ void SetGlowColor(int glowEnt, int classType)
 	SetVariantString(color);
 	AcceptEntityInput(glowEnt, "Color");
 
-	// DispatchKeyValue(glowEnt, "MinDist", "2000"); // 6000
-	// DispatchKeyValue(glowEnt, "MaxDist", "0");
-	// DispatchKeyValue(glowEnt, "origin", );
+	// DispatchKeyValue(glowEnt, "MinDist", "3000"); // 6000
+	// DispatchKeyValue(glowEnt, "MaxDist", "1");
 
 	// SetEntityRenderColor(glowEnt, 100, 0, 255, 200);
 	SetEntData(glowEnt, m_clrRenderoffset, 		r, 1, true);
@@ -433,8 +467,9 @@ void SetGlowColor(int glowEnt, int classType)
 	SetEntData(glowEnt, m_clrRenderoffset + 2, 	b, 1, true);
 	SetEntData(glowEnt, m_clrRenderoffset + 3, 	a, 1, true);
 
-	ChangeEdictState(glowEnt);
-	DispatchSpawn(glowEnt);
+	// ChangeEdictState(glowEnt);
+	// DispatchSpawn(glowEnt);
+	// ActivateEntity(glowEnt);
 }
 
 
@@ -442,13 +477,12 @@ void SetGlowColor(int glowEnt, int classType)
 // https://developer.valvesoftware.com/wiki/S_PreserveEnts
 int CreateInfoTarget(int client, char[] sTag, modelType model)
 {
-	// sems to work (in this case) with EF_PARENT_ANIMATES https://developer.valvesoftware.com/wiki/Effect_flags
+	// seems to work (in this case) with EF_PARENT_ANIMATES https://developer.valvesoftware.com/wiki/Effect_flags
 	// int iEnt = CreateEntityByName("info_target");
 	int iEnt = CreateEntityByName("prop_dynamic_override");
 	DispatchKeyValue(iEnt, "model", "models/editor/ground_node_hint.mdl"); //12 polygons
 
 	// these hacks were used with prop_dynamic_override and to optimize a bit
-
 	DispatchKeyValue(iEnt,"damagetoenablemotion","0");
 	DispatchKeyValue(iEnt,"forcetoenablemotion","0");
 	DispatchKeyValue(iEnt,"Damagetype","0");
@@ -490,7 +524,9 @@ int CreateInfoTarget(int client, char[] sTag, modelType model)
 
 // Create glow and attach to target since we can't attach to player directly
 // NOTE: env_lightglow ents are removed accross rounds!
-int CreateGlow(int target, int classType, int client)
+// Doesn't totally work. The origin for the fade is stuck at the origin during initial spawn of the entity :(
+// which means it doesn't update the fade distance dynamically
+stock int CreateGlow(int target, int classType)
 {
 	int glowEnt = CreateEntityByName("env_lightglow");
 	DispatchKeyValue(glowEnt, "rendercolor", "0 0 0");
@@ -502,7 +538,7 @@ int CreateGlow(int target, int classType, int client)
 	else
 		DispatchKeyValue(glowEnt, "MinDist", "3000"); // 6000
 
-	DispatchKeyValue(glowEnt, "MaxDist", "0");
+	DispatchKeyValue(glowEnt, "MaxDist", "1");
 	// DispatchKeyValue(glowEnt, "OuterMaxDist", "1600");
 
 	// DispatchKeyValue(glowEnt, "origin", );
@@ -510,10 +546,12 @@ int CreateGlow(int target, int classType, int client)
 	DispatchKeyValue(glowEnt, "VerticalGlowSize", "7"); // 16
 	DispatchKeyValue(glowEnt, "HorizontalGlowSize", "7"); // 16
 	// DispatchKeyValue(glowEnt, "spawnflags", "1");
-	DispatchKeyValue(glowEnt, "GlowProxySize", "60.0"); // 2.0
+	DispatchKeyValue(glowEnt, "GlowProxySize", "1.0"); // 2.0
 	DispatchKeyValue(glowEnt, "HDRColorScale", "2.0");
 
 	DispatchKeyValue(glowEnt,"renderfx","256"); // EF_PARENT_ANIMATES (instead of 0)
+
+	// SetEntProp(glowEnt, Prop_Data, "m_iEFlags", (1<<7)); //FL_FORCE_CHECK_TRANSMIT should be set already
 
 	// char glow[64];
 	// Format(glow, sizeof(glow), "glow%i", glowEnt);
@@ -525,17 +563,92 @@ int CreateGlow(int target, int classType, int client)
 	// SetEntProp(glowEnt, Prop_Data, "m_nRenderMode", RENDER_TRANSALPHA, 1);
 
 	DispatchSpawn(glowEnt);
-	ActivateEntity(glowEnt);
+	// ActivateEntity(glowEnt);
 
-	// float vecPos[3];
-	// GetEntPropVector(client, Prop_Send, "m_vecOrigin", vecPos);
+	#if DEBUG
+	float vecPos[3];
+	GetEntPropVector(client, Prop_Send, "m_vecOrigin", vecPos);
 	// vecPos[2] += 30.0;
 	// TeleportEntity(glowEnt, vecPos, NULL_VECTOR, NULL_VECTOR);
+	#endif
 
 	SetVariantString("!activator");
 	AcceptEntityInput(glowEnt, "SetParent", target, glowEnt, 0);
 
+	// this does the same as the above
+	// SetEntPropEnt(glowEnt, Prop_Send, "moveparent", target);
+
+	#if DEBUG
+	float m_vecAbsOrigin[3];
+	GetEntPropVector(glowEnt, Prop_Data, "m_vecAbsOrigin", m_vecAbsOrigin);
+	GetEntPropVector(glowEnt, Prop_Send, "m_vecOrigin", vecPos);
+	PrintToServer("After parenting, glow is at %f %f %f, m_vecAbsOrigin %f %f %f",
+	vecPos[0], vecPos[1], vecPos[2], m_vecAbsOrigin[0], m_vecAbsOrigin[1], m_vecAbsOrigin[2]);
+	#endif
+
+	// SetEntPropVector(glowEnt, Prop_Send, "m_vecOrigin", vecPos);
 	return glowEnt;
+}
+
+
+// This works, but the sprite is rendered through optic camo! :(
+stock int CreateSprite(int target, int classType)
+{
+	int iEnt = CreateEntityByName("env_glow"); // env_sprite / env_glow same
+
+	DispatchKeyValue(iEnt, "model", SPRITEMDL);
+
+	DispatchKeyValue(iEnt, "rendermode", "3"); // 3 glow keeps size, 9 doesn't
+	DispatchKeyValueFloat(iEnt, "GlowProxySize", 0.2);
+	DispatchKeyValueFloat(iEnt, "HDRColorScale", 1.0);
+
+	switch (classType)
+	{
+		case CLASS_RECON:
+		{
+			DispatchKeyValue(iEnt, "renderamt", "65");
+			DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
+			DispatchKeyValue(iEnt, "renderfx", "26"); // 22 spotlight effect 26 fade near 23 cull distance
+			DispatchKeyValue(iEnt, "rendercolor", "74 199 1");
+			DispatchKeyValue(iEnt, "alpha", "65");
+			DispatchKeyValue(iEnt, "m_bWorldSpaceScale", "1");
+		}
+		case CLASS_ASSAULT:
+		{
+			DispatchKeyValue(iEnt, "renderamt", "125");
+			DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
+			DispatchKeyValue(iEnt, "renderfx", "26"); // 22 spotlight effect 26 fade near 23 cull distance
+			DispatchKeyValue(iEnt, "rendercolor", "179 60 0");
+			DispatchKeyValue(iEnt, "alpha", "125");
+			DispatchKeyValue(iEnt, "m_bWorldSpaceScale", "1");
+		}
+		case CLASS_SUPPORT:
+		{
+			DispatchKeyValue(iEnt, "renderamt", "125");
+			DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
+			DispatchKeyValue(iEnt, "renderfx", "26"); // 22 spotlight effect 26 fade near 23 cull distance
+			DispatchKeyValue(iEnt, "rendercolor", "100 100 200");
+			DispatchKeyValue(iEnt, "alpha", "125");
+			DispatchKeyValue(iEnt, "m_bWorldSpaceScale", "1");
+		}
+	}
+
+	DispatchSpawn(iEnt);
+
+	SetVariantString("!activator");
+	AcceptEntityInput(iEnt, "SetParent", target, iEnt, 0);
+
+	return iEnt;
+}
+
+stock void ShowSprite(int sprite)
+{
+	AcceptEntityInput(sprite, "ShowSprite");
+}
+
+stock void HideSprite(int sprite)
+{
+	AcceptEntityInput(sprite, "HideSprite");
 }
 
 
@@ -687,12 +800,20 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 			{
 				// gbVisionActive[client] = GetEntProp(client, Prop_Send, "m_iVision") == 2 ? true : false;
 				gbVisionActive[client] = false;
+				#if USE_LIGHTGLOW
 				SetGlowColor(giGlow[client], 0); // turn off
+				#else
+				HideSprite(giGlow[client]);
+				#endif
 			}
 			else
 			{
 				gbVisionActive[client] = true; // we assume vision is active client-side
+				#if USE_LIGHTGLOW
 				SetGlowColor(giGlow[client], giClassType[client]); // turn on
+				#else
+				ShowSprite(giGlow[client]);
+				#endif
 			}
 		}
 	}
@@ -703,12 +824,14 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 	return 	Plugin_Continue;
 }
 
+
 public Action Hook_SetTransmit(int entity, int client)
 {
 	if (entity == giGlow[client])
 		return Plugin_Handled;
 	return Plugin_Continue;
 }
+
 
 public Action Hook_SetTransmitSpecOnly(int entity, int client)
 {
