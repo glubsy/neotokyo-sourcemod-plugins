@@ -129,6 +129,7 @@ TODO: parse available models from a text file
 TODO: make sure props (d too) are not solid to avoid obstructing bullets -> use a refactored create_entity functions
 also make sure they don't block line of fire while being grabbed
 FIXME: improve static props menu, not enough items!
+FIXME: attempt to block sound effects from falling physics props regarding opted out clients
 
 FIXME: if supports can cloak, we need to cloak attached props too now!
 */
@@ -1237,7 +1238,7 @@ void DestroyAttachedPropForClient(int client)
 {
 	#if DEBUG
 	PrintToServer("[nt_props] DEBUG: DestroyAttachedPropForClient() \
-Checking if need to remove strapped entity %d on client %N.", 
+Checking if need to remove strapped entity %d on client %N.",
 	g_AttachmentEnt[client], client);
 	#endif
 
@@ -2982,12 +2983,12 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 
 	if((buttons & (1 << 27)) == (1 << 27)) // Cloak button
 	{
-		if (IsPlayerReallyAlive(client) && (GetEntProp(client, Prop_Send, "m_iClassType") < 3)) // not a Support
+		if (IsPlayerReallyAlive(client)) // not a Support
 		{
-			ToggleNoDrawForAttachmentOfClient(client);
-
 			// right now I have no idea how to cloak a parented prop, so we simply kill it :(
 			//DestroyAttachedPropForClient(client);
+			// Let's nodraw it instead
+			ToggleNoDrawForAttachmentOfClient(client);
 
 			return Plugin_Continue;
 		}
