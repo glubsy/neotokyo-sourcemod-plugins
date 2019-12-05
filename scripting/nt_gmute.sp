@@ -15,21 +15,23 @@ public Plugin:myinfo =
 	name = "NEOTOKYO global mute",
 	author = "glub",
 	description = "Mute beligerent or griefing players.",
-	version = "0.1",
+	version = "0.2",
 	url = "https://github.com/glubsy"
 };
 
 
 public void OnPluginStart()
 {
-	RegAdminCmd("sm_gmute", Command_Mute_SteamId, ADMFLAG_CHAT, "sm_gmute <STEAM_ID> - \
-Removes a player's ability to use text, voice, nickchange.");
-	RegAdminCmd("sm_gunmute", Command_UnMute_SteamId, ADMFLAG_CHAT, "sm_gunmute <STEAM_ID> - \
+	RegAdminCmd("sm_gmute", Command_Mute_SteamId, ADMFLAG_CHAT, "sm_gmute \"<STEAM_ID>\" - \
+Remove a player's ability to use text, voice, nickchange.");
+	RegAdminCmd("sm_gunmute", Command_UnMute_SteamId, ADMFLAG_CHAT, "sm_gunmute \"<STEAM_ID>\" - \
 Restores a player's ability to use text, voice, nickchange.");
 	RegAdminCmd("sm_gmute_userid", Command_Mute_UserId, ADMFLAG_CHAT, "sm_gmute_userid <userID> - \
-Removes a player's ability to use text, voice, nickchange.");
+Toggle a player's ability to use text, voice, nickchange.");
 	RegAdminCmd("sm_gmute_status", Command_Status, ADMFLAG_CHAT, "List all globally muted players \
 currently connected.");
+	RegAdminCmd("sm_gmute_makesay", Command_MakeSay, ADMFLAG_CHAT, "sm_gmute_makesay <userid> \"message\" - \
+Make target say something.");
 
 	HookEvent("player_changename", OnPlayerChangeName, EventHookMode_Pre);
 	// HookEvent("player_info", OnPlayerChangeName, EventHookMode_Pre);
@@ -103,7 +105,7 @@ public Action Command_Status(int client, int args)
 
 public Action Command_Mute_UserId(int client, int args)
 {
-	if (args < 1)
+	if (args != 1)
 	{
 		ReplyToCommand(client, "usage sm_gmute_userid <userID> (use status command) to toggle mute on that user." );
 		return Plugin_Handled;
@@ -111,12 +113,19 @@ public Action Command_Mute_UserId(int client, int args)
 
 	char arg[5];
 	GetCmdArg(1, arg, sizeof(arg));
+
+	if (!IsCharNumeric(arg[0]))
+	{
+		ReplyToCommand(client, "Invalid userId specified." );
+		return Plugin_Handled;
+	}
+
 	int userid = StringToInt(arg);
 	int targetclient = GetClientOfUserId(userid);
 
-	if (userid <= 0)
+	if (targetclient <= 0 || !IsClientInGame(targetclient) || IsFakeClient(targetclient))
 	{
-		ReplyToCommand(client, "Invalid userId!" );
+		ReplyToCommand(client, "Invalid userId specified." );
 		return Plugin_Handled;
 	}
 
@@ -141,9 +150,9 @@ public Action Command_Mute_UserId(int client, int args)
 
 public Action Command_UnMute_SteamId(int client, int args)
 {
-	if (args < 1)
+	if (args != 1)
 	{
-		ReplyToCommand(client, "[gmute] Usage: sm_gunmute <STEAMID> or sm_gmute_client <USERID>");
+		ReplyToCommand(client, "[gmute] Usage: sm_gunmute <STEAMID> or sm_gmute_userid <USERID>");
 		return Plugin_Handled;
 	}
 
@@ -168,9 +177,9 @@ public Action Command_UnMute_SteamId(int client, int args)
 
 public Action Command_Mute_SteamId(int client, int args)
 {
-	if (args < 1)
+	if (args != 1)
 	{
-		ReplyToCommand(client, "[gmute] Usage: sm_gmute <STEAMID> or sm_gmute_client <USERID>");
+		ReplyToCommand(client, "[gmute] Usage: sm_gmute \"<STEAMID>\" or sm_gmute_userid <USERID>");
 		return Plugin_Handled;
 	}
 
@@ -179,7 +188,7 @@ public Action Command_Mute_SteamId(int client, int args)
 
 	if (!IsValidAuthId(authid))
 	{
-		ReplyToCommand(client, "[gmute] Invalid SteamID specified");
+		ReplyToCommand(client, "[gmute] Invalid SteamID specified (don't forget the quotes).");
 		return Plugin_Handled;
 	}
 
@@ -187,7 +196,7 @@ public Action Command_Mute_SteamId(int client, int args)
 
 	UpdateUserOfSteamID(authid);
 
-	ReplyToCommand(client, "[gmute] client of %s is now muted globally!", authid);
+	ReplyToCommand(client, "[gmute] account %s is now muted globally!", authid);
 
 	return Plugin_Handled;
 }
@@ -229,9 +238,9 @@ void UpdateUserOfSteamID(char[] authid)
 
 bool IsValidAuthId(char[] authid)
 {
-	if (!strncmp(authid, "STEAM_", 6) && authid[7] == ':')
+	if (!strncmp(authid, "STEAM_", 6, false) && authid[7] == ':')
 		return true;
-	else if (!strncmp(authid, "[U:", 3))
+	else if (!strncmp(authid, "[U:", 3, false))
 		return true;
 	return false;
 }
@@ -262,7 +271,7 @@ public void OnPlayerDisconnect(int client)
 }
 
 // prevent haters from spreading hate
-char BannedWords[][] = {"crap", "shitty", "fuck"};
+char BannedWords[][] = {"crap", "crappy", "shitty", "fuck"};
 
 bool EnforceNeutralName(client)
 {
@@ -286,7 +295,7 @@ char Love[][] = {
 	"I love you all! <3", "Yay :D", "Ah! <3", "We need to play this game more often!",
 	"Oh yeah~", "Nice~", "Got me!", "I love this game.", "nice :3", "(+. +)/",
 	"Please :D", "Haha~", "Yeah man! :)", "xD", ":D", "(^-^)~ø", "=)", "Love you too <3", "hehe :)",
-	"let's git gud :)", "much fun! ^_^", "rawr~ :3", "I'm a lil tiger~", "meow~", "woof woof!" };
+	"let's git gud :)", "much fun! ^_^", "rawr~ :3", "I'm a lil' tiger~", "meow~", "woof woof!" };
 
 // This returns the original text message to the client, as if it was sent to others.
 public Action OnClientSayCommand(client, const String:command[], const String:sArgs[])
@@ -294,39 +303,12 @@ public Action OnClientSayCommand(client, const String:command[], const String:sA
 	if (!client || !g_Muted[client])
 		return Plugin_Continue;
 
-	char buffer[255], teamtag[12], nicebuffer[255];
+	char buffer[255], teamtag[12];
+
 	int team = GetClientTeam(client);
-	switch (team)
-	{
-		case 2: // TEAM_JINRAI
-			strcopy(teamtag, sizeof(teamtag), "[Jinrai]");
-		case 3: // TEAM_NSF
-			strcopy(teamtag, sizeof(teamtag), "[NSF]");
-		default: // 0 TEAM_NONE, 1 TEAM_SPECTATOR
-			strcopy(teamtag, sizeof(teamtag), "[Spectator]");
-	}
+	FormatTeamTag(team, teamtag);
 
-	if (IsPlayerAlive(client))
-	{
-		Format(buffer, sizeof(buffer), "%s %N: %s", teamtag, client, sArgs);
-
-		if (ghAntiFloodTimer[client] == INVALID_HANDLE)
-			Format(nicebuffer, sizeof(nicebuffer), "%s %N: %s", teamtag, client, Love[GetRandomLoveIndex()]);
-	}
-	else if (team <= 1)
-	{
-		Format(buffer, sizeof(buffer), "%s %N: %s", teamtag, client, sArgs);
-
-		if (ghAntiFloodTimer[client] == INVALID_HANDLE)
-			Format(nicebuffer, sizeof(nicebuffer), "%s %N: %s", teamtag, client, Love[GetRandomLoveIndex()]);
-	}
-	else // dead
-	{
-		Format(buffer, sizeof(buffer), "[DEAD]%s %N: %s", teamtag, client, sArgs);
-
-		if (ghAntiFloodTimer[client] == INVALID_HANDLE)
-			Format(nicebuffer, sizeof(nicebuffer), "[DEAD]%s %N: %s", teamtag, client, Love[GetRandomLoveIndex()]);
-	}
+	FormatMessage(client, team, teamtag, sArgs, buffer, sizeof(buffer));
 
 	int players[NEO_MAX_CLIENTS];
 	players[0] = client;
@@ -357,12 +339,41 @@ public Action OnClientSayCommand(client, const String:command[], const String:sA
 
 	if (ghAntiFloodTimer[client] == INVALID_HANDLE)
 	{
+		char nicebuffer[255];
+		FormatMessage(client, team, teamtag, Love[GetRandomLoveIndex()], nicebuffer, sizeof(nicebuffer));
 		SendFakeUserMessage(client, players, total, nicebuffer, false);
-		ghAntiFloodTimer[client] = CreateTimer(20.0, timer_ResetAntiFlood, client, TIMER_FLAG_NO_MAPCHANGE);
+		ghAntiFloodTimer[client] = CreateTimer(7.0, timer_ResetAntiFlood, client, TIMER_FLAG_NO_MAPCHANGE);
 	}
 
 	return Plugin_Handled; // blocks the original usermessage
 }
+
+
+void FormatTeamTag(int team, char teamtag[12])
+{
+	switch (team)
+	{
+		case 2: // TEAM_JINRAI
+			strcopy(teamtag, sizeof(teamtag), "[Jinrai]");
+		case 3: // TEAM_NSF
+			strcopy(teamtag, sizeof(teamtag), "[NSF]");
+		default: // 0 TEAM_NONE, 1 TEAM_SPECTATOR
+			strcopy(teamtag, sizeof(teamtag), "[Spectator]");
+	}
+}
+
+
+void FormatMessage(const int client, const int team, const char teamtag[12],
+const char[] input, char[] output, const int outputsize)
+{
+	if (IsPlayerAlive(client))
+		Format(output, outputsize, "%s %N: %s", teamtag, client, input);
+	else if (team <= 1)
+		Format(output, outputsize, "%s %N: %s", teamtag, client, input);
+	else // dead
+		Format(output, outputsize, "[DEAD]%s %N: %s", teamtag, client, input);
+}
+
 
 int giUsedIndex[sizeof(Love)] = {-1, ...};
 
@@ -391,12 +402,13 @@ int GetRandomLoveIndex()
 
 	while (giUsedIndex[index] == -1)
 	{
+		#if DEBUG
 		PrintToServer("UsedIndex[%d] = -1, incrementing...", index);
+		#endif
 		++index;
 		if (index >= sizeof(giUsedIndex))
 			index = 0;
 	}
-	PrintToServer("Not called while loop!");
 	rand = giUsedIndex[index];
 	giUsedIndex[index] = -1;
 	return rand;
@@ -427,14 +439,81 @@ public Action timer_ResetAntiFlood(Handle timer, int client)
 }
 
 
+public Action Command_MakeSay(int client, int args)
+{
+	if (args != 2)
+	{
+		ReplyToCommand(client, "Usage: sm_gmute_makesay <userid> \"message\".");
+		return Plugin_Handled;
+	}
+
+	char userid[3], message[255];
+	int targetid, targetindex;
+	GetCmdArg(1, userid, sizeof(userid));
+	GetCmdArg(2, message, sizeof(message));
+
+	if (!IsCharNumeric(userid[0]))
+	{
+		ReplyToCommand(client, "Invalid userID specified.");
+		return Plugin_Handled;
+	}
+
+	targetid = StringToInt(userid);
+	targetindex = GetClientOfUserId(targetid);
+
+	if (targetindex <= 0 || !IsClientInGame(targetindex) || IsFakeClient(targetindex))
+	{
+		ReplyToCommand(client, "Invalid target client %d.", targetindex);
+		return Plugin_Handled;
+	}
+
+	#if DEBUG
+	PrintToServer("[gmute] %N is targetting %N (%d).",
+	client, targetindex, targetindex);
+	#endif
+
+	char teamtag[12], output[255];
+	int team = GetClientTeam(targetindex);
+	FormatTeamTag(team, teamtag);
+	FormatMessage(targetindex, team, teamtag, message, output, sizeof(output));
+
+	int players[NEO_MAX_CLIENTS], admins[NEO_MAX_CLIENTS], admintotal, total;
+	for (int i = MaxClients; i; --i)
+	{
+		if (!IsClientInGame(i) || IsFakeClient(i) || i == targetindex)
+			continue;
+		if (GetUserFlagBits(i) != 0) // is admin
+		{
+			// players[total++] = i;
+			admins[admintotal++] = i;
+		}
+		else // not admin
+			players[total++] = i;
+	}
+
+	SendFakeUserMessage(targetindex, players, total, output);
+
+	if (admintotal)
+	{
+		Format(output, sizeof(output), "%s [%N]", output, client);
+		SendFakeUserMessage(targetindex, admins, admintotal, output);
+		LogAction(client, -1, output);
+	}
+
+	return Plugin_Handled;
+}
+
+
+// FIXME: the last character of the buffer ('\n') is eaten somehow? Still displays fine
+// in game chat, but console gets slightly mangled due to this.
 void SendFakeUserMessage(int client, int[] players, int playersNum, char[] buffer, bool grey=false)
 {
 	Handle message = StartMessageEx(GetUserMessageId("SayText"), players, playersNum);
 	BfWrite bf = UserMessageToBfWrite(message);
 
-	if (!grey)
+	if (!grey) // color message as if originating from a client
 		BfWriteByte(bf, client); // originating client?
-	else
+	else // grey text as if originating from server console
 		BfWriteByte(bf, 0);
 	// BfWriteByte(bf, 0); // seems to block the message
 	BfWriteString(bf, buffer);
@@ -465,7 +544,6 @@ public Action OnSayText(UserMsg msg_id, Handle bf, players[], playersNum, bool r
 	return Plugin_Continue;
 }
 #endif
-
 
 public Action OnPlayerChangeName(Handle event, const char[] name, bool Dontbroadcast)
 {
