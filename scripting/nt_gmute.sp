@@ -140,7 +140,7 @@ public Action Command_Mute_UserId(int client, int args)
 	ToggleCookieClient(targetclient);
 	OnClientCookiesCached(targetclient);
 
-	ReplyToCommand(client, "Client %N is now %s.", targetclient, g_Muted[targetclient] ? "gmuted" : "not gmuted");
+	ReplyToCommand(client, "Client %N is %s.", targetclient, g_Muted[targetclient] ? "gmuted now" : "not gmuted anymore");
 
 	// FIXME we're not updating voice flags here, they'll have to reconnect.
 
@@ -271,7 +271,67 @@ public void OnPlayerDisconnect(int client)
 }
 
 // prevent haters from spreading hate
-char BannedWords[][] = {"crap", "crappy", "shitty", "fuck"};
+char NameBannedWords[][] = {"crap", "crappy", "shitty", "fuck"};
+char MessageBannedWords[][] = {"nigger", "fuck"};
+
+bool PurgeBadWords(int client, const char[] message, int size)
+{
+	char buffer[255];
+	strcopy(buffer, sizeof(buffer), message);
+	bool replaced;
+
+	for (int str = 0; str < sizeof(MessageBannedWords); ++str)
+	{
+		if (ReplaceString(buffer, size, MessageBannedWords[str], " \\(^-^)/ ", false))
+			replaced = true;
+	}
+
+	if (replaced)
+	{
+		LogAction(client, -1, "%N got their message filetered from \"%s\" to \"%s\".",
+		client, message, buffer);
+
+		int players[NEO_MAX_CLIENTS];
+
+		int team = GetClientTeam(client);
+		char teamtag[12];
+		FormatTeamTag(team, teamtag);
+		FormatMessage(client, team, teamtag, buffer, buffer, sizeof(buffer));
+
+		// send back to sender
+		char originalmessage[255];
+		FormatMessage(client, team, teamtag, message, originalmessage, sizeof(originalmessage));
+		players[0] = client;
+		SendFakeUserMessage(client, players, 1, originalmessage);
+
+		int admins[NEO_MAX_CLIENTS], admintotal, total;
+		for (int i = MaxClients; i; --i)
+		{
+			if (!IsClientInGame(i) || IsFakeClient(i) || i == client)
+				continue;
+			if (GetUserFlagBits(i) != 0) // is admin
+			{
+				players[total++] = i;
+				admins[admintotal++] = i;
+			}
+			else // not admin
+				players[total++] = i;
+		}
+
+		SendFakeUserMessage(client, players, total, buffer);
+
+		if (admintotal)
+		{
+			Format(originalmessage, sizeof(originalmessage), "[FILTER]%s", originalmessage);
+			SendFakeUserMessage(client, admins, admintotal, originalmessage, true);
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
 
 bool EnforceNeutralName(client)
 {
@@ -279,12 +339,12 @@ bool EnforceNeutralName(client)
 	GetClientName(client, name, sizeof(name));
 	TrimString(name);
 
-	for (int i = 0; i < sizeof(BannedWords); ++i)
+	for (int i = 0; i < sizeof(NameBannedWords); ++i)
 	{
-		if (StrContains(name, BannedWords[i], false) != -1)
+		if (StrContains(name, NameBannedWords[i], false) != -1)
 		{
 			LogAction(client, -1, "Found banned word \"%s\" in player name \"%s\".",
-			BannedWords[i], name);
+			NameBannedWords[i], name);
 			return true;
 		}
 	}
@@ -300,8 +360,16 @@ char Love[][] = {
 // This returns the original text message to the client, as if it was sent to others.
 public Action OnClientSayCommand(client, const String:command[], const String:sArgs[])
 {
-	if (!client || !g_Muted[client])
+	if (!client)
 		return Plugin_Continue;
+
+	if (!g_Muted[client])
+	{
+		if (PurgeBadWords(client, sArgs, strlen(sArgs)))
+			return Plugin_Handled;
+		else
+			return Plugin_Continue;
+	}
 
 	char buffer[255], teamtag[12];
 
