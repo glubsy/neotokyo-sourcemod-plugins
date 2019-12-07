@@ -199,6 +199,8 @@ public void OnClientDisconnect(int client)
 	// 	TriggerTimer(ghToggleTimer[client])
 	DestroyMarkerEnts(client);
 
+	ResetMarkerRefsForClient(client);
+
 	#if !USE_TE
 	DestroyBeam(client);
 	#endif
