@@ -111,11 +111,13 @@ public Plugin:myinfo =
 	url = "https://github.com/glubsy"
 };
 
-// TODO: use return GetEntProp(weapon, Prop_Data, "m_iState") to check if weapon is being carried by a player (see smlib/weapons.inc)
+// TODO: use GetEntProp(weapon, Prop_Data, "m_iState") to check if weapon is being carried by a player (see smlib/weapons.inc)
 // TODO: setup two beams, a normal one for spectators, a thicker one for night vision?
 // TODO: animation (changemode or fireempty) on toggle laser command
 // TODO: show the entire laser beam to players hit by traceray when pointed directly at their head
 // TODO: have laser color / alpha in a convar
+// FIXME: "warning deleted orphaned children of weapon_"
+// FIXME: either delete the info_target manually accross rounds, or reuse them somehow (watch out for viewmodel ones)
 
 #define TEMP_ENT 1 // use TE every game frame, instead of actual env_beam (obsolete)
 #define METHOD 0
@@ -135,8 +137,6 @@ public Plugin:myinfo =
 
 public void OnPluginStart()
 {
-	PrintToServer("[lasersight] OnPluginStart()");
-
 	CVAR_LaserAlpha = CreateConVar("sm_lasersight_alpha", "20.0",
 	"Transparency amount for laser beam", _, true, 0.0, true, 255.0);
 	laser_color[3] = GetConVarInt(CVAR_LaserAlpha); //TODO: hook convar change
@@ -163,6 +163,41 @@ g_sLaserWeaponNames \"%s\" (length: %i) in index %i.", LONGEST_WEP_NAME,
 	// HookConVarChange(FindConVar("neo_restart_this"), OnNeoRestartThis);
 }
 
+
+/*
+// detect inputtweaks plugin
+public void OnAllPluginsLoaded()
+{
+	Handle iterator = GetPluginIterator();
+	if (iterator == INVALID_HANDLE)
+		ThrowError("Couldn't get the plugin iterator!");
+
+	Handle plugin;
+	char buffer[35];
+	char filename[PLATFORM_MAX_PATH];
+
+	while(MorePlugins(iterator))
+	{
+		plugin = ReadPlugin(iterator);
+
+		PluginStatus status = GetPluginStatus(plugin);
+		if (status != Plugin_Running)
+			continue;
+
+		GetPluginInfo(plugin, PlInfo_Name, buffer, sizeof(buffer));
+		if (StrContains(buffer, "Input tweaks", false) != -1)
+		{
+			GetPluginFilename(plugin, filename, sizeof(filename));
+			if (StrContains(filename, "nt_inputtweaks", false) != -1)
+			{
+
+				break;
+			}
+		}
+	}
+	CloseHandle(iterator);
+}
+*/
 
 public void OnConfigsExecuted()
 {
@@ -299,6 +334,8 @@ stock void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] n
 
 }
 
+// NOTE: info_target ents are not removed accross rounds!
+// https://developer.valvesoftware.com/wiki/S_PreserveEnts
 void KillAllEntitiesForClient(int client)
 {
 	if (giViewModelLaserBeam[client] > 0 && IsValidEntity(giViewModelLaserBeam[client]))
@@ -1001,6 +1038,11 @@ int CreateInfoTargetProp(int parent, int client, char[] tag, bool worldmodel=fal
 
 void UpdatePositionOnViewModel(int client, WeaponType weapontype)
 {
+	if (giViewModelLaserStart[client] <= 0)
+		LogError("UpdatePositionOnViewModel() giViewModelLaserStart[%d] was <= 0!", client);
+	if (giViewModelLaserEnd[client] <= 0)
+		LogError("UpdatePositionOnViewModel() giViewModelLaserEnd[%d] was <= 0!", client);
+	
 	UpdateAttachementPosition(weapontype, giViewModelLaserStart[client], true, true);
 	UpdateAttachementPosition(weapontype, giViewModelLaserEnd[client], true, false);
 }
@@ -1980,8 +2022,8 @@ public Action OnPlayerRunCmd(int client, int &buttons)
 
 	if (buttons & IN_GRENADE1) // ZOOM key
 	{
-		// nt_inputtweaks should already remove extra key presses for us
-		// NOTE: the key is already released as soon as this is called!
+		// nt_inputtweaks should already remove extra key presses.
+		// the key is already released as soon as this is called!
 		OnZoomKeyPressed(client);
 	}
 

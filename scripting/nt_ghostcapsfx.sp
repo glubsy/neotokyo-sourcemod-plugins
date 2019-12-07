@@ -916,13 +916,13 @@ void ToggleEffect(int ghostref, bool activate=true)
 	int m_fEffects = GetEntProp(ghost , Prop_Data, "m_fEffects");
 
 	if (activate){
-		m_fEffects |= (2 << 1); // 4 EF_DIMLIGHT 2 EF_BRIGHTLIGHT
+		// m_fEffects |= (2 << 1); // 4 EF_DIMLIGHT 2 EF_BRIGHTLIGHT
 		m_fEffects |= (1 << 8); // EF_ITEM_BLINK
 
 	}
 	else
 	{
-		m_fEffects &= ~(2 << 1); // 4 EF_DIMLIGHT 2 EF_BRIGHTLIGHT
+		// m_fEffects &= ~(2 << 1); // 4 EF_DIMLIGHT 2 EF_BRIGHTLIGHT
 		m_fEffects &= ~(1 << 8); // EF_ITEM_BLINK
 	}
 	SetEntProp(ghost, Prop_Data, "m_fEffects", m_fEffects);

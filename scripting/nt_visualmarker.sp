@@ -41,7 +41,7 @@ bool gbCanPlace[NEO_MAX_CLIENTS+1], gbLimitToClass;
 // #define LASERMDL "materials/sprites/laser.vmt"
 // #define BEEPSND "sound/buttons/button16.wav"
 // #define BEEPSND "sound/buttons/button18.wav"
-#define FAKEPROPMDL "models/nt/props_debris/can01.mdl"
+#define FAKEPROPMDL "models/editor/ground_node_hint.mdl"
 #define QMARKMDL "materials/vgui/hud/cp/cp_none.vmt"
 #define CIRCLEMDL "materials/vgui/hud/ctg/g_beacon_circle.vmt"
 
@@ -50,7 +50,7 @@ public Plugin:myinfo =
 	name = "NEOTOKYO visual marker",
 	author = "glub",
 	description = "Place a marker in the world for teammates to see.",
-	version = "0.1",
+	version = "0.2",
 	url = "https://github.com/glubsy"
 };
 
@@ -262,6 +262,7 @@ stock void DestroyBeam(int client)
 		AcceptEntityInput(giBeaconBeam[client], "ClearParent");
 		AcceptEntityInput(giBeaconBeam[client], "kill");
 	}
+
 	if (IsValidEntity(giTargetEnd[client])){
 		AcceptEntityInput(giTargetEnd[client], "ClearParent");
 		AcceptEntityInput(giTargetEnd[client], "kill");

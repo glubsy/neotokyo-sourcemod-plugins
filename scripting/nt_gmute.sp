@@ -271,7 +271,8 @@ public void OnPlayerDisconnect(int client)
 }
 
 // prevent haters from spreading hate
-char NameBannedWords[][] = {"crap", "crappy", "shitty", "fuck"};
+char NameBannedWords[][] = {"crap", "crappy", "shitty", "fuck", "sucks", "sux"};
+
 char MessageBannedWords[][] = {"nigger", "fuck"};
 
 bool PurgeBadWords(int client, const char[] message, int size)

@@ -127,6 +127,8 @@ public void OnRoundEnd(Handle event, const char[] name, bool dontBroadcast)
 
 public void OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
+	if (ToggleAllowed)
+		return;
 	gbFreezeTime = true;
 	flRoundStartTime = GetGameTime();
 }

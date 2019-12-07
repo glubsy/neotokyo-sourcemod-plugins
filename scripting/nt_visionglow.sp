@@ -32,6 +32,8 @@
 // #define SPRITEMDL "sprites/yellowflare.vmt"
 // #define SPRITEMDL "sprites/yellowglow1.vmt"
 #define SPRITEMDL "sprites/light_glow01.vmt" // Good one.
+#define TARGETMDL "models/editor/ground_node_hint.mdl"
+
 
 enum modelType {
 	MDL_NONE = -1, jrecon1 = 0, jrecon2, jrecon3, nrecon1, nrecon2, nrecon3,
@@ -88,6 +90,8 @@ public void OnPluginStart()
 	HookEvent("game_round_start", OnRoundStart);
 	HookEvent("game_round_end", OnRoundEnd);
 
+	AutoExecConfig(true, "nt_visionglow");
+
 	#if DEBUG
 	HookConVarChange(FindConVar("neo_restart_this"), OnNeoRestartThis);
 	#endif
@@ -122,6 +126,14 @@ public void OnNeoRestartThis(ConVar convar, const char[] oldValue, const char[] 
 		giTarget[client] = -1;
 	}
 }
+
+
+public OnMapStart()
+{
+	PrecacheModel(TARGETMDL, true);
+	PrecacheModel(SPRITEMDL, true);
+}
+
 
 // NOTE called on plugin reload
 public Action OnRoundStart(Handle event, const char[] name, bool dontBroadcast)
@@ -218,6 +230,7 @@ void KillEnts(int client)
 		// #endif
 
 		// SetGlowColor(giGlow[client], 0);
+		HideSprite(giGlow[client]);
 
 		if (!AcceptEntityInput(giGlow[client], "ClearParent"))
 		{
@@ -480,7 +493,7 @@ int CreateInfoTarget(int client, modelType model)
 	// seems to work (in this case) with EF_PARENT_ANIMATES https://developer.valvesoftware.com/wiki/Effect_flags
 	// int iEnt = CreateEntityByName("info_target");
 	int iEnt = CreateEntityByName("prop_dynamic_override");
-	DispatchKeyValue(iEnt, "model", "models/editor/ground_node_hint.mdl"); //12 polygons
+	DispatchKeyValue(iEnt, "model", TARGETMDL); //12 polygons
 
 	// these hacks were used with prop_dynamic_override and to optimize a bit
 	DispatchKeyValue(iEnt,"damagetoenablemotion","0");
@@ -606,29 +619,29 @@ stock int CreateSprite(int target, int classType)
 	{
 		case CLASS_RECON:
 		{
-			DispatchKeyValue(iEnt, "renderamt", "95");
+			DispatchKeyValue(iEnt, "renderamt", "85");
 			DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
 			DispatchKeyValue(iEnt, "renderfx", "26"); // 22 spotlight effect 26 fade near 23 cull distance
-			DispatchKeyValue(iEnt, "rendercolor", "74 199 1");
-			DispatchKeyValue(iEnt, "alpha", "95");
+			DispatchKeyValue(iEnt, "rendercolor", "74 199 1"); // there should be an extra value for alpha here
+			DispatchKeyValue(iEnt, "alpha", "85");
 			DispatchKeyValue(iEnt, "m_bWorldSpaceScale", "1");
 		}
 		case CLASS_ASSAULT:
 		{
-			DispatchKeyValue(iEnt, "renderamt", "135");
+			DispatchKeyValue(iEnt, "renderamt", "145");
 			DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
 			DispatchKeyValue(iEnt, "renderfx", "26"); // 22 spotlight effect 26 fade near 23 cull distance
-			DispatchKeyValue(iEnt, "rendercolor", "179 60 0");
-			DispatchKeyValue(iEnt, "alpha", "135");
+			DispatchKeyValue(iEnt, "rendercolor", "179 60 0"); // there should be an extra value for alpha here
+			DispatchKeyValue(iEnt, "alpha", "145");
 			DispatchKeyValue(iEnt, "m_bWorldSpaceScale", "1");
 		}
 		case CLASS_SUPPORT:
 		{
-			DispatchKeyValue(iEnt, "renderamt", "135");
+			DispatchKeyValue(iEnt, "renderamt", "145");
 			DispatchKeyValue(iEnt, "disablereceiveshadows", "1");
 			DispatchKeyValue(iEnt, "renderfx", "26"); // 22 spotlight effect 26 fade near 23 cull distance
-			DispatchKeyValue(iEnt, "rendercolor", "100 100 200");
-			DispatchKeyValue(iEnt, "alpha", "135");
+			DispatchKeyValue(iEnt, "rendercolor", "100 100 200"); // there should be an extra value for alpha here
+			DispatchKeyValue(iEnt, "alpha", "145");
 			DispatchKeyValue(iEnt, "m_bWorldSpaceScale", "1");
 		}
 	}
@@ -643,11 +656,15 @@ stock int CreateSprite(int target, int classType)
 
 stock void ShowSprite(int sprite)
 {
+	if (sprite <= MaxClients)
+		return;
 	AcceptEntityInput(sprite, "ShowSprite");
 }
 
 stock void HideSprite(int sprite)
 {
+	if (sprite <= MaxClients)
+		return;
 	AcceptEntityInput(sprite, "HideSprite");
 }
 

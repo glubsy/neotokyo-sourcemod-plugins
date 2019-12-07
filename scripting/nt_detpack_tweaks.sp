@@ -39,6 +39,7 @@ public OnPluginStart()
 // TODO: press USE on a dropped detpack should put it back in inventory
 // TODO: make detpacks totally invisible to opponents unless they use vision modes?
 // TODO: drop remote on death for others to use, drop detpack if not already used
+// TODO: show corresponding detpack when picking up remote, with an ignorez sprite + beam? 
 
 
 

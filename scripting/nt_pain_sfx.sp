@@ -370,7 +370,6 @@ public OnClientDisconnect(int client)
 }
 
 
-// returns true only if previous cookies were found
 void ReadCookies(int client)
 {
 	if (!IsValidClient(client))

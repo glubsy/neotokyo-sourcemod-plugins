@@ -32,7 +32,7 @@ new Handle:cvDropOnJump = INVALID_HANDLE;
 
 public Plugin:myinfo = {
 	name = "Grabber:SM",
-	author = "L. Duke modified by tommy",
+	author = "L. Duke & modified by tommy76",
 	description = "grabber (gravgun)",
 	version = PLUGIN_VERSION,
 	url = "http://www.lduke.com/"
@@ -499,17 +499,15 @@ public Action:Command_MoveFar(client, args)
 {	
 	if(gObj[client] > 0) {
 		distance[client] += 20;
-		return Plugin_Handled;
 	}
-	return Plugin_Continue;
+	return Plugin_Handled;
 }
 public Action:Command_MoveNear(client, args)
 {
 	if(gObj[client] > 0) {
 		distance[client] -= 20;
-		return Plugin_Handled;
 	}
-	return Plugin_Continue;
+	return Plugin_Handled;
 }
 /*
 public Action:Command_RotateClockwise(client, args)
