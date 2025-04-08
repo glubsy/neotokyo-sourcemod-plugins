@@ -4,10 +4,9 @@
 #define TIMER_INTERVAL 60.0
 
 new Handle:sv_password;
-//new String:listOfChar[] = "aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ0123456789";
+//new String:listOfChar[] = "aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYz0123456789";
 new String:listOfChar[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 new Handle:passwordChangeTimer = INVALID_HANDLE;
-
 
 public Plugin:myinfo = 
 {
@@ -22,21 +21,21 @@ public OnPluginStart()
 {
 	RegConsoleCmd("sm_newpassword", GeneratePassword, "Randomly generates a password for the server");
 	RegConsoleCmd("sm_password", DisplayPassword, "Displays the current server password in chat");
+	RegConsoleCmd("sm_emptypassword", EmptyPassword, "Removes the server password"); // New command to remove the password
 	sv_password = FindConVar("sv_password");
 //	CreateTimer(5.0, CheckEmpty, 0, TIMER_REPEAT );
 }
 
-
 public OnClientConnected(client)
 {
-  // Check if the Timer is still a valid timer.
-  if (passwordChangeTimer != INVALID_HANDLE)
-  {
-    // Stop countdown! Kill the timer! We have a customer!
-    PrintToServer("Kill timer, we have a customer");
-//    KillTimer(passwordChangeTimer);
-    passwordChangeTimer = INVALID_HANDLE;
-  }
+    // Check if the Timer is still a valid timer.
+    if (passwordChangeTimer != INVALID_HANDLE)
+    {
+        // Stop countdown! Kill the timer! We have a customer!
+        PrintToServer("Kill timer, we have a customer");
+//        KillTimer(passwordChangeTimer);
+        passwordChangeTimer = INVALID_HANDLE;
+    }
 }
 
 public OnClientDisconnect(client)
@@ -53,24 +52,30 @@ public OnClientDisconnect(client)
 
 public bool IsServerEmpty()
 {
-  for(new i=1; i<GetMaxClients(); i++){
-    if( IsClientInGame(i) && !IsFakeClient(i) ){ // human player & in game
-      return false;
+    for(new i=1; i<GetMaxClients(); i++)
+    {
+        if(IsClientInGame(i) && !IsFakeClient(i)) // human player & in game
+        {
+            return false;
+        }
     }
-  }
-  return true;
+    return true;
 }
 
-public Action:CheckEmpty( Handle:timer, any:ignore ) {
+public Action:CheckEmpty(Handle:timer, any:ignore)
+{
 	// Is the server empty? if so, resets password to specified value
-	for( new i = 1; i <= MaxClients; i++ ) {
-		if( IsClientConnected( i ) && !IsFakeClient( i ) ) {
+	for(new i = 1; i <= MaxClients; i++)
+	{
+		if(IsClientConnected(i) && !IsFakeClient(i))
+		{
 			return;
 		}
 	}
+
 	new String:defaultpassword[] = "ANPA";
 	SetConVarString(sv_password, defaultpassword);
-	LogMessage( "Server is empty, resetting default password" );
+	LogMessage("Server is empty, resetting default password");
 	PrintToServer("Changed the server password to default");
 	passwordChangeTimer = INVALID_HANDLE;
 }
@@ -137,4 +142,29 @@ public Action:DisplayPassword(client, args)
 	PrintToConsole(client, "==========================================");
 	PrintToConsole(client, "Current server password is: %s", password);
 	PrintToConsole(client, "==========================================");
+}
+
+public Action:EmptyPassword(client, args) // New function to remove the password
+{
+    SetConVarString(sv_password, ""); // Set the password to an empty string
+
+    new String:name[64];
+    GetClientName(client, name, sizeof(name));
+
+    PrintToChatAll("---------------------------------------------------------------------");
+    PrintToChatAll("%s removed the server password", name);
+    PrintToChatAll("---------------------------------------------------------------------");
+    PrintToServer("%s removed the server password", name);
+    
+    for(int id = 1; id < MaxClients; id++)
+    {
+        if(!IsClientInGame(id))
+            continue; 
+        
+        PrintToConsole(id, "==================================");
+        PrintToConsole(id, "Server password has been removed.");
+        PrintToConsole(id, "==================================");
+    }
+
+    LogMessage("%s removed the server password", name);
 }
