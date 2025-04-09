@@ -83,13 +83,6 @@ public Action:CheckEmpty(Handle:timer, any:ignore)
 public Action:GeneratePassword(client, args)
 {
 
-    // Make sure the player is an admin
-    if (!IsClientAdmin(client))
-    {
-        PrintToChat(client, "You don't have permission to use this command.");
-        return Plugin_Handled;
-    }
-
 	new String:password[5];
 	new String:password1[5];
 	new String:password2[5];
@@ -154,13 +147,6 @@ public Action:DisplayPassword(client, args)
 
 public Action:EmptyPassword(client, args) // New function to remove the password
 {
-
-    // Make sure the player is an admin
-    if (!IsClientAdmin(client))
-    {
-        PrintToChat(client, "You don't have permission to use this command.");
-        return Plugin_Handled;
-    }
 
     SetConVarString(sv_password, ""); // Set the password to an empty string
 
