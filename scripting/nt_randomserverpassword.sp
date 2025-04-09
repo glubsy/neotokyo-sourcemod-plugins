@@ -19,9 +19,9 @@ public Plugin:myinfo =
 
 public OnPluginStart()
 {
-	RegConsoleCmd("sm_newpassword", GeneratePassword, "Randomly generates a password for the server");
+	RegAdminCmd("sm_newpassword", GeneratePassword, ADMFLAG_GENERIC, "Randomly generates a password for the server");
+	RegAdminCmd("sm_emptypassword", EmptyPassword, ADMFLAG_GENERIC, "Removes the server password");
 	RegConsoleCmd("sm_password", DisplayPassword, "Displays the current server password in chat");
-	RegConsoleCmd("sm_emptypassword", EmptyPassword, "Removes the server password"); // New command to remove the password
 	sv_password = FindConVar("sv_password");
 //	CreateTimer(5.0, CheckEmpty, 0, TIMER_REPEAT );
 }
@@ -82,6 +82,14 @@ public Action:CheckEmpty(Handle:timer, any:ignore)
 
 public Action:GeneratePassword(client, args)
 {
+
+    // Make sure the player is an admin
+    if (!IsClientAdmin(client))
+    {
+        PrintToChat(client, "You don't have permission to use this command.");
+        return Plugin_Handled;
+    }
+
 	new String:password[5];
 	new String:password1[5];
 	new String:password2[5];
@@ -146,6 +154,14 @@ public Action:DisplayPassword(client, args)
 
 public Action:EmptyPassword(client, args) // New function to remove the password
 {
+
+    // Make sure the player is an admin
+    if (!IsClientAdmin(client))
+    {
+        PrintToChat(client, "You don't have permission to use this command.");
+        return Plugin_Handled;
+    }
+
     SetConVarString(sv_password, ""); // Set the password to an empty string
 
     new String:name[64];
